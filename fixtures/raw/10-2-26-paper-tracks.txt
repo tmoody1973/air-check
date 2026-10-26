@@ -1,0 +1,30 @@
+# Synthesized from the golden fixture (Paper spellings, no closing tracks). Format: H<hour> | Artist | Title
+H1 | Walter Bishop, Jr. | N'Dugu's Prayer
+H1 | Hiatus Kaiyote | The World It Softly Lulls
+H1 | BADBADNOTGOOD & Samuel T. Herring | Time Moves Slow
+H1 | Resavoir | 4th Cloud
+H1 | Michael Kiwanuka | Summer Clothes
+H1 | The Midnight Hour | Water's Edge
+H1 | Elliott Skinner | Don't Be A Runner
+H1 | Zoe's Shanghai | Big big picture
+H1 | Joy Oladokun | Easy Company
+H1 | Saigon Soul Revival | Lý Qua Dub
+H1 | The Operator Sound INC. | Appel En Attente (Call Waiting)
+H1 | Thee Sinseers & Joey Quiñones | Let's Fall In Love (Again)
+H1 | Liv East | Fever Dream
+H1 | Your Old Droog | I Appreciate You
+H2 | Actress | Withending
+H2 | Bicep | Viper
+H2 | Charlotte Adigéry & Bolis Pupul | Googoo Gaga
+H2 | Logic1000 | Sparkle
+H2 | Tinashe | Twentyfive Eight
+H2 | ISHA | Feel At Home
+H2 | GENA | Lead It Up (Kaytranada Remix)
+H2 | Kaytranada | backstABS
+H2 | Tinashe | Sunglasses
+H2 | Seun Kuti & Egypt 80 | Problems
+H2 | Son Rompe Pera | Hagan Rueda
+H2 | Silvan Strauss | All Bosses
+H2 | Hermanos Gutiérrez | Los Ojos Del Cóndor
+H2 | ALA.NI & Adrian Younge | Dusty Road
+H2 | Teodros Makonnen | Libesh Kabashen
