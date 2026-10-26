@@ -7,3 +7,5 @@ export * from "./package/title";
 export * from "./stations";
 export * from "./package/description";
 export * from "./package/mixcloud";
+export * from "./package/fingerprint";
+export * from "./package/approval";
