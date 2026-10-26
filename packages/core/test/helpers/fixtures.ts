@@ -26,3 +26,19 @@ export function goldenLines(): string[] {
     .map((l) => l.match(/^\d+\. (.+?)(?:\s+\(closing track\))?$/)?.[1])
     .filter((l): l is string => Boolean(l));
 }
+
+/** The main title and two alternates from section 2 of the golden package fixture. */
+export function goldenPackageTitles(): string[] {
+  const doc = readFixture("RLR-10-2-26-mixcloud-package.md");
+  return [...doc.slice(doc.indexOf("## 2."), doc.indexOf("## 3.")).matchAll(/^(?:\*\*|- )(RLR [^*\n]+)/gm)].map(
+    (m) => m[1]!.trim(),
+  );
+}
+
+/** Lead artists in a title like "RLR 10.2.26 | A, B, C and more". */
+export function leadsOf(title: string): string[] {
+  return title
+    .replace(/^RLR \S+?(?: \||:) /, "")
+    .replace(/ and more$/, "")
+    .split(", ");
+}
