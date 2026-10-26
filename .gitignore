@@ -1,0 +1,8 @@
+PRIVATE_NOTES.md
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.superpowers/
+.DS_Store

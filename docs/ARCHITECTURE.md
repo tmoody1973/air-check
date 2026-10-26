@@ -1,0 +1,313 @@
+# Air Check: architecture (draft v0.1)
+
+A private, always-on producer for Rhythm Lab Radio and Radio Milwaukee. It prepares each week's show, checks the facts before air, and turns finished episodes into Mixcloud-ready packages, all with the station's data under the station's control.
+
+Hackathon: Nebius x NVIDIA Global AI Hackathon, Personal AI Track. Deadline Oct 30, 2026, 10:00 PDT (12:00 CDT). Today is Oct 19, so roughly 11 days.
+
+Items marked **(verify)** are things I have not been able to confirm from here and should be tested early.
+
+---
+
+## 1. What it does
+
+| # | Job | Trigger | Output |
+|---|---|---|---|
+| A | **New episode package** | A new dated folder with both hours appears in Box | Draft Mixcloud package (title, tags, description, tracklist, joined audio) sent to Telegram for approval |
+| B | **Backlog catch-up** | On demand, or nightly until empty | The same package for each unposted show, 2026 forward, one at a time |
+| C | **Pre-air verify** | Thursday and Friday before air, or on demand | Fact-check report for the Paper show notes with cited corrections |
+| D | **Weekly adds brief** | Weekly | Rotation context for 88Nine and HYFIN from Convex play history (last played, 90-day plays, gaps) |
+| E | **Learning** | Whenever Tarik edits or approves | Updates to skills and memory (title style, tag choices, naming patterns) |
+
+Jobs A, B, and C are the demo. D shows the station-data angle. E is what makes it "personal".
+
+## 2. Data map
+
+| Data | Where it lives | How the agent gets it |
+|---|---|---|
+| Weekly show audio, 2 x ~1 hr WAV per episode | Box `Rhythm Lab Radio / Full Episodes 2023-2026` | Ingest worker only |
+| Final tracklists | Google Drive, one doc per show | Ingest worker exports to markdown |
+| Show notes | Dropbox Paper (about 33 docs in 2026) | Ingest worker exports to markdown |
+| Station play history | Convex (rm-playlist-v2), stations `88nine` and `hyfin` | Read-only query endpoint |
+| Already-posted shows | Mixcloud public API (`rhythmlab`) | Read-only, sandbox allow-listed |
+| Web facts | Tavily | Sandbox allow-listed |
+| Music metadata (release dates, credits, labels) | MusicBrainz, Discogs, Genius, Last.fm, Bandcamp | Through the Crate research service over MCP (section 3.9) |
+
+Important data rules:
+- The Convex station `rhythmlab` is the 24/7 stream, **not** the weekly show. It is never queried.
+- Scope is 2026-01-01 forward. As of today: 35 shows have a Drive tracklist, 31 have Box audio, 29 have audio, tracklist and Paper notes.
+- Mixcloud's newest posted cloudcast is the 10.24.25 episode (posted Nov 12, 2025), so the backlog is about 35 to 40 shows. Confirm against the live account.
+
+## 3. Components
+
+```
+ Tarik (Telegram, dashboard)
+        |
+        v
++-------------------------------+        +-----------------------------+
+| NemoClaw / OpenShell sandbox  |        | Ingest worker               |
+|  Hermes agent                 |        |  holds Box / Drive / Dropbox|
+|   - MEMORY.md, USER.md        | <----- |  credentials                |
+|   - skills/*.md               |  corpus|  exports to markdown + JSON |
+|   - cron                      |  (files|  watches Box for new folders|
+|   - MCP tools (below)         |  only) +-----------------------------+
+|  default-deny egress          |
+|  audit log                    |        +-----------------------------+
++---------------+---------------+        | Media worker (GPU, Nebius)  |
+                |                        |  ffmpeg join + encode       |
+                | MCP tools              |  Crate research (MCP)       |
+                v                        +-----------------------------+
+   corpus.search      (local files)
+   plays.query        (Convex, read-only, 88nine + hyfin)
+   mixcloud.list      (Mixcloud API, read-only)
+   web.search         (Tavily)
+   package.submit  ----> approval queue ----> Publisher (holds Mixcloud OAuth)
+```
+
+### 3.0 Hosting (decided Oct 19, 2026)
+
+**Everything Air Check runs, it runs on Nebius.** Hackathon rule: projects must run on Nebius Token Factory or Nebius AI Cloud. The Hetzner VPS is not used for the submission; it is the planned long-term home after Oct 30.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Models (Nemotron) | Nebius Token Factory | Registered in NemoClaw as a custom OpenAI-compatible provider |
+| Agent: Hermes in the OpenShell sandbox (NemoClaw) | One Nebius AI Cloud Linux VM, Docker | No GPU needed with hosted inference. Dashboard (18789) and API (8642) stay on loopback |
+| Console (Next.js) and reverse proxy | Same VM | HTTPS, Clerk sign-in, is the only public entry and the public demo URL. The AgentMail webhook also enters here |
+| Ingest worker, publisher, Crate research service | Same VM, separate containers | Hold the source and Mixcloud credentials. Secrets in separate env files, never mounted into the sandbox. A second VM would separate them more strongly if time allows |
+| Media worker (ffmpeg join and MP3 encode) | Container on the VM; optionally a Nebius Serverless Job (P2) | Plan about 3 GB scratch for one show in flight (two WAVs are about 1.26 GB); process one show at a time and delete after upload |
+| State and auth | Convex Cloud and Clerk (hosted services, as in TarikOS) | Not on Nebius. Disclose in the README: compute and models run on Nebius; auth and the app database are hosted services |
+| External services | Telegram, Tavily, AgentMail, Mixcloud, Box / Google / Dropbox | Only the ones on the sandbox allow-list are reachable from the agent |
+
+Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure job. **(verify)** Tarik's Nebius account can create the VM and has credits or billing set up; VM size is chosen on Day 1. Step-by-step CLI setup is in `NEBIUS_SETUP.md`.
+
+### 3.1 Agent: Hermes inside OpenShell, installed via NemoClaw
+- Harness: Hermes Agent. It provides persistent memory (MEMORY.md, USER.md), SKILL.md files, cron, a Telegram gateway, and MCP support.
+- **NemoClaw facts (from NVIDIA's NemoClaw + Hermes quickstart and architecture pages, Oct 19):**
+  - Install: `curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=hermes NEMOCLAW_SANDBOX_NAME=<name> bash`, then `nemohermes <name> status`. Docker is the default runtime (rootless Podman optional). Linux and macOS supported. No GPU needed when using hosted inference.
+  - Inference: a custom OpenAI-compatible provider is supported (`NEMOCLAW_PROVIDER=custom`, `COMPATIBLE_API_KEY`), which should work for Nebius Token Factory. **(verify.)** Provider credentials stay outside the sandbox; the agent holds a placeholder that OpenShell swaps in at the approved egress point.
+  - Network: OpenShell blocks unapproved hosts, surfaces them for operator approval, and rules hot-reload. Approvals last for the current sandbox only. System paths are read-only; `/sandbox` and `/tmp` are writable.
+  - Telegram: needs `TELEGRAM_BOT_TOKEN`, and the docs advise configuring messaging **before the first sandbox build** so the image includes it.
+  - Ports: dashboard 18789 and API 8642 bind to loopback by default. Reach them by SSH forwarding, or put a reverse proxy in front (set `CHAT_UI_URL` to its HTTPS origin before onboarding) and protect that ingress. The Air Check console would sit in front as the authenticated reverse proxy. **(verify the 8642 API supports the chat/task calls the console needs.)**
+  - Not documented on the pages read: how the agent gets shell/bash access inside the sandbox, and the format of the activity log (a "Monitor Sandbox Activity" page exists). **(verify; the audit-log view depends on it.)**
+- Sandbox: OpenShell with a default-deny network policy. Egress allow-list only: the Nebius inference endpoint, the Convex query endpoint, `api.mixcloud.com`, Tavily, and Telegram. Nothing else.
+- The agent has **no** Box, Drive, Dropbox, or Mixcloud-write credentials. It sees files the ingest worker puts in its corpus folder and the read-only tools above.
+- Audit log: every network request and tool call is shown on the dashboard. This is the privacy evidence for judges.
+
+### 3.2 Models (Nebius Token Factory, NVIDIA open models)
+- **Nemotron Nano** for the routine loop: parsing notes, matching titles, drafting metadata.
+- **Nemotron Ultra or Super** for weekly reasoning: pre-air verify synthesis, adds brief. (verify which sizes are currently on Token Factory and their limits.)
+- **Speech-to-text and track timing: not needed.** Tarik decided on Oct 19 that sections carry no start times, so no ASR model is required.
+- Hackathon rule: must run on Token Factory or AI Cloud, with at least one NVIDIA open model. Both are satisfied by the first two bullets.
+
+### 3.3 Ingest worker (separate process, holds credentials)
+- Polls the Rhythm Lab folder in Box for new dated subfolders.
+- Exports Drive tracklists and Paper notes to markdown plus a small JSON record per show.
+- Runs the `rlr-box-episode-assembly` and `rlr-source-reconciliation` logic as code for the deterministic part, and asks the agent only for judgment calls.
+- Writes to the agent's corpus folder. No credentials ever enter the sandbox.
+
+### 3.4 Media worker (Nebius GPU or CPU VM)
+- Downloads the two hour files, joins in order with ffmpeg, encodes MP3 for Mixcloud (the upload API documents only the `mp3` field).
+- Measures real durations (never assumes 60:00) so hour-2 section offsets are right.
+- No track start times are generated or sent.
+
+### 3.5 Publisher (approval-gated, holds Mixcloud OAuth)
+- Accepts only a package that Tarik approved in Telegram.
+- Uploads through Mixcloud's upload API (checked against the Mixcloud developer docs, Oct 19): `POST https://api.mixcloud.com/upload/`, multipart, OAuth 2.0 access token. Fields: `mp3` (audio, 4 GB max), `name` (required), `description` (**max 1,000 characters**), `tags-0-tag` to `tags-4-tag` (5 max), `picture` (10 MB max), `unlisted`, and `sections-N-artist` / `sections-N-song` / `sections-N-start_time` (whole seconds).
+- Authorization is browser-based only: Tarik signs in once to grant the publisher a token, which he can revoke at any time.
+- `publish_date` is **Pro only**, and the docs say it applies to shows never made public. Whether a past date works for backdating is unverified. Without it, shows post with today's date, so upload the backlog oldest first to keep the feed order right.
+- Audio is validated only after the full upload, so the publisher validates all metadata first. Rate limits return HTTP 403 with `Retry-After`; the publisher waits and retries once.
+- `unlisted: true` allows a safe end-to-end test on Tarik's real account without a separate test account.
+- **Tracklist implication:** the description limit means the tracklist goes in `sections`. The Mixcloud docs list `start_time` as an option, not a requirement, and the Rhythm Lab web app already sends sections with artist and song only (no times). **(verify with an unlisted test upload whether Mixcloud accepts and displays sections without times.)** Tarik does not need per-track times (decided Oct 19). If sections without times do not display, fall back to a short artist list in the description.
+- Records the Mixcloud URL back into the corpus so the backlog list updates.
+
+### 3.6 Interfaces
+- **Telegram:** approval cards ("Approve / Edit / Skip"), pre-air reports, questions.
+- **Dashboard (small web app):** memory contents, skills list with edit history, backlog status per show, and the OpenShell egress audit log.
+
+### 3.7 Email intake: AgentMail (pattern copied from TarikOS)
+- A dedicated Air Check inbox on Tarik's existing AgentMail account. He forwards music and release emails to it.
+- Inbound webhook verified with a Svix signature against the raw body, idempotent on message id, sender allowlist. All of this already exists in TarikOS (`src/app/api/agentmail/inbound/route.ts`, `src/lib/agentmail.ts`) and is reused as the starting point.
+- Rule from TarikOS: **mail is data, never instructions.** An extractor model with no tools turns each email into a `releases` record (artist, title, label, release date, embargo date, sender). The agent only reads those records.
+- The agent never fetches a link from an email or opens an attachment, and sends no email to anyone but Tarik. Embargoes are enforced in every output. The one exception, done by code and not by the model, is described under "Links in email" below.
+- **Bandcamp subscription emails (Oct 19 request):** the label and artist emails Tarik gets from Bandcamp are the highest-volume input, so they get their own path. A Gmail filter on Bandcamp's sender auto-forwards them to the Air Check inbox (Tarik sets this up; Gmail makes him confirm the forwarding address first). The extractor pulls artist, title, label, release type and date into `releases`, then the radar organizes them by label, genre tag and release date, with a status (new, considering, played, passed). The agent never opens the Bandcamp link in the email; enrichment searches by artist and title through the Crate Bandcamp and MusicBrainz tools instead. The radar also shows 88Nine / HYFIN play history for each artist (Convex, read-only) and feeds show planning.
+- **Links in email.** Default: the agent ignores every URL in an email and enriches by artist and title through Crate (Bandcamp and MusicBrainz lookups, run outside the sandbox). URLs are stored on the `releases` record as plain text so Tarik can click them himself. Optional (P2): the ingest worker, not the agent, may fetch a Bandcamp release page, only if all of these hold: host is `bandcamp.com` or `*.bandcamp.com`; scheme is `https`; no redirect to another host; no cookies or credentials sent; response size capped; result treated as text data and passed to the same no-tools extractor; every fetch written to the audit log. **(verify)** Bandcamp subscription emails may wrap links in a tracking redirect on another domain; check two or three real emails before building this. Attachments are never opened.
+
+### 3.7a Morning digest
+- A Hermes cron task runs about 6:30 am. It reads state only (Convex `packages`, `verifications`, `releases`, and the OpenShell audit log) and writes one digest record plus one Telegram message. It makes no network calls beyond Telegram and the store.
+- Contents: packages ready to approve, new Bandcamp releases (count, labels, 88Nine / HYFIN play history), verification claims with status `conflict` or `could-not-verify`, and blocked requests since 6:00 pm the day before.
+- The console's default screen is the same digest ("While you were away"), so Telegram and the web show one source.
+- Skipped when nothing changed. Items link to the package, verify report, radar entry or audit row.
+
+### 3.8 Frontend: the Air Check console
+- Next.js + Tailwind, Clerk sign-in restricted to @radiomilwaukee.org (same pattern as TarikOS and the playlist app). Convex for app state.
+- Chat-first layout: conversations, episodes (backlog), release radar, show plan, skills and memory, trust and audit.
+- **Generated UI with OpenUI** (`@openuidev/react-lang`, MIT). The agent's replies stream as UI built only from a registered component library: `PackageCard`, `TagRow`, `StatRow`, `FlagList`, `TracklistTable`, `ReleaseCard`, `ShowPlanBoard`, `ClaimReport`, `ApprovalBar`.
+  - Model calls go straight to Nebius Token Factory (OpenAI-compatible). The hosted OpenUI Cloud gateway is **not** used, because it would route station data through a third party.
+  - Without the gateway there is no auto-correction, so the app validates the streamed output against the component schemas and falls back to plain text on failure. **(verify on day one: how reliably Nemotron writes valid OpenUI Lang.)**
+  - Action buttons (Approve, Edit, Skip) call app endpoints with a package id and the signed-in user's session. The model can render a button but cannot trigger an approval.
+- **Tracklist entry (Oct 19 decision):** for new shows Tarik types or pastes the playlist in the console instead of a Google Doc (he is the only user of those docs, so no export is needed). Lines are split in code (`Artist - "Title"`), the last good track of each hour is auto-marked `closing-track`, unparseable lines are flagged, and spellings are checked via MusicBrainz (Crate). Workflow: Tarik plans the show and types a draft before recording, edits it while voice-tracking (the order can change), and marks it final after the show is recorded; only a final list triggers the package. No per-track times are stored. The 2026 backlog stays in Drive and is read once by the ingest worker. Paper show notes are unchanged.
+- Demo mode for judges: sample data, publishing switched off, a judge login that opens straight into it.
+- Clickable mock: Artifact "Air Check Console Mock".
+
+### 3.9 Reused from Crate and the Rhythm Lab web app, and what is new
+
+Crate (crate-cli and crate-web) is Tarik's existing music research agent. Air Check **calls it, it does not copy it**, so the hackathon repo stays new work with a clear "what changed" note.
+
+| Piece | Source | How Air Check uses it | Status |
+|---|---|---|---|
+| Data-source clients: MusicBrainz, Discogs, Genius, Last.fm, Wikipedia, Bandcamp | crate-cli `src/servers/*` | Called over MCP. These hold the rate limiting, parsing and API quirks that are slow to rebuild | Reused |
+| MCP server (`crate-music-research`) | crate-cli `src/mcp-server.ts` | Run as a **separate research service outside the sandbox**. The agent's allow-list gets one new host instead of a dozen | Reused |
+| OpenUI component library, stream adapter, prompt pattern | crate-web `src/lib/openui/`, `openui-prompt.ts` | Starting pattern for the console. Air Check registers its own components (PackageCard, FlagList, ReleaseCard and so on) | Pattern reused, components new |
+| Clerk + Convex + Next.js setup | crate-web, TarikOS | Same stack for the console | Reused pattern |
+| Mixcloud OAuth flow: authorize with CSRF state, callback, token table, refresh-token handling | rhythm-lab-app `app/api/auth/mixcloud/*`, `lib/mixcloud/oauth.ts`, `supabase/migrations/*mixcloud_oauth*` | Pattern for the publisher's one-time authorization. Rewritten for Air Check, token kept server-side only | Pattern reused |
+| Mixcloud upload field mapping: `mp3`, `name`, `description`, `tags-N-tag`, `sections-N-artist/song`, `picture` | rhythm-lab-app `lib/mixcloud/client-upload-v2.ts` | Same field names in the publisher. Rhythm Lab app uploads from the browser to dodge serverless size limits; Air Check uploads server-side from the publisher, so the token never reaches a browser | Pattern reused |
+| Playlist parser: `HOUR n` markers, `Artist - Track` lines, per-line errors and warnings, `tracksToMixcloudFormat` | rhythm-lab-app `lib/playlist-parser.ts` | Starting point for `playlist.parse` and the Tracklist entry screen. Adds closing-track marking and spelling checks | Adapted |
+| AI description generation, cover image helper, Sanity episode upsert after import | rhythm-lab-app `app/api/episodes/*`, `lib/mixcloud/cover-image.ts`, `lib/sanity/episodeHelpers.ts` | Not copied. Idea kept: after a successful post, optionally call the web app's import so the site's episode page appears | Optional hook (P2) |
+| `artist-deep-dive`, `sample-archaeology`, `scene-mapping` workflows | crate-cli `src/skills/` | Source material for `rlr-pre-air-verify` and `rlr-show-planning` | Adapted |
+| `show-prep` (talk breaks, social copy) | crate-cli | **Not used.** Air Check does no talk, scripts or posts | Skipped |
+| `vinyl-valuation` | crate-cli | Not used | Skipped |
+
+**License warning on the Rhythm Lab web app:** its LICENSE is Business Source License 1.1, which is not an OSI-approved open source license, and the hackathon requires one. Tarik owns the code and can license copies under MIT, but the Air Check repo should either (a) contain only code written fresh for it, borrowing patterns, or (b) copy specific files and state in the README that they are relicensed MIT by their author. Either way, disclose it in the "what changed" note.
+
+**What this saves:** the Mixcloud authorization and field mapping were already working in production (the web app's "Upload New Show"), so the publisher is a smaller build than first planned.
+
+**New, written during the hackathon (the part judges score):**
+- `verify_release`: checks a release date, label or credit against at least two sources and returns structured `{claim, status, sources[]}`. Crate's tools return research text for a person to read; verification needs a result the agent can act on and cite.
+- `enrich_release`: matches a forwarded email's release record to MusicBrainz and Bandcamp and fills gaps.
+- `check_spelling`: validates artist and track spellings and diacritics as Tarik types the tracklist.
+- `plays.query` (Convex, 88nine and hyfin only) and `playlist.parse`.
+- All Air Check skills, the approval flow, the publisher, the ingest worker and the console.
+
+**Why not rebuild the data clients?** Eleven days. The clients are the slow, already-debugged part (rate limits, Bandcamp page parsing, API keys). Rewriting them would spend days to arrive where Crate already is, and nothing in the judging rewards it. The improvement is the layer above them: verification, structured output and approval, which is new.
+
+**Constraints on the reused tools:**
+- Run Crate outside the sandbox. Do not allow-list Discogs, Genius, Bandcamp and the rest individually.
+- Disable the Bandcamp browser fallback (`browser.ts`) and keep its rate limit. It scrapes pages, which is more visible in a public repo.
+- Neither Crate repo has a LICENSE file. Calling over MCP does not need one. Copying any Crate code into the Air Check repo needs an MIT license added to Crate first, plus attribution.
+- **(verify)** Crate's tools use the Claude Agent SDK `tool` helper but are served through the standard MCP SDK, so any MCP client should work. Test with the Hermes MCP client on day one.
+
+**README disclosure (draft):** "Air Check is new work built for this hackathon. It calls Tarik Moody's existing Crate research service (MusicBrainz, Discogs, Genius, Last.fm, Wikipedia and Bandcamp lookups) over MCP, and borrows the OpenUI integration pattern from Crate Web. Everything else, including the agent skills, verification tools, ingest and publish pipeline, approval flow and console, was written during the hackathon."
+
+### 3.10 Show planning: theme ideas and deep dives (Oct 19 decision, P1)
+Tarik plans each show ahead and voice-tracks it, so planning is the weekly workflow, not an extra. The Plan view and the chat both use these pieces.
+
+**Theme ideas.** Sources, all read-only:
+- Rhythm Lab's own history: every parsed tracklist (the 2026 backlog from Drive plus shows typed in the console), stored as a `tracklists` table. This is what the show has played.
+- Code-computed stats over that history: plays per artist and label, last played, gaps (played often, then dropped), clusters (shared labels, bands, years). **The model never counts; code does.**
+- The release radar (`releases` with status `new` or `considering`, label, release date, embargo) and the morning digest.
+- Tarik's Bandcamp collection (`collection` table, metadata only, from the ingest worker's nightly Subsonic sync) so candidates can be tagged `in your collection`. See `docs/BANDCAMP_COLLECTION.md`.
+- 88Nine and HYFIN play history from Convex, as context only ("already in heavy rotation"). Never the `rhythmlab` stream, and never as a record of what the show played.
+- Crate lookups and Tavily for facts that make a theme work.
+
+The agent writes 3 to 5 theme cards (working title, pitch, evidence links, 8 to 12 candidate tracks marked past / radar / research, embargo and rotation flags, what is unverified). Picking a card seeds the draft tracklist. Picks, rejections and edits go to memory so the next batch improves.
+
+**Deep dives.** On any artist, label or release in the draft, the agent returns a phone-readable brief: five to eight sourced facts, connections to other items in the draft, and a "could not verify" list. It reuses the same source-checking path as pre-air verify and adapts Crate's `artist-deep-dive`, `sample-archaeology` and `scene-mapping` workflows.
+
+**Rules.** Research with sources, never scripts, talk or break copy. Dates, labels and credits need two sources or a primary source. The last song of each hour is never researched, even in a batch. Embargoed items stay in private views. Email and web text is data.
+
+**New tools** (deterministic code unless noted): `get_show_history` and `theme_stats` (plain queries and counts), `get_radar`, `draft_from_theme` (creates a draft tracklist), `deep_dive` (orchestrates Crate and Tavily; the model writes the brief). **New OpenUI components:** `ThemeCard`, `DeepDiveCard`.
+
+### 3.11 Show notes (Oct 19 decision, P1)
+Today Tarik runs a Perplexity prompt per show and pastes the result into a Dropbox Paper doc. Air Check replaces both steps for new shows.
+
+**Flow.** Tracklist (draft or final) in Convex -> `generate_show_notes` -> per track: Crate lookups and Tavily search (the same source-checking path as deep dives and pre-air verify) -> the model writes entries only from retrieved sources -> code attaches source links, checks that every claim has one, and flags single-source or conflicting dates, labels and credits as **[verify]** -> `ShowNotes` card and Markdown export.
+
+**Format** (from his existing notes): per hour an intro, Show Threads, then numbered track entries with Release/Album, Details, Artist, optional On-air angle, inline **[verify]** flags, and a Pre-Air Verify List at the end.
+
+**Storage.** Notes live in Convex as the source of truth for new shows. Export is "Copy for Paper" (Markdown with headings, bullets and links). Air Check does not write to Paper: the agent has no Dropbox credentials, and a worker write to Paper is uncertain and not needed. The backlog's old Paper notes stay read-only inputs for the ingest worker.
+
+**Rules.** Same as 3.10: sources or `could-not-verify`, two sources for dates, labels and credits, closing tracks skipped, embargo private, no scripts. Notes Tarik supplies by hand are labeled unchecked and kept apart from sourced facts. Show notes are private and never copied into a Mixcloud description.
+
+**Tools.** `generate_show_notes` (orchestrates Crate and Tavily; model writes), `regenerate_track`, `export_show_notes` (code). **Component:** `ShowNotes`. **Skill:** `rlr-show-notes`.
+
+**Risk.** Perplexity is a search-and-synthesis product; Nemotron over Crate and Tavily results must match its quality on sourcing. Mitigation: source-grounded generation, code-enforced citations, and a side-by-side check against one of his published notes docs on Day 9. Good fit for the Best Use of Tavily bonus.
+
+### 3.12 Bandcamp collection (Oct 19 decision, P2 or P1-light)
+Bandcamp's Subsonic API (open beta) exposes a fan's purchased collection. The ingest worker, which holds the credentials, syncs it nightly into a Convex `collection` table (artist, album, track, year, item id; label when present). Metadata only: no audio is streamed or stored. Tracklist lines are matched in our own code with the `rlr-source-reconciliation` normalization, because no ID-based lookup was found and the supported endpoints are not documented. Fuzzy matches are shown for Tarik to confirm. Tools: `get_collection`, `check_owned` (read-only). Full findings, terms-of-use reading and quirks: `docs/BANDCAMP_COLLECTION.md`. Verified by spike V9.
+
+**Persistent player (P2).** A fixed mini player in the console plays owned items (streaming only, through a server proxy that keeps the credentials out of the browser). Queue = the draft tracklist. One `<audio>` element at the app root so playback survives navigation. Feishin is a reference only: it is GPL-3.0, so no code is copied. Details in `docs/BANDCAMP_COLLECTION.md`.
+
+## 4. Skills (portable, station-owned)
+
+Stored in `skills/` and versioned in the repo:
+- `rlr-box-episode-assembly`: which Box files are the hours, what to ignore, when to ask.
+- `rlr-source-reconciliation`: Drive vs Paper vs Box rules.
+- `rlr-mixcloud-title-and-tags`: title and tag style from the 100 most recent posts.
+- `rlr-description-safety`: private notes to public description, with what to leave out.
+- `rlr-pre-air-verify`: the fact-check loop.
+- `rlr-show-notes`: sourced show notes in his Paper format, replacing the Perplexity prompt (written).
+- `rlr-theme-ideas`: theme suggestions from show history, the release radar and the digest (written).
+- `rlr-deep-dive`: sourced research briefs on artists, labels and releases (written).
+- `rlr-show-planning` (to write): turning a chosen theme into a draft list, checked against 88Nine and HYFIN play history and the release radar.
+- `rlr-embargo-rules` (to write): what may be mentioned and when.
+- `rlr-email-extraction-safety` (to write): how forwarded emails become `releases` records, and what is ignored.
+
+Skills the agent should *write for itself* during the demo (the learning loop):
+- Naming patterns Tarik confirms.
+- Title and tag choices he overrides.
+- Later: `88nine-adds-criteria` from his accept and reject decisions on adds.
+
+## 5. Security and privacy design
+
+- **Credential separation.** Source-system credentials live in the ingest worker; Mixcloud write access lives in the publisher. The sandboxed agent holds neither.
+- **Default-deny egress** with an explicit allow-list, plus an audit log shown in the demo.
+- **Human approval** before any publish. The agent drafts; it cannot upload.
+- **Read-only Convex access**, scoped to two stations.
+- **Content filtering** in the description skill: no unverified claims, no time-relative language, no private details about artists.
+- **Audio stays in the station's accounts and on the Nebius VM.** Audio is downloaded to the VM only for the join and encode, then deleted after upload. Auth and the app database use hosted services (Clerk, Convex), disclosed in the README.
+
+## 6. Hackathon checklist
+
+| Requirement | Plan |
+|---|---|
+| Runs on Nebius Token Factory or AI Cloud | Inference on Token Factory; media worker on AI Cloud VM |
+| At least one NVIDIA open model | Nemotron (Nano, plus Ultra or Super) |
+| Public repo with OSI license | New repo, Apache-2.0 or MIT |
+| README | Architecture, setup, demo steps |
+| Hosted demo URL | Console on the Nebius VM behind HTTPS, demo workspace with sample data and publishing off (section 3.0) |
+| Public YouTube video, 3 minutes or less | Script below |
+| Feedback write-up | Written during build, from real friction |
+| "What changed" note for pre-existing work | Use a fresh repo; call Crate (and Backstory, MKE Field Guide if needed) as MCP services and describe them as such. See section 3.9 for the draft disclosure |
+
+## 7. Demo script (3 minutes)
+
+1. **0:00 to 0:20.** "I host Rhythm Lab Radio. Mixcloud's last post is almost a year old." Show the backlog list.
+2. **0:20 to 1:20.** Live: the 10-16 audio lands in Box (expected this week). The agent notices, matches the Drive tracklist and Paper notes, and sends a Telegram approval card with title, tags, description, tracklist, and flags.
+3. **1:20 to 1:50.** Show a flag ("the notes and tracklist disagree on the last track") and Tarik's reply; the skill updates.
+4. **1:50 to 2:20.** Pre-air verify: a cited corrections report for next week's notes, with play-history context from 88Nine and HYFIN.
+5. **2:20 to 2:50.** Dashboard: memory, skills, and the audit log showing every allowed and blocked request.
+6. **2:50 to 3:00.** Backlog counter ticking down; close.
+
+## 8. Build plan to Oct 30 (about 11 days)
+
+| Days | Milestone |
+|---|---|
+| 1 to 2 (Oct 19 to 20) | Install NemoClaw, Hermes, OpenShell on a Nebius VM. Confirm Nemotron on Token Factory. Test one Convex read-only endpoint. Test Box listing from the ingest worker. |
+| 3 to 4 | Ingest worker: Box watcher, Drive and Paper exports, reconciliation. Corpus for 2026 (35 shows). |
+| 5 to 6 | Agent package flow end to end for 10-2-26 (metadata only). Telegram approval cards. |
+| 7 to 8 | Media worker: join and encode one show. Mixcloud upload test on a private or test cloudcast. |
+| 9 | Pre-air verify job and Convex context. Dashboard with audit log. |
+| 10 | Record the demo around the real 10-16 episode. Write README and feedback. |
+| 11 (Oct 29 to 30) | Buffer, polish, submit before 12:00 CDT on Oct 30. |
+
+## 9. Risks and how to cut scope
+
+| Risk | Mitigation |
+|---|---|
+| Mixcloud upload API limits (OAuth, backdating, sections) | Stage the package and show the upload against a test account; document the gap |
+| NemoClaw or Hermes install friction | Keep Day 1 for this; fall back to the plain OpenShell sandbox with Hermes if NemoClaw blocks |
+| 10-16 audio not in Box in time | Demo on 10-2-26; show 10-16 as the live trigger if it lands |
+| Backlog is large | Demo three shows; the rest run unattended |
+| Convex access policy | Read-only endpoint, two stations, reviewed before enabling |
+| Weekly show vs 24/7 stream confusion | Hard rule in the plays tool: reject any `rhythmlab` station query |
+
+## 10. Open questions for Tarik
+
+1. Are the Paper show notes written by hand or AI-assisted? (Affects what the agent should learn from them.)
+2. Which 2026 Fridays had no show: Jan 2, Jun 19, Jul 31, Aug 7, Aug 14, Sep 25, Oct 9?
+3. Where are 2-13, 7-17, and 9-4 audio files, if they exist?
+4. Is the Mixcloud account's newest post really 10.24.25?
+5. Is a test Mixcloud account or a private upload available for the publisher demo?
+6. Which AgentMail address should Air Check use (new inbox, or an existing one such as `triton-ingest@`)? Which senders do you forward from?
+7. Does the console need other staff logins, or only yours plus a judge demo login?
+
+Resolved: the last song of each hour is never talked about on air, so it has no show-notes entry. The agent includes it in the tracklist as a `closing-track` and does not flag or research it (Tarik, Oct 19).

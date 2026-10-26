@@ -1,0 +1,14 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-10-19T15:20:00Z" },
+  "title": "Air Check Console Mock",
+  "launch": { "view": "focused", "file": "Main.dc.html" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1280, "h": 800, "title": "Sign in", "expand": "fill", "is_interactive": true },
+    "Console.dc.html": { "x": 1360, "y": 0, "w": 1360, "h": 900, "title": "Console", "expand": "fill", "is_interactive": true }
+  },
+  "order": ["Main.dc.html", "Console.dc.html"],
+  "notes": {},
+  "designSystems": []
+}
