@@ -5,3 +5,5 @@ export * from "./tracklist/reconcile";
 export * from "./episode/assemble";
 export * from "./package/title";
 export * from "./stations";
+export * from "./package/description";
+export * from "./package/mixcloud";

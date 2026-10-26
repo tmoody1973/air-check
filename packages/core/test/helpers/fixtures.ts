@@ -42,3 +42,14 @@ export function leadsOf(title: string): string[] {
     .replace(/ and more$/, "")
     .split(", ");
 }
+
+/** The public description from section 4 of the golden fixture, without the parenthetical notes. */
+export function goldenDescription(): string {
+  const doc = readFixture("RLR-10-2-26-mixcloud-package.md");
+  return doc
+    .slice(doc.indexOf("## 4.") + "## 4. Description".length, doc.indexOf("## 5."))
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p && !p.startsWith("("))
+    .join("\n\n");
+}
