@@ -21,9 +21,14 @@ const code = async (p: Promise<unknown>) => {
   return "no error";
 };
 
-async function ready() {
-  const rec = await gate.submit(goldenDraft());
-  return { id: rec.draft.id, fp: rec.fingerprint! };
+const MP3 = "a".repeat(64);
+const judge: Actor = { kind: "demo", userId: "judge" };
+
+async function ready(overrides: Parameters<typeof goldenDraft>[0] = {}) {
+  const rec = await gate.submit(goldenDraft(overrides));
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  return { id: rec.draft.id, fp: withAudio.fingerprint! };
 }
 
 test("cannot approve before audio exists", async () => {
@@ -31,7 +36,7 @@ test("cannot approve before audio exists", async () => {
   const rec = await gate.submit(draft);
   expect(rec.status).toBe("preparing_audio");
   expect(await code(gate.decide(rec.draft.id, "anything", "approve", tarik))).toBe("NOT_READY");
-  const withAudio = await gate.attachAudio(rec.draft.id, "b".repeat(64));
+  const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id: "h1", hour2Id: "h2", mp3Sha256: "b".repeat(64) });
   expect(withAudio.status).toBe("awaiting_review");
   expect(withAudio.fingerprint).toBe(fingerprint({ ...draft, audio: { ...draft.audio, mp3Sha256: "b".repeat(64) } }));
 });
@@ -76,11 +81,50 @@ test("skip is final", async () => {
 });
 
 test("demo package never publishes", async () => {
-  const rec = await gate.submit(goldenDraft({ workspace: "demo" }));
-  const approved = await gate.decide(rec.draft.id, rec.fingerprint!, "approve", tarik);
+  const { id, fp } = await ready({ workspace: "demo" });
+  const approved = await gate.decide(id, fp, "approve", judge);
   expect(approved.status).toBe("approved");
   expect(canPublish(approved)).toBe(false);
-  expect(await code(gate.claimForPublish(rec.draft.id))).toBe("DEMO_CANNOT_PUBLISH");
+  expect(await code(gate.claimForPublish(id))).toBe("DEMO_CANNOT_PUBLISH");
+});
+
+test("demo actor can decide demo packages only", async () => {
+  const real = await ready();
+  expect(await code(gate.decide(real.id, real.fp, "approve", judge))).toBe("FORBIDDEN");
+});
+
+test("revise cannot change the workspace", async () => {
+  const { id } = await ready({ workspace: "demo" });
+  const revised = await gate.revise(id, goldenDraft({ workspace: "real", title: "RLR 10.2.26 | A, B, C, D and more" }));
+  expect(revised.draft.workspace).toBe("demo");
+  expect(await code(gate.claimForPublish(id))).toBe("DEMO_CANNOT_PUBLISH");
+});
+
+test("fingerprint covers the workspace", () => {
+  expect(fingerprint(goldenDraft({ workspace: "demo" }))).not.toBe(fingerprint(goldenDraft()));
+});
+
+test("the agent cannot supply the MP3 hash", async () => {
+  const rec = await gate.submit(goldenDraft()); // goldenDraft carries an mp3Sha256
+  expect(rec.status).toBe("preparing_audio");
+  expect(rec.draft.audio.mp3Sha256).toBeUndefined();
+  expect(await code(gate.decide(rec.draft.id, fingerprint(goldenDraft()), "approve", tarik))).toBe("NOT_READY");
+});
+
+test("revise never takes an MP3 hash from the draft", async () => {
+  const { id } = await ready();
+  const moved = await gate.revise(id, goldenDraft({ audio: { hour1Id: "NEW1", hour2Id: "NEW2", mp3Sha256: "f".repeat(64) } }));
+  expect(moved.status).toBe("preparing_audio");
+  expect(moved.draft.audio.mp3Sha256).toBeUndefined();
+});
+
+test("attachAudio refuses an MP3 made from other hours", async () => {
+  const { id } = await ready();
+  await gate.revise(id, goldenDraft({ audio: { hour1Id: "NEW1", hour2Id: "NEW2" } }));
+  expect(await code(gate.attachAudio(id, { hour1Id: "box-h1", hour2Id: "box-h2", mp3Sha256: MP3 }))).toBe(
+    "PACKAGE_CHANGED",
+  );
+  expect((await gate.attachAudio(id, { hour1Id: "NEW1", hour2Id: "NEW2", mp3Sha256: MP3 })).status).toBe("awaiting_review");
 });
 
 test("outcome_unknown is never re-claimed", async () => {
@@ -104,7 +148,8 @@ test("transitions record who acted", async () => {
   await gate.claimForPublish(id);
   await gate.recordResult(id, { status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/x/" });
   expect(transitions.map((t) => [t.from, t.to, t.by])).toEqual([
-    [null, "awaiting_review", "agent"],
+    [null, "preparing_audio", "agent"],
+    ["preparing_audio", "awaiting_review", "media"],
     ["awaiting_review", "approved", "tarik@radiomilwaukee.org"],
     ["approved", "publishing", "publisher"],
     ["publishing", "succeeded", "publisher"],

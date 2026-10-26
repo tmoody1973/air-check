@@ -6,7 +6,7 @@ import { findBoundaryViolations, type SourceFile } from "../packages/core/src/in
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SKIP_DIRS = new Set(["node_modules", ".git", ".superpowers", "dist"]);
-const SCAN = /\.(?:ts|tsx|js|mjs|json|yml)$|\.env\.example$/;
+const SCAN = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|ya?ml|py|sh|toml)$|\.env\.example$/;
 
 function walk(dir: string): SourceFile[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

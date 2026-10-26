@@ -30,7 +30,7 @@ export function parseTracklist(text: string): ParsedTracklist {
 
   text.split(/\r\n|\r|\n/).forEach((rawLine, i) => {
     const line = rawLine.trim();
-    if (!line || line.startsWith("#")) return;
+    if (!line || line.startsWith("# ")) return;
     const marker = line.match(HOUR_MARKER);
     if (marker) {
       hour = /^(1|one)$/i.test(marker[1]!) ? 1 : 2;

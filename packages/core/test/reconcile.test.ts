@@ -46,3 +46,10 @@ test("paper-only track is never added", () => {
   expect(r.tracks).toHaveLength(1);
   expect(r.questions[0]).toContain("Ghost");
 });
+
+test("unreadable lines become questions", () => {
+  const r = reconcile(parseTracklist('HOUR 1\nA - "One"\nB - "Two"\nC–Three'), [
+    { hour: 1, artist: "A", title: "One" },
+  ]);
+  expect(r.questions.some((q) => q.includes("C–Three"))).toBe(true);
+});

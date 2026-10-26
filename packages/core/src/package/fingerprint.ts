@@ -17,6 +17,7 @@ function canonical(value: unknown): unknown {
 export function fingerprint(p: PackageDraft): string {
   if (!p.audio.mp3Sha256) throw new Error("cannot fingerprint a package before its MP3 exists");
   const content = {
+    workspace: p.workspace,
     title: p.title,
     tags: p.tags,
     description: p.description,

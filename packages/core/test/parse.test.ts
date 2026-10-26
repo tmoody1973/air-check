@@ -60,3 +60,8 @@ test("accepts hour marker variants", () => {
     expect(parseTracklist(`${m}\nA - "B"`).tracks[0]!.hour).toBe(1);
   expect(parseTracklist('Hour 2:\nA - "B"').tracks[0]!.hour).toBe(2);
 });
+
+test("a band name starting with # is a track, not a comment", () => {
+  const p = parseTracklist('# a comment\nHOUR 1\n#1 Dads - "So Soldier"');
+  expect(p.tracks.map((t) => t.artist)).toEqual(["#1 Dads"]);
+});

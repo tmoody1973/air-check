@@ -30,7 +30,14 @@ export interface PackageStore {
   ): Promise<PackageRecord | null>;
 }
 
-export type Actor = { kind: "human"; userId: string; email: string } | { kind: "agent" };
+/** `demo` is the judges' demo login: it may decide demo packages only. */
+export type Actor = { kind: "human"; userId: string; email: string } | { kind: "demo"; userId: string } | { kind: "agent" };
+
+export interface AudioRef {
+  hour1Id: string;
+  hour2Id: string;
+  mp3Sha256: string;
+}
 
 export interface Transition {
   id: string;
@@ -66,12 +73,28 @@ export type PublishResult =
   | { status: "failed"; error: string }
   | { status: "outcome_unknown" };
 
+function mayDecide(actor: Actor, workspace: PackageDraft["workspace"]): boolean {
+  if (actor.kind === "human") return actor.email.toLowerCase().endsWith(APPROVER_DOMAIN);
+  return actor.kind === "demo" && workspace === "demo";
+}
+
+function actorName(actor: Actor): string {
+  return actor.kind === "human" ? actor.email : actor.kind === "demo" ? `demo:${actor.userId}` : "agent";
+}
+
+/** The MP3 hash is set only by attachAudio (the media job), never by the agent's draft. */
+function withoutMp3(draft: PackageDraft): PackageDraft {
+  const { hour1Id, hour2Id } = draft.audio;
+  return { ...draft, audio: { hour1Id, hour2Id } };
+}
+
 export function canPublish(rec: PackageRecord): boolean {
   return rec.status === "approved" && rec.draft.workspace === "real";
 }
 
 /**
- * Hard Rule 1: the agent can submit and revise; only a signed-in @radiomilwaukee.org human can decide.
+ * Hard Rule 1: the agent can submit and revise; only a signed-in @radiomilwaukee.org human can decide
+ * (the demo login can decide demo packages, which never publish).
  * No time expiry (spec 5.4). Nothing is retried automatically.
  */
 export class ApprovalGate {
@@ -98,17 +121,17 @@ export class ApprovalGate {
 
   async submit(draft: PackageDraft): Promise<PackageRecord> {
     if (await this.store.get(draft.id)) throw new GateError("ALREADY_EXISTS", `package ${draft.id} already exists`);
-    const rec: PackageRecord = draft.audio.mp3Sha256
-      ? { draft, status: "awaiting_review", fingerprint: fingerprint(draft) }
-      : { draft, status: "preparing_audio" };
+    const rec: PackageRecord = { draft: withoutMp3(draft), status: "preparing_audio" };
     await this.store.put(rec);
     await this.emit(draft.id, null, rec.status, "agent");
     return rec;
   }
 
-  async attachAudio(id: string, mp3Sha256: string): Promise<PackageRecord> {
+  async attachAudio(id: string, audio: AudioRef): Promise<PackageRecord> {
     const cur = await this.load(id);
-    const draft = { ...cur.draft, audio: { ...cur.draft.audio, mp3Sha256 } };
+    if (audio.hour1Id !== cur.draft.audio.hour1Id || audio.hour2Id !== cur.draft.audio.hour2Id)
+      throw new GateError("PACKAGE_CHANGED", `MP3 for ${id} was made from different hour files`);
+    const draft = { ...cur.draft, audio: { ...audio } };
     const next = await this.store.compareAndSwap(
       id,
       { status: "preparing_audio" },
@@ -123,9 +146,11 @@ export class ApprovalGate {
     const cur = await this.load(id);
     if (cur.status !== "awaiting_review") throw new GateError("NOT_READY", `package ${id} cannot be revised now`);
     const sameAudio = draft.audio.hour1Id === cur.draft.audio.hour1Id && draft.audio.hour2Id === cur.draft.audio.hour2Id;
-    // ponytail: an MP3 is only carried over when the source hours are unchanged; otherwise audio is prepared again
-    const mp3Sha256 = sameAudio ? (draft.audio.mp3Sha256 ?? cur.draft.audio.mp3Sha256) : draft.audio.mp3Sha256;
-    const revised = { ...draft, id, audio: { ...draft.audio, mp3Sha256 } };
+    // ponytail: the existing MP3 is carried over only when the source hours are unchanged; otherwise audio is prepared again
+    const mp3Sha256 = sameAudio ? cur.draft.audio.mp3Sha256 : undefined;
+    // id, workspace and show date belong to the record, never to the agent's revision
+    const base = withoutMp3({ ...draft, id, workspace: cur.draft.workspace, showDate: cur.draft.showDate });
+    const revised = mp3Sha256 ? { ...base, audio: { ...base.audio, mp3Sha256 } } : base;
     const patch: Partial<PackageRecord> = mp3Sha256
       ? { draft: revised, status: "awaiting_review", fingerprint: fingerprint(revised) }
       : { draft: revised, status: "preparing_audio", fingerprint: undefined };
@@ -136,9 +161,10 @@ export class ApprovalGate {
   }
 
   async decide(id: string, fp: string, decision: "approve" | "skip", actor: Actor): Promise<PackageRecord> {
-    if (actor.kind !== "human" || !actor.email.toLowerCase().endsWith(APPROVER_DOMAIN))
-      throw new GateError("FORBIDDEN", "only a signed-in Radio Milwaukee user can decide");
+    if (actor.kind === "agent") throw new GateError("FORBIDDEN", "the agent cannot decide");
     const cur = await this.load(id);
+    if (!mayDecide(actor, cur.draft.workspace))
+      throw new GateError("FORBIDDEN", "only a signed-in Radio Milwaukee user can decide");
     if (DECIDED.includes(cur.status)) return cur;
     if (cur.status === "preparing_audio") throw new GateError("NOT_READY", "audio is still being prepared");
     if (cur.fingerprint !== fp) throw new GateError("PACKAGE_CHANGED", "This package changed. Open the latest version.");
@@ -146,10 +172,10 @@ export class ApprovalGate {
     const next = await this.store.compareAndSwap(
       id,
       { status: "awaiting_review", fingerprint: fp },
-      { status: to, decidedBy: actor.email, decidedAt: this.now().toISOString() },
+      { status: to, decidedBy: actorName(actor), decidedAt: this.now().toISOString() },
     );
     if (!next) return this.load(id);
-    await this.emit(id, "awaiting_review", to, actor.email);
+    await this.emit(id, "awaiting_review", to, actorName(actor));
     return next;
   }
 

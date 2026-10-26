@@ -26,3 +26,15 @@ test("docs, skills, fixtures and markdown are exempt", () => {
   for (const path of ["docs/a.ts", "skills/x/y.ts", "fixtures/z.json", "README.md"])
     expect(one(path, "start_time api.mixcloud.com/upload")).toEqual([]);
 });
+
+test("agent reaching the approval gate or publish steps is a violation", () => {
+  expect(one("agent/tools/approve.ts", 'import { ApprovalGate } from "@aircheck/core";\nnew ApprovalGate(s)')).toHaveLength(1);
+  expect(one("agent/tools/p.ts", "await gate.claimForPublish(id)")).toHaveLength(1);
+  expect(one("agent/tools/q.ts", 'import { upload } from "@aircheck/publisher";')).toHaveLength(1);
+  expect(one("agent/tools/ok.ts", 'import { parseTracklist } from "@aircheck/core";')).toEqual([]);
+});
+
+test("agent Python and YAML files are checked too", () => {
+  expect(one("agent/hermes/tool.py", 'os.environ["MIXCLOUD_TOKEN"]')).toHaveLength(1);
+  expect(one("agent/compose.yaml", "BOX_CLIENT_SECRET: x")).toHaveLength(1);
+});

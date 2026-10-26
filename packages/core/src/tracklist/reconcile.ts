@@ -50,6 +50,8 @@ export function reconcile(drive: ParsedTracklist, paper: PaperTrack[]): Reconcil
     return { ...t, status: "unverified-in-notes" };
   });
 
+  for (const b of drive.bad)
+    questions.push(`Line ${b.line} "${b.raw}" could not be read (${b.reason}). Fix it so no track is missed.`);
   for (const p of paper.filter((p) => !used.has(p)))
     questions.push(`"${p.artist} - ${p.title}" is in the notes (hour ${p.hour}) but not in the tracklist.`);
 
