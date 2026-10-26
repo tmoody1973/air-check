@@ -10,6 +10,8 @@ Items marked **(verify)** are things I have not been able to confirm from here a
 
 ## 1. What it does
 
+> **Superseded** by `docs/PRD.md` sections 5 and 5a and `docs/superpowers/specs/2026-10-26-air-check-design.md`. Kept for history.
+
 | # | Job | Trigger | Output |
 |---|---|---|---|
 | A | **New episode package** | A new dated folder with both hours appears in Box | Draft Mixcloud package (title, tags, description, tracklist, joined audio) sent to Telegram for approval |
@@ -106,11 +108,11 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
 
 ### 3.4 Media worker (Nebius GPU or CPU VM)
 - Downloads the two hour files, joins in order with ffmpeg, encodes MP3 for Mixcloud (the upload API documents only the `mp3` field).
-- Measures real durations (never assumes 60:00) so hour-2 section offsets are right.
+- Measures real durations (never assumes 60:00). The hour-1 length drives the player's "Jump to hour 2" (design spec 5.8); no track start times are generated or sent.
 - No track start times are generated or sent.
 
 ### 3.5 Publisher (approval-gated, holds Mixcloud OAuth)
-- Accepts only a package that Tarik approved in Telegram.
+- Accepts only a package that Tarik approved in the signed-in console (design spec 5.1 and 7.1). Telegram never approves.
 - Uploads through Mixcloud's upload API (checked against the Mixcloud developer docs, Oct 19): `POST https://api.mixcloud.com/upload/`, multipart, OAuth 2.0 access token. Fields: `mp3` (audio, 4 GB max), `name` (required), `description` (**max 1,000 characters**), `tags-0-tag` to `tags-4-tag` (5 max), `picture` (10 MB max), `unlisted`, and `sections-N-artist` / `sections-N-song` / `sections-N-start_time` (whole seconds).
 - Authorization is browser-based only: Tarik signs in once to grant the publisher a token, which he can revoke at any time.
 - `publish_date` is **Pro only**, and the docs say it applies to shows never made public. Whether a past date works for backdating is unverified. Without it, shows post with today's date, so upload the backlog oldest first to keep the feed order right.
@@ -120,7 +122,7 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
 - Records the Mixcloud URL back into the corpus so the backlog list updates.
 
 ### 3.6 Interfaces
-- **Telegram:** approval cards ("Approve / Edit / Skip"), pre-air reports, questions.
+- **Telegram:** the digest and package cards that link to the console's package page (no approve buttons, design spec 5.1), pre-air reports, questions.
 - **Dashboard (small web app):** memory contents, skills list with edit history, backlog status per show, and the OpenShell egress audit log.
 
 ### 3.7 Email intake: AgentMail (pattern copied from TarikOS)
@@ -222,7 +224,7 @@ Today Tarik runs a Perplexity prompt per show and pastes the result into a Dropb
 **Risk.** Perplexity is a search-and-synthesis product; Nemotron over Crate and Tavily results must match its quality on sourcing. Mitigation: source-grounded generation, code-enforced citations, and a side-by-side check against one of his published notes docs on Day 9. Good fit for the Best Use of Tavily bonus.
 
 ### 3.12 Bandcamp collection (Oct 19 decision, P2 or P1-light)
-Bandcamp's Subsonic API (open beta) exposes a fan's purchased collection. The ingest worker, which holds the credentials, syncs it nightly into a Convex `collection` table (artist, album, track, year, item id; label when present). Metadata only: no audio is streamed or stored. Tracklist lines are matched in our own code with the `rlr-source-reconciliation` normalization, because no ID-based lookup was found and the supported endpoints are not documented. Fuzzy matches are shown for Tarik to confirm. Tools: `get_collection`, `check_owned` (read-only). Full findings, terms-of-use reading and quirks: `docs/BANDCAMP_COLLECTION.md`. Verified by spike V9.
+Bandcamp's Subsonic API (open beta) exposes a fan's purchased collection. The ingest worker, which holds the credentials, syncs it nightly into a Convex `collection` table (artist, album, track, year, item id; label when present). Only metadata is stored. Audio is never downloaded or stored, but owned items may be streamed to the signed-in user through the console's server proxy (Hard Rule 13, design spec 5.8). Tracklist lines are matched in our own code with the `rlr-source-reconciliation` normalization, because no ID-based lookup was found and the supported endpoints are not documented. Fuzzy matches are shown for Tarik to confirm. Tools: `get_collection`, `check_owned` (read-only). Full findings, terms-of-use reading and quirks: `docs/BANDCAMP_COLLECTION.md`. Verified by spike V9.
 
 **Persistent player (P2).** A fixed mini player in the console plays owned items (streaming only, through a server proxy that keeps the credentials out of the browser). Queue = the draft tracklist. One `<audio>` element at the app root so playback survives navigation. Feishin is a reference only: it is GPL-3.0, so no code is copied. Details in `docs/BANDCAMP_COLLECTION.md`.
 
@@ -270,6 +272,8 @@ Skills the agent should *write for itself* during the demo (the learning loop):
 
 ## 7. Demo script (3 minutes)
 
+> **Superseded** by `docs/PRD.md` sections 5 and 5a and `docs/superpowers/specs/2026-10-26-air-check-design.md`. Kept for history.
+
 1. **0:00 to 0:20.** "I host Rhythm Lab Radio. Mixcloud's last post is almost a year old." Show the backlog list.
 2. **0:20 to 1:20.** Live: the 10-16 audio lands in Box (expected this week). The agent notices, matches the Drive tracklist and Paper notes, and sends a Telegram approval card with title, tags, description, tracklist, and flags.
 3. **1:20 to 1:50.** Show a flag ("the notes and tracklist disagree on the last track") and Tarik's reply; the skill updates.
@@ -278,6 +282,8 @@ Skills the agent should *write for itself* during the demo (the learning loop):
 6. **2:50 to 3:00.** Backlog counter ticking down; close.
 
 ## 8. Build plan to Oct 30 (about 11 days)
+
+> **Superseded** by `docs/PRD.md` sections 5 and 5a and `docs/superpowers/specs/2026-10-26-air-check-design.md`. Kept for history.
 
 | Days | Milestone |
 |---|---|

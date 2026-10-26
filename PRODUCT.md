@@ -60,5 +60,5 @@ A producer's assistant, not a chatbot and not a dashboard. The chat is how you a
 
 - A clickable mock (`design/mockups/`) with sign-in, digest, chat with a generated package card, package preview, backlog table, tracklist entry with live parsing, and audit log.
 - A hand-built 10-2-26 package (`fixtures/`) as the acceptance test.
-- Five working station skills (`skills/`).
+- Eight station skills (`skills/`).
 - Verified Mixcloud upload API facts in `docs/ARCHITECTURE.md` section 3.5.

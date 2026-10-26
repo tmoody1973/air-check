@@ -2,7 +2,7 @@
 
 Deadline: **Oct 30, 2026, 12:00 CDT**. Day 1 is Oct 19. Aim to submit the morning of Oct 30 at the latest, with Oct 29 as buffer.
 
-Priorities come from `docs/PRD.md` section 6. P0 is never cut. If behind, cut in this order: bulk backlog, Bandcamp page fetch, release radar, pre-air verify, then show planning (keep theme ideas, drop deep-dive polish first). Show planning is P1 because it is how Tarik works every week.
+Priorities come from `docs/PRD.md` section 6. P0 is never cut. If behind, cut in this order: bulk backlog, Bandcamp page fetch, release radar, pre-air verify, then show planning (keep theme ideas, drop deep-dive polish first). Show planning is P1 because it is how Tarik works every week. Where this list and `docs/PRD.md` section 6 differ, the PRD wins.
 
 ## Day 1: scaffold and verification spikes
 
