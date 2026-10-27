@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { MIN_TOKEN_LENGTH, pickInput, tokenMatches } from "./agentSubmit";
+import { MIN_TOKEN_LENGTH, pickInput, readCapped, tokenMatches } from "./agentSubmit";
 
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -17,7 +17,15 @@ const submitPackage = httpAction(async (ctx, req) => {
   const expected = process.env.AGENT_SUBMIT_TOKEN;
   if (!expected || expected.length < MIN_TOKEN_LENGTH) return json(503, {});
   if (!tokenMatches(req.headers.get("authorization"), expected)) return json(401, {});
-  const input = pickInput(await req.json().catch(() => null));
+  const text = await readCapped(req);
+  if (text === null) return json(413, {});
+  let body: unknown = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // not JSON: pickInput rejects null below
+  }
+  const input = pickInput(body);
   if (!input) return json(400, { problems: ["body must be the seven package fields"] });
   const built = buildPackageDraft(input, { privateTerms: privateTerms() });
   if (!built.ok) return json(400, { problems: built.problems });

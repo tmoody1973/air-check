@@ -111,6 +111,12 @@ describe("POST /agent/packages", () => {
     expect((await post(t, { showDate: 5 })).status).toBe(400);
   });
 
+  test("a body over 128 KB is 413 and writes nothing", async () => {
+    const t = convexTest(schema, modules);
+    expect((await post(t, { description: "x".repeat(140_000) })).status).toBe(413);
+    expect(await rows(t)).toHaveLength(0);
+  });
+
   test("GET is not routed", async () => {
     const t = convexTest(schema, modules);
     const res = await t.fetch("/agent/packages", { method: "GET" });
