@@ -20,6 +20,6 @@ test("the only public write is packages.decide", async () => {
   }
   expect(exposed).toEqual(["packages.decide"]);
   expect(internal.sort()).toEqual(
-    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit"].sort(),
+    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "seed.seedDemo"].sort(),
   );
 });

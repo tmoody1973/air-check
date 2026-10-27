@@ -14,6 +14,8 @@ import type * as gate from "../gate.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as runs from "../runs.js";
+import type * as seed from "../seed.js";
+import type * as seedData from "../seedData.js";
 import type * as today from "../today.js";
 
 import type {
@@ -29,6 +31,8 @@ declare const fullApi: ApiFromModules<{
   packageStore: typeof packageStore;
   packages: typeof packages;
   runs: typeof runs;
+  seed: typeof seed;
+  seedData: typeof seedData;
   today: typeof today;
 }>;
 
