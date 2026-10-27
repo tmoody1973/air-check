@@ -35,7 +35,7 @@ export const pending = query({
       .flatMap((r) =>
         r.status && r.kind && r.input !== undefined && sourceOf(r) === "live"
           ? [{
-              runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, conversationId: r.conversationId,
+              runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, instructions: r.instructions, conversationId: r.conversationId,
               stopRequested: r.stopRequested ?? false, hermesRunId: r.hermesRunId, status: r.status, lastSeq: r.lastSeq,
             }]
           : [],

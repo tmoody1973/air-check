@@ -7,6 +7,8 @@ export interface PendingRun {
   workspace: "real" | "demo";
   kind: "chat" | "draft-package";
   input: string;
+  /** Fixed scope (core RUN_INSTRUCTIONS); undefined on rows queued before the field existed. */
+  instructions: string | undefined;
   conversationId: string | undefined;
   stopRequested: boolean;
   hermesRunId: string | undefined;

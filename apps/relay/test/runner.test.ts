@@ -33,17 +33,23 @@ describe("starting a queued run", () => {
     expect(real.starts).toHaveLength(1);
     expect(real.starts[0]!.headers.authorization).toBe(`Bearer ${TOKEN}`);
     expect(real.starts[0]!.headers["idempotency-key"]).toBe("r1");
-    expect(real.starts[0]!.body).toEqual({ input: "SECRET-INPUT", session_id: "conv1" });
+    expect(real.starts[0]!.body).toEqual({ input: "SECRET-INPUT", instructions: "SCOPE-INSTRUCTIONS", session_id: "conv1" });
     expect(convex.startedCalls).toEqual([{ runId: "r1", hermesRunId: expect.stringMatching(/^h-/) }]);
     expect(convex.names("r1")).toEqual(fixture.map((e) => e.event));
     expect(convex.seqs("r1")).toEqual(fixture.map((_, i) => i + 1));
     expect(convex.finishedCalls).toEqual([{ runId: "r1", status: "completed" }]);
   });
 
+  test("a row without instructions (queued before the field existed) sends none", async () => {
+    runner.onPending([row({ runId: "r1", instructions: undefined })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    expect(real.starts[0]!.body).toEqual({ input: "SECRET-INPUT", session_id: "conv1" });
+  });
+
   test("draft-package runs send no session_id", async () => {
     runner.onPending([row({ runId: "r1", kind: "draft-package", conversationId: undefined })]);
     await waitFor(() => convex.finishedCalls.length === 1);
-    expect(real.starts[0]!.body).toEqual({ input: "SECRET-INPUT" });
+    expect(real.starts[0]!.body).toEqual({ input: "SECRET-INPUT", instructions: "SCOPE-INSTRUCTIONS" });
   });
 
   test("started:false (cancelled while queued) sends stop and streams nothing", async () => {
@@ -269,7 +275,7 @@ describe("logging (Hard Rule 8)", () => {
     await waitFor(() => convex.finishedCalls.length === 2);
     const all = logs.join("\n");
     expect(all).toMatch(/run=r1 event=\S+ n=\d+/);
-    for (const secret of [TOKEN, DEMO_TOKEN, "SECRET-INPUT", "PRIVATE-REPLY-TEXT"]) expect(all).not.toContain(secret);
+    for (const secret of [TOKEN, DEMO_TOKEN, "SECRET-INPUT", "SCOPE-INSTRUCTIONS", "PRIVATE-REPLY-TEXT"]) expect(all).not.toContain(secret);
   });
 });
 

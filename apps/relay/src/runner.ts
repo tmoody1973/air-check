@@ -104,7 +104,7 @@ export function createRunner(o: RunnerOptions): Runner {
     let hermesRunId: string;
     try {
       // Idempotent by runId: a repeat start (after a crash between POST and `started`) returns the same Hermes run.
-      hermesRunId = await sb.hermes.start(r.input, r.runId, r.kind === "chat" ? r.conversationId : undefined);
+      hermesRunId = await sb.hermes.start(r.input, r.runId, r.kind === "chat" ? r.conversationId : undefined, r.instructions);
     } catch {
       o.log(`run=${r.runId} event=start_failed n=${failures.set(r.runId, (failures.get(r.runId) ?? 0) + 1).get(r.runId)}`);
       if (!stopped) await sleep(backoff((failures.get(r.runId) ?? 1) - 1));

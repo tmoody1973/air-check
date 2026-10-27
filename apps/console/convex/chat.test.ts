@@ -1,6 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { RUN_INSTRUCTIONS } from "@aircheck/core";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
@@ -33,6 +34,7 @@ describe("chat.send", () => {
     expect(msgs.map((m) => [m.role, m.text, m.runId])).toEqual([["user", "Who is Seun Kuti?", undefined], ["assistant", "", runId]]);
     const [run] = await all(t, "runs");
     expect(run).toMatchObject({ runId, kind: "chat", source: "live", status: "queued", input: "Who is Seun Kuti?", conversationId, stopRequested: false, workspace: "real" });
+    expect(run!.instructions).toBe(RUN_INSTRUCTIONS);
   });
 
   test("title is the first 60 characters; a follow-up reuses the conversation and sends only the new text", async () => {
@@ -67,6 +69,7 @@ describe("tracklist.draft", () => {
     const { runId } = await t.withIdentity(human).mutation(api.tracklist.draft, form);
     const [run] = await all(t, "runs");
     expect(run).toMatchObject({ runId, kind: "draft-package", source: "live", status: "queued", form, workspace: "real" });
+    expect(run!.instructions).toBe(RUN_INSTRUCTIONS);
     expect(run!.input).toContain("Draft the Mixcloud package for the show dated 2026-10-02.");
     expect(run!.input).toContain("A – B");
     const got = await t.withIdentity(human).query(api.runs.get, { runId });
@@ -177,7 +180,7 @@ describe("runs.requestStop", () => {
     expect(await byId(a.runId)).toMatchObject({ status: "cancelled", stopRequested: false });
     expect(await byId(b.runId)).toMatchObject({ status: "stopping", stopRequested: true });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
-      { runId: b.runId, workspace: "real", kind: "chat", input: "b", conversationId: b.conversationId, stopRequested: true, hermesRunId: "h-b", status: "stopping", lastSeq: undefined },
+      { runId: b.runId, workspace: "real", kind: "chat", input: "b", instructions: RUN_INSTRUCTIONS, conversationId: b.conversationId, stopRequested: true, hermesRunId: "h-b", status: "stopping", lastSeq: undefined },
     ]);
     await t.mutation(api.relay.finished, { token: RELAY, runId: b.runId, status: "cancelled" });
     await me.mutation(api.runs.requestStop, { runId: b.runId });

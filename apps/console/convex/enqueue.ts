@@ -1,4 +1,4 @@
-import { initialRun } from "@aircheck/core";
+import { initialRun, RUN_INSTRUCTIONS } from "@aircheck/core";
 import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
 import { firstDelayMs } from "./scripted";
@@ -33,6 +33,8 @@ export async function enqueueRun(ctx: MutationCtx, run: NewRun): Promise<string>
     source,
     status: source === "live" ? "queued" : "running",
     input: run.input,
+    // The fixed scope rides with every live run; scripted runs never reach Hermes.
+    instructions: source === "live" ? RUN_INSTRUCTIONS : undefined,
     stopRequested: false,
     conversationId: run.conversationId,
     sessionKey,

@@ -65,7 +65,7 @@ export class FakeHermes {
 }
 
 export const row = (over: Partial<PendingRun> & { runId: string }): PendingRun => ({
-  workspace: "real", kind: "chat", input: "SECRET-INPUT", conversationId: "conv1", stopRequested: false,
+  workspace: "real", kind: "chat", input: "SECRET-INPUT", instructions: "SCOPE-INSTRUCTIONS", conversationId: "conv1", stopRequested: false,
   hermesRunId: undefined, status: "queued", lastSeq: undefined, ...over,
 });
 

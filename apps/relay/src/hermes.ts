@@ -57,11 +57,11 @@ export class HermesClient {
   }
 
   /** Idempotent by `key`: repeating a start with the same key returns the same run. */
-  async start(input: string, key: string, sessionId?: string): Promise<string> {
+  async start(input: string, key: string, sessionId?: string, instructions?: string): Promise<string> {
     const res = await this.call("/v1/runs", {
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": key },
-      body: JSON.stringify({ input, ...(sessionId !== undefined && { session_id: sessionId }) }),
+      body: JSON.stringify({ input, ...(instructions !== undefined && { instructions }), ...(sessionId !== undefined && { session_id: sessionId }) }),
     });
     const { run_id } = (await res.json()) as { run_id?: string };
     if (!run_id) throw new Error("hermes start returned no run_id");

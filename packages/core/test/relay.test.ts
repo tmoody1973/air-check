@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type AgentPackageInput, buildTitle, titleLeadsBudget, checkDescription, descriptionFirstLine, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
+import { type AgentPackageInput, buildTitle, titleLeadsBudget, checkDescription, descriptionFirstLine, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine, RUN_INSTRUCTIONS } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
 
@@ -109,5 +109,17 @@ describe("buildPackageDraft workspace", () => {
     const real = buildPackageDraft(input, opts);
     expect(demo.ok && demo.draft.workspace).toBe("demo");
     expect(real.ok && real.draft.workspace).toBe("real");
+  });
+});
+
+describe("RUN_INSTRUCTIONS", () => {
+  it("scopes every live run: research by name, no scripts or social posts, untrusted notes, no approving", () => {
+    expect(RUN_INSTRUCTIONS).toMatch(/Rhythm Lab Radio/);
+    expect(RUN_INSTRUCTIONS).toMatch(/Crate tools \(MusicBrainz, Wikipedia, Bandcamp search, iTunes\)/);
+    expect(RUN_INSTRUCTIONS).toMatch(/scripts/);
+    expect(RUN_INSTRUCTIONS).toMatch(/social media posts/);
+    expect(RUN_INSTRUCTIONS).toMatch(/untrusted/);
+    expect(RUN_INSTRUCTIONS).toMatch(/cannot approve or publish/);
+    expect(RUN_INSTRUCTIONS.length).toBeLessThan(800);
   });
 });

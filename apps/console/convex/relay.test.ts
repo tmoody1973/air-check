@@ -1,6 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { RUN_INSTRUCTIONS } from "@aircheck/core";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
@@ -60,7 +61,7 @@ describe("relay.pending / started / finished", () => {
     const t = convexTest(schema, modules);
     const a = await t.withIdentity(human).mutation(api.chat.send, { text: "hi" });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
-      { runId: a.runId, workspace: "real", kind: "chat", input: "hi", conversationId: a.conversationId, stopRequested: false, hermesRunId: undefined, status: "queued", lastSeq: undefined },
+      { runId: a.runId, workspace: "real", kind: "chat", input: "hi", instructions: RUN_INSTRUCTIONS, conversationId: a.conversationId, stopRequested: false, hermesRunId: undefined, status: "queued", lastSeq: undefined },
     ]);
   });
 
@@ -82,7 +83,7 @@ describe("relay.pending / started / finished", () => {
     const { t, runId, conversationId } = await started();
     await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "x" }, 7)] });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
-      { runId, workspace: "real", kind: "chat", input: "hi", conversationId, stopRequested: false, hermesRunId: "h1", status: "running", lastSeq: 7 },
+      { runId, workspace: "real", kind: "chat", input: "hi", instructions: RUN_INSTRUCTIONS, conversationId, stopRequested: false, hermesRunId: "h1", status: "running", lastSeq: 7 },
     ]);
     await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([]);

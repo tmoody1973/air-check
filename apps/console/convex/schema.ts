@@ -73,6 +73,7 @@ export default defineSchema({
     source: v.optional(v.union(v.literal("live"), v.literal("scripted"))),
     status: v.optional(runStatusV),
     input: v.optional(v.string()), // the Hermes instruction, built at queue time
+    instructions: v.optional(v.string()), // core RUN_INSTRUCTIONS, sent as Hermes `instructions` (live runs only)
     stopRequested: v.optional(v.boolean()),
     hermesRunId: v.optional(v.string()),
     conversationId: v.optional(v.string()), // also Hermes's session_id
