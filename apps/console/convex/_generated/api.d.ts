@@ -21,6 +21,7 @@ import type * as http from "../http.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as relay from "../relay.js";
+import type * as runDefaults from "../runDefaults.js";
 import type * as runs from "../runs.js";
 import type * as sandbox from "../sandbox.js";
 import type * as scripted from "../scripted.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   packageStore: typeof packageStore;
   packages: typeof packages;
   relay: typeof relay;
+  runDefaults: typeof runDefaults;
   runs: typeof runs;
   sandbox: typeof sandbox;
   scripted: typeof scripted;
