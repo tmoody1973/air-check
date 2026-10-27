@@ -64,6 +64,77 @@ describe("seedDemo", () => {
     expect(GOLDEN_TRACKS).toHaveLength(31);
   });
 
+  const HOUR = 3_600_000;
+  const userRun = (runId: string, createdAt: number, status: "running" | "completed" | "queued", conversationId?: string) => ({
+    workspace: "demo" as const, runId, title: "Chat", state: {}, updatedAt: createdAt, kind: "chat" as const, source: "live" as const,
+    status, input: "hi", stopRequested: false, createdAt, conversationId, sessionKey: "s1",
+  });
+
+  test("a reseed leaves a 1-hour-old live demo run and its conversation intact (daily cap count unchanged)", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const now = Date.now();
+    const convId = await t.run(async (ctx) => {
+      const c = await ctx.db.insert("conversations", { workspace: "demo", title: "hi", createdAt: now - HOUR });
+      await ctx.db.insert("messages", { workspace: "demo", conversationId: c, role: "user", text: "hi", at: now - HOUR });
+      await ctx.db.insert("runs", userRun("live-1h", now - HOUR, "completed", c));
+      return c;
+    });
+    const liveToday = () => t.run(async (ctx) => (await ctx.db.query("runs").withIndex("by_workspace_source_created", (q) => q.eq("workspace", "demo").eq("source", "live")).collect()).length);
+    const before = await liveToday();
+    await t.mutation(internal.seed.seedDemo, {});
+    expect(await liveToday()).toBe(before);
+    const kept = await t.run(async (ctx) => ({
+      run: await ctx.db.query("runs").withIndex("by_runId", (q) => q.eq("runId", "live-1h")).first(),
+      conv: await ctx.db.get(convId),
+      msgs: await ctx.db.query("messages").withIndex("by_conversation", (q) => q.eq("conversationId", convId)).collect(),
+    }));
+    expect(kept.run).not.toBeNull();
+    expect(kept.conv).not.toBeNull();
+    expect(kept.msgs).toHaveLength(1);
+  });
+
+  test("a 25-hour-old finished demo run is removed with its conversation; an old in-flight run and its conversation stay", async () => {
+    const t = convexTest(schema, modules);
+    const now = Date.now();
+    const ids = await t.run(async (ctx) => {
+      const oldConv = await ctx.db.insert("conversations", { workspace: "demo", title: "old", createdAt: now - 25 * HOUR });
+      await ctx.db.insert("messages", { workspace: "demo", conversationId: oldConv, role: "user", text: "old", at: now - 25 * HOUR });
+      await ctx.db.insert("runs", userRun("old-done", now - 25 * HOUR, "completed", oldConv));
+      const liveConv = await ctx.db.insert("conversations", { workspace: "demo", title: "busy", createdAt: now - 25 * HOUR });
+      await ctx.db.insert("runs", userRun("old-running", now - 25 * HOUR, "running", liveConv));
+      await ctx.db.insert("packages", { packageId: "demo-10-9-26-abcde", workspace: "demo", status: "awaiting_review", draft: { id: "demo-10-9-26-abcde" } });
+      return { oldConv, liveConv };
+    });
+    await t.mutation(internal.seed.seedDemo, {});
+    const after = await t.run(async (ctx) => ({
+      runs: (await ctx.db.query("runs").collect()).map((r) => r.runId).sort(),
+      oldConv: await ctx.db.get(ids.oldConv),
+      liveConv: await ctx.db.get(ids.liveConv),
+      msgs: (await ctx.db.query("messages").collect()).length,
+      pkgs: (await ctx.db.query("packages").collect()).map((p) => p.packageId).sort(),
+    }));
+    expect(after.runs).toEqual(["demo-run-1", "old-running"]);
+    expect(after.oldConv).toBeNull();
+    expect(after.liveConv).not.toBeNull();
+    expect(after.msgs).toBe(0);
+    // A fresh user package (younger than 24 h) survives the reseed.
+    expect(after.pkgs).toEqual(["demo-10-2-26", "demo-10-9-26-abcde", "demo-long-title"]);
+  });
+
+  test("seeded rows are refreshed: an approved golden package returns to awaiting_review", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    await t.run(async (ctx) => {
+      const p = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", "demo-10-2-26")).first();
+      await ctx.db.patch(p!._id, { status: "approved" });
+    });
+    await t.mutation(internal.seed.seedDemo, {});
+    const rec = await t.withIdentity(demoUser).query(api.packages.get, { packageId: "demo-10-2-26" });
+    expect(rec!.status).toBe("awaiting_review");
+    expect((await counts(t)).packages).toBe(2);
+  });
+
   test("demo-long-title has a 99-character title and exactly 5 tags", async () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.seed.seedDemo, {});

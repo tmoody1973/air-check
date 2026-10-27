@@ -1,6 +1,8 @@
 import { type PackageDraft, applyRunEvent, fingerprint, initialRun, type RunState } from "@aircheck/core";
-import { internalMutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
+import { createdAtOf, statusOf } from "./runDefaults";
 import {
   DEMO_MP3_SHA256,
   GOLDEN_ALTERNATES,
@@ -11,7 +13,13 @@ import {
 } from "./seedData";
 
 const WS = "demo" as const;
-const TABLES = ["packages", "activity", "verifications", "releases", "runs", "conversations", "messages"] as const;
+/** Tables written only by this seed in the demo workspace: wiped and re-inserted on every run. */
+const SEED_ONLY = ["verifications", "releases"] as const;
+const SEEDED_PACKAGES = new Set(["demo-10-2-26", "demo-long-title"]);
+const SEEDED_RUN = "demo-run-1";
+/** Visitors' demo rows (chats, runs, packages, activity) are kept this long. */
+const USER_ROW_TTL_MS = 24 * 3_600_000;
+const IN_FLIGHT = new Set(["queued", "running", "stopping"]);
 
 const goldenDemo: PackageDraft = {
   id: "demo-10-2-26",
@@ -72,15 +80,43 @@ function demoRunState(now: number): RunState {
   return { ...s, steps: s.steps.map((st, i) => ({ ...st, label: rows[i]!.label, sources: rows[i]!.sources })) };
 }
 
-/** Wipes and re-inserts the demo workspace. Never reads, changes or deletes a "real" row. */
+const SEEDED_ACTIVITY_TITLES = new Set<string>(ACTIVITY.map(([, row]) => row.title));
+
+/**
+ * Deletes the seeded demo rows and visitors' demo rows older than 24 hours. A run that is queued,
+ * running or stopping is never deleted, and a conversation is kept while any of its runs is kept,
+ * so a reseed never cuts off live work or resets the daily live-run count.
+ */
+async function clearDemo(ctx: MutationCtx, now: number) {
+  const stale = (at: number) => now - at > USER_ROW_TTL_MS;
+  for (const table of SEED_ONLY) {
+    for (const r of await ctx.db.query(table).filter((q) => q.eq(q.field("workspace"), WS)).collect()) await ctx.db.delete(r._id);
+  }
+  for (const p of await ctx.db.query("packages").filter((q) => q.eq(q.field("workspace"), WS)).collect()) if (SEEDED_PACKAGES.has(p.packageId) || stale(p._creationTime)) await ctx.db.delete(p._id);
+  for (const a of await ctx.db.query("activity").filter((q) => q.eq(q.field("workspace"), WS)).collect()) if ((!a.key && SEEDED_ACTIVITY_TITLES.has(a.title)) || stale(a.at)) await ctx.db.delete(a._id);
+
+  const keptConversations = new Set<string>();
+  for (const r of await ctx.db.query("runs").filter((q) => q.eq(q.field("workspace"), WS)).collect()) {
+    const keep = r.runId !== SEEDED_RUN && (IN_FLIGHT.has(statusOf(r) ?? "") || !stale(createdAtOf(r)));
+    if (!keep) await ctx.db.delete(r._id);
+    else if (r.conversationId) keptConversations.add(r.conversationId);
+  }
+  const dropped = new Set<Id<"conversations">>();
+  for (const c of await ctx.db.query("conversations").filter((q) => q.eq(q.field("workspace"), WS)).collect()) {
+    if (keptConversations.has(c._id) || !stale(c.createdAt)) continue;
+    dropped.add(c._id);
+    await ctx.db.delete(c._id);
+  }
+  // Every message has a run created with it, so a message younger than 24 h keeps its conversation.
+  for (const m of await ctx.db.query("messages").filter((q) => q.eq(q.field("workspace"), WS)).collect()) if (dropped.has(m.conversationId)) await ctx.db.delete(m._id);
+}
+
+/** Refreshes the demo workspace (see clearDemo). Never reads, changes or deletes a "real" row. */
 export const seedDemo = internalMutation({
   args: {},
   handler: async (ctx) => {
-    for (const table of TABLES) {
-      const rows = await ctx.db.query(table).filter((q) => q.eq(q.field("workspace"), WS)).collect();
-      for (const r of rows) await ctx.db.delete(r._id);
-    }
     const now = Date.now();
+    await clearDemo(ctx, now);
 
     for (const draft of [goldenDemo, longTitleDemo]) {
       const clean = stripUndefined(draft);
