@@ -68,18 +68,19 @@ export default defineSchema({
     // Display-only Next/Skipped rows; the seed (Task 13) stores them.
     upcoming: v.optional(v.array(v.object({ label: v.string(), text: v.string(), status: v.union(v.literal("next"), v.literal("skipped")) }))),
     updatedAt: v.number(),
-    kind: v.union(v.literal("chat"), v.literal("draft-package")),
-    source: v.union(v.literal("live"), v.literal("scripted")),
-    status: runStatusV,
-    input: v.string(), // the Hermes instruction, built at queue time
-    stopRequested: v.boolean(),
+    // Plan 4b fields are optional so Plan-3-era rows still satisfy the schema (see runDefaults.ts).
+    kind: v.optional(v.union(v.literal("chat"), v.literal("draft-package"))),
+    source: v.optional(v.union(v.literal("live"), v.literal("scripted"))),
+    status: v.optional(runStatusV),
+    input: v.optional(v.string()), // the Hermes instruction, built at queue time
+    stopRequested: v.optional(v.boolean()),
     hermesRunId: v.optional(v.string()),
     conversationId: v.optional(v.string()), // also Hermes's session_id
     sessionKey: v.optional(v.string()), // demo rate-limit key
     packageId: v.optional(v.string()),
     form: v.optional(v.object({ showDate: v.string(), tracklistText: v.string(), notes: v.string() })),
     lastSeq: v.optional(v.number()), // highest relay event seq applied
-    createdAt: v.number(),
+    createdAt: v.optional(v.number()),
   })
     .index("by_runId", ["runId"])
     .index("by_status", ["status"])

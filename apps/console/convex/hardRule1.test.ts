@@ -32,7 +32,7 @@ test("the public writes are exactly the allowlist", async () => {
 // The chat/run/relay code sits next to the publish path, so it must not touch it: no publish or decide
 // function by name, no calls into packages.ts, and the packages table is only ever read (relay.events reads it
 // for the run's packageId). This is a source-text check: it cannot see a call built from a computed string.
-const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "sandbox", "enqueue", "applyEvents", "runs"];
+const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "sandbox", "enqueue", "applyEvents", "runs", "runDefaults"];
 const src = (name: string) => readFileSync(new URL(`./${name}.ts`, import.meta.url), "utf8");
 
 test("run, chat and relay code never reach packages.decide or the publish functions", () => {

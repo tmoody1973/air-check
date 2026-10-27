@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
 import { applyEvents } from "./applyEvents";
+import { isTerminal, sourceOf, statusOf } from "./runDefaults";
 
 // The relay (a host program) is the only caller. Every function checks its token first, in constant time,
 // and fails closed: RELAY_TOKEN unset or shorter than 32 characters means nothing here works.
@@ -11,12 +12,11 @@ function requireRelay(token: string): void {
   if (!sameToken(token, process.env.RELAY_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
-const TERMINAL = ["completed", "cancelled", "failed"];
 const workspaceV = v.union(v.literal("real"), v.literal("demo"));
 
 async function findRun(ctx: QueryCtx, runId: string): Promise<Doc<"runs">> {
   const run = await ctx.db.query("runs").withIndex("by_runId", (q) => q.eq("runId", runId)).unique();
-  if (!run || run.source !== "live") throw new ConvexError({ code: "NOT_FOUND" });
+  if (!run || sourceOf(run) !== "live") throw new ConvexError({ code: "NOT_FOUND" });
   return run;
 }
 
@@ -31,11 +31,15 @@ export const pending = query({
     const byStatus = (status: "queued" | "stopping" | "running") => ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect();
     const [queued, stopping, running] = await Promise.all([byStatus("queued"), byStatus("stopping"), byStatus("running")]);
     return [...queued, ...stopping.filter((r) => r.stopRequested), ...running]
-      .filter((r) => r.source === "live")
-      .map((r) => ({
-        runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, conversationId: r.conversationId,
-        stopRequested: r.stopRequested, hermesRunId: r.hermesRunId, status: r.status, lastSeq: r.lastSeq,
-      }));
+      // Old rows lacking status/kind/input are never handed to the relay.
+      .flatMap((r) =>
+        r.status && r.kind && r.input !== undefined && sourceOf(r) === "live"
+          ? [{
+              runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, conversationId: r.conversationId,
+              stopRequested: r.stopRequested ?? false, hermesRunId: r.hermesRunId, status: r.status, lastSeq: r.lastSeq,
+            }]
+          : [],
+      );
   },
 });
 
@@ -45,11 +49,11 @@ export const started = mutation({
   handler: async (ctx, { token, runId, hermesRunId }) => {
     requireRelay(token);
     const run = await findRun(ctx, runId);
-    if (run.status === "queued") {
+    if (statusOf(run) === "queued") {
       await ctx.db.patch(run._id, { status: "running", hermesRunId, updatedAt: Date.now() });
       return { started: true };
     }
-    return { started: run.status === "running" && run.hermesRunId === hermesRunId };
+    return { started: statusOf(run) === "running" && run.hermesRunId === hermesRunId };
   },
 });
 
@@ -74,7 +78,7 @@ export const events = mutation({
   handler: async (ctx, { token, runId, events }) => {
     requireRelay(token);
     const run = await findRun(ctx, runId);
-    if (TERMINAL.includes(run.status)) return;
+    if (isTerminal(statusOf(run))) return;
     const state = await applyEvents(ctx, run, events);
     const packageId = await packageIdFor(ctx, run, state, events);
     if (packageId && packageId !== run.packageId) await ctx.db.patch(run._id, { packageId });
@@ -86,7 +90,7 @@ export const finished = mutation({
   handler: async (ctx, { token, runId, status }) => {
     requireRelay(token);
     const run = await findRun(ctx, runId);
-    if (TERMINAL.includes(run.status)) return;
+    if (isTerminal(statusOf(run))) return;
     const state = run.state as RunState;
     const settled = state.status === "running" || state.status === "stopping";
     await ctx.db.patch(run._id, { status, state: settled ? { ...state, status } : state, updatedAt: Date.now() });

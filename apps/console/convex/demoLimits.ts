@@ -52,6 +52,7 @@ export async function sourceFor(ctx: MutationCtx, ws: Workspace, sessionKey: str
     .collect();
   if (recent.length >= intEnv("DEMO_RUNS_PER_SESSION", 5)) throw new ConvexError({ code: "RATE_LIMITED" });
   if (process.env.DEMO_LIVE === "0") return "scripted";
+  // Old rows without source/createdAt are not in this index range, so they never count (and demo has none live).
   const liveToday = await ctx.db
     .query("runs")
     .withIndex("by_workspace_source_created", (q) => q.eq("workspace", "demo").eq("source", "live").gte("createdAt", chicagoDayStart(now)))
