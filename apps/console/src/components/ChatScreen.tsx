@@ -17,6 +17,9 @@ export function ChatScreen({ conversationId }: { conversationId?: string }) {
   const messages = useQuery(api.chat.messages, conversationId ? { conversationId } : "skip");
   const sendMessage = useMutation(api.chat.send);
 
+  // A real conversation always has messages; an id that is in neither the list nor the messages is bogus or not ours.
+  const missing = Boolean(conversationId) && conversations !== undefined && messages?.length === 0 && !conversations.some((c) => c._id === conversationId);
+
   async function send(text: string) {
     const r = await sendMessage({ conversationId, text });
     if (!conversationId) router.push(`/chat/${r.conversationId}`);
@@ -27,8 +30,8 @@ export function ChatScreen({ conversationId }: { conversationId?: string }) {
       <div className="flex flex-col gap-6 min-[900px]:grid min-[900px]:grid-cols-[220px_minmax(0,1fr)] min-[900px]:gap-8">
         <ConversationList conversations={conversations} activeId={conversationId} />
         <ChatThread
-          key={conversationId ?? "new"}
           messages={conversationId ? messages : []}
+          missing={missing}
           send={send}
           useRun={useRun}
           usePackage={usePackage}

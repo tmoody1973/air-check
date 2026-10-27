@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PackageRecord } from "@aircheck/core";
 import { chatErrorText, MAX_MESSAGE_CHARS, progressLine } from "../lib/chat";
 import { ChatPackageCard } from "./ChatPackageCard";
@@ -25,11 +25,18 @@ type Props = {
   useRun: (runId: string) => RunView | null | undefined;
   usePackage: (packageId: string | undefined) => PackageRecord | null | undefined;
   headerSlot?: ReactNode;
+  /** The conversation id in the URL is not one of ours: show a plain note instead of a fresh chat. */
+  missing?: boolean;
 };
+
+const NEAR_BOTTOM_PX = 120;
+const atBottom = () => document.documentElement.scrollHeight - window.scrollY - window.innerHeight < NEAR_BOTTOM_PX;
 
 const GOING = new Set(["queued", "running", "stopping"]);
 
-function EmptyReply({ status }: { status: RunView["status"] | undefined }) {
+function EmptyReply({ run }: { run: RunView | null | undefined }) {
+  if (run === null) return <span className="text-muted">Run unavailable.</span>;
+  const status = run?.status;
   if (status === undefined || GOING.has(status)) {
     return <span role="status" aria-label="The agent is writing" className="text-muted">…</span>;
   }
@@ -38,15 +45,17 @@ function EmptyReply({ status }: { status: RunView["status"] | undefined }) {
   return <span className="text-muted">The agent finished without a reply.</span>;
 }
 
-function AssistantMessage({ m, useRun, usePackage }: { m: ChatMessage } & Pick<Props, "useRun" | "usePackage">) {
+function AssistantMessage({ m, useRun, usePackage, onGrow }: { m: ChatMessage; onGrow: () => void } & Pick<Props, "useRun" | "usePackage">) {
   const run = useRun(m.runId ?? "");
   const pkg = usePackage(run?.packageId);
   const line = run ? progressLine(run.status, run.state.steps) : null;
+  // A streamed reply, a new step or the card arriving makes the thread taller without adding a message.
+  useEffect(() => { onGrow(); }, [onGrow, m.text.length, run?.status, run?.state.steps.length, !!pkg]);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {/* Agent text is untrusted: plain text only, line breaks kept, never parsed as HTML. */}
       <p className="text-[15px] leading-[1.55] whitespace-pre-wrap [overflow-wrap:anywhere]">
-        {m.text === "" ? <EmptyReply status={run?.status} /> : m.text}
+        {m.text === "" ? <EmptyReply run={run} /> : m.text}
       </p>
       {run?.packageId && pkg && <ChatPackageCard record={pkg} packageId={run.packageId} />}
       <div className="flex flex-wrap items-center gap-x-3">
@@ -61,14 +70,27 @@ function AssistantMessage({ m, useRun, usePackage }: { m: ChatMessage } & Pick<P
   );
 }
 
-export function ChatThread({ messages, send, useRun, usePackage, headerSlot }: Props) {
+export function ChatThread({ messages, send, useRun, usePackage, headerSlot, missing = false }: Props) {
   const [text, setText] = useState("");
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ text: string; sent: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false); // state lags a fast second Enter; a ref does not
   const end = useRef<HTMLDivElement>(null);
-  const count = (messages?.length ?? 0) + (pending ? 1 : 0);
-  useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [count]);
+  const nearBottom = useRef(true);
+  useEffect(() => {
+    const onScroll = () => { nearBottom.current = atBottom(); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  // Follow new content only while the reader is already at the bottom.
+  const follow = useCallback(() => { if (nearBottom.current) end.current?.scrollIntoView?.({ block: "end" }); }, []);
+
+  // The sent message stays on screen until the server's copy is in `messages` (also across the first-message navigation).
+  const saved = pending?.sent && messages?.some((m) => m.role === "user" && m.text === pending.text);
+  const shownPending = pending && !saved ? pending.text : null;
+  useEffect(() => { if (saved) setPending(null); }, [saved]);
+  const count = (messages?.length ?? 0) + (shownPending ? 1 : 0);
+  useEffect(() => { if (count > 0) follow(); }, [count, follow]);
 
   async function submit() {
     const body = text.trim();
@@ -76,46 +98,52 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot }: P
     if (body.length > MAX_MESSAGE_CHARS) { setError(chatErrorText({ data: { code: "INVALID_INPUT" } })); return; }
     sending.current = true;
     setError(null);
-    setPending(body);
+    nearBottom.current = true; // sending always follows
+    setPending({ text: body, sent: false });
     setText("");
     try {
       await send(body);
-      // Convex resolves a mutation after the query results include it, so the saved message is already on screen.
-      setPending(null);
+      setPending((p) => (p ? { ...p, sent: true } : p));
     } catch (e) {
       setError(chatErrorText(e));
       setPending(null);
-      setText(body);
+      setText((cur) => (cur === "" ? body : cur)); // never overwrite what was typed meanwhile
     } finally {
       sending.current = false;
     }
   }
 
-  const busy = pending !== null;
+  const busy = pending !== null && !pending.sent;
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {headerSlot}
       <div role="log" aria-label="Conversation" className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-6">
-        {messages === undefined && <p className="text-ink-soft">Loading…</p>}
-        {messages?.length === 0 && !pending && (
+        {messages === undefined && !shownPending && <p className="text-ink-soft">Loading…</p>}
+        {!missing && messages?.length === 0 && !shownPending && (
           <p className="text-[15px] leading-relaxed text-ink-soft">Ask Air Check to draft a package, check a tracklist or plan a show.</p>
         )}
         {messages?.map((m) =>
           m.role === "user" ? (
             <p key={m._id} className="max-w-[80%] self-end rounded-[16px_16px_4px_16px] bg-ink px-4 py-3 text-[15px] leading-normal whitespace-pre-wrap text-paper [overflow-wrap:anywhere]">{m.text}</p>
           ) : (
-            <AssistantMessage key={m._id} m={m} useRun={useRun} usePackage={usePackage} />
+            <AssistantMessage key={m._id} m={m} useRun={useRun} usePackage={usePackage} onGrow={follow} />
           ),
         )}
-        {pending && (
-          <p className="max-w-[80%] self-end rounded-[16px_16px_4px_16px] bg-ink px-4 py-3 text-[15px] leading-normal whitespace-pre-wrap text-paper [overflow-wrap:anywhere]">{pending}</p>
+        {shownPending && (
+          <p className="max-w-[80%] self-end rounded-[16px_16px_4px_16px] bg-ink px-4 py-3 text-[15px] leading-normal whitespace-pre-wrap text-paper [overflow-wrap:anywhere]">{shownPending}</p>
         )}
-        <div ref={end} />
       </div>
+
+      {missing ? (
+        <div className="mx-auto flex w-full max-w-[760px] flex-col items-start gap-2">
+          <p className="text-[15px] text-ink-soft">That conversation isn&apos;t here.</p>
+          <Link href="/chat" className="inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-2">Start a new conversation</Link>
+        </div>
+      ) : (
 
       <form
         onSubmit={(e) => { e.preventDefault(); void submit(); }}
-        className="mx-auto flex w-full max-w-[760px] flex-col gap-2"
+        className="sticky bottom-0 mx-auto flex w-full max-w-[760px] flex-col gap-2 bg-paper pt-2 pb-4"
       >
         {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
         <div className="flex items-end gap-2.5 rounded-[14px] border border-line-strong bg-surface py-2 pr-2 pl-4">
@@ -127,7 +155,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot }: P
             placeholder="Ask Air Check to draft, check or plan a show"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(); }
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void submit(); }
             }}
             className="max-h-40 min-h-11 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15px] outline-none"
           />
@@ -141,6 +169,8 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot }: P
           </button>
         </div>
       </form>
+      )}
+      <div ref={end} />
     </div>
   );
 }

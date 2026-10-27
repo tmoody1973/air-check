@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import "@testing-library/jest-dom/vitest";
 import { ConvexError } from "convex/values";
 import type { PackageRecord } from "@aircheck/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatThread, type ChatMessage, type RunView } from "./ChatThread";
 
 afterEach(cleanup);
@@ -20,12 +20,13 @@ const record = (): PackageRecord => ({
   },
 });
 
-function setup(o: { messages?: ChatMessage[] | undefined; runs?: Record<string, RunView | null | undefined>; pkgs?: Record<string, PackageRecord | null>; send?: (t: string) => Promise<unknown> } = {}) {
+function setup(o: { missing?: boolean; messages?: ChatMessage[] | undefined; runs?: Record<string, RunView | null | undefined>; pkgs?: Record<string, PackageRecord | null>; send?: (t: string) => Promise<unknown> } = {}) {
   const send = vi.fn(o.send ?? (async () => ({})));
   const props = {
     messages: "messages" in o ? o.messages : [],
     send,
     useRun: (id: string) => o.runs?.[id],
+    missing: o.missing,
     usePackage: (id: string | undefined) => (id ? (o.pkgs?.[id] ?? null) : null),
   };
   const view = render(<ChatThread {...props} />);
@@ -165,5 +166,84 @@ describe("ChatThread replies", () => {
   it("keeps line breaks", () => {
     setup({ messages: [user("hi"), bot("one\ntwo")], runs: { r1: run({ status: "completed" }) } });
     expect(screen.getByText(/one/)).toHaveClass("whitespace-pre-wrap");
+  });
+});
+
+describe("ChatThread follow, not-found and input fixes", () => {
+  const scrollIntoView = vi.fn();
+  beforeEach(() => {
+    scrollIntoView.mockClear();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 0 });
+  });
+  const scrollTo = (fromBottom: number) => {
+    Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 5000 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 5000 - window.innerHeight - fromBottom });
+    fireEvent.scroll(window);
+  };
+
+  it("does not scroll on mount with no messages", () => {
+    setup();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+  it("scrolls when the reply text grows and the reader is at the bottom", () => {
+    const runs = { r1: run() };
+    const { rerender } = setup({ messages: [user("hi"), bot("Fo")], runs });
+    scrollIntoView.mockClear();
+    rerender({ messages: [user("hi"), bot("Found both hours")] });
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+  it("does not scroll when the reader has scrolled up", () => {
+    const runs = { r1: run() };
+    const { rerender } = setup({ messages: [user("hi"), bot("Fo")], runs });
+    scrollTo(800);
+    scrollIntoView.mockClear();
+    rerender({ messages: [user("hi"), bot("Found both hours")] });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+  it("scrolls when the run status changes", () => {
+    const { rerender } = setup({ messages: [user("hi"), bot("")], runs: { r1: run({ status: "queued" }) } });
+    scrollIntoView.mockClear();
+    rerender({ useRun: () => run({ status: "running" }) });
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+  it("shows a note and no composer for a conversation that is not ours", () => {
+    setup({ messages: [], missing: true });
+    expect(screen.getByText("That conversation isn't here.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start a new conversation" })).toHaveAttribute("href", "/chat");
+    expect(screen.queryByLabelText("Message Air Check")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ask air check to draft/i)).not.toBeInTheDocument();
+  });
+  it("a missing run (null) says Run unavailable, loading (undefined) keeps the ellipsis", () => {
+    setup({ messages: [user("hi"), bot("")], runs: { r1: null } });
+    expect(screen.getByText("Run unavailable.")).toBeInTheDocument();
+    cleanup();
+    setup({ messages: [user("hi"), bot("")], runs: { r1: undefined } });
+    expect(screen.getByRole("status", { name: "The agent is writing" })).toBeInTheDocument();
+  });
+  it("keeps the sent message until the saved copy arrives, then shows it once", async () => {
+    const { rerender } = setup({ messages: undefined, send: async () => ({}) });
+    type("first one");
+    enter();
+    await waitFor(() => expect(box().value).toBe(""));
+    expect(screen.getByText("first one")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    rerender({ messages: [user("first one"), bot("", "r1", "a1")] });
+    await waitFor(() => expect(screen.getAllByText("first one")).toHaveLength(1));
+  });
+  it("a failed send does not overwrite text typed meanwhile", async () => {
+    let fail!: () => void;
+    setup({ send: () => new Promise((_, rej) => (fail = () => rej(new ConvexError({ code: "NOT_FOUND" })))) });
+    type("sent text");
+    enter();
+    type("typed meanwhile");
+    await act(async () => fail());
+    expect(box().value).toBe("typed meanwhile");
+  });
+  it("does not send on Enter during IME composition (keyCode 229)", () => {
+    const { send } = setup();
+    type("にほん");
+    fireEvent.keyDown(box(), { key: "Enter", keyCode: 229 });
+    expect(send).not.toHaveBeenCalled();
   });
 });
