@@ -19,6 +19,18 @@ test("package page fits a 375px phone", async ({ page }, info) => {
   }
 });
 
+test("tracklist page fits a 375px phone", async ({ page }, info) => {
+  test.skip(info.project.name !== "iPhone 13", "phone project only");
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/tracklist");
+  const button = page.getByRole("button", { name: "Draft package" });
+  await button.scrollIntoViewIfNeeded();
+  await expect(button).toBeVisible();
+  await expect(button).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
 test("demo approve flow", async ({ page }, info) => {
   desktopOnly(info.project.name); // approving twice would find the package already approved
   await page.goto("/today");

@@ -35,3 +35,10 @@ describe("Shell", () => {
     expect(screen.getByText("4 destinations allowed")).toBeInTheDocument();
   });
 });
+
+describe("Shell nav targets", () => {
+  it("Tracklist links to the built screen, not /soon", () => {
+    render(<Shell title="Today" workspace="real" active="today">x</Shell>);
+    expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Tracklist" })).toHaveAttribute("href", "/tracklist");
+  });
+});
