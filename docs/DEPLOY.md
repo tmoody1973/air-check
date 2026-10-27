@@ -7,9 +7,9 @@ This page has no addresses or keys on purpose, because the repo is public. The V
 ## The pieces
 
 - **Docker Compose** (a tool that starts several containers from one file): `deploy/compose.yaml` starts two containers.
-- **`console`**: the Next.js website, built by `deploy/Dockerfile`. It has no published port, so nothing outside can reach it directly.
+- **`console`**: the website, a Next.js app (a React web framework), built by `deploy/Dockerfile`. It has no published port, so nothing outside can reach it directly.
 - **`caddy`**: a web server that takes ports 80 and 443, gets a free HTTPS certificate from Let's Encrypt by itself, and passes traffic to `console`. Config is `deploy/Caddyfile`. It writes no access log on purpose, because a sign-in link can carry a one-time token.
-- **Convex production** (deployment `clever-deer-759`): the database and the hourly job in `apps/console/convex/crons.ts` that re-seeds the demo workspace.
+- **Convex production** (deployment `clever-deer-759`): the database and the hourly scheduled job (a cron) in `apps/console/convex/crons.ts` that re-seeds the demo workspace.
 
 ## One-time setup (already done)
 
@@ -33,21 +33,23 @@ The VM's public IP must be static. By default Nebius frees it when the VM stops,
 Clerk production instance on domain `aircheck.rhythmlabradio.com` (see decision 010).
 
 1. Create the production instance and add the domain; add the five CNAMEs above; wait until Clerk shows them verified.
-2. Sign-in method: email code only for now. Google needs your own Google OAuth client, so it comes later.
+2. Sign-in method: email code only for now. Google needs your own Google OAuth client (the registration that lets Google trust our sign-in page), so it comes later.
 3. Turn on the Convex integration (this creates the JWT template, the token Convex uses to know who is signed in). Its issuer domain is `https://clerk.aircheck.rhythmlabradio.com`.
-4. Add the session claims the console reads (the role and email fields), same as in the development instance.
-5. Create the demo user: role `demo`, an email that is not `@radiomilwaukee.org`.
+4. Edit the session token (Sessions, then Customize session token) so it carries these claims: `aud` set to `convex`, `email`, `email_verified`, and `role` taken from the user's public metadata.
+5. Create the demo user with public metadata `{"role":"demo"}` and an email that is not `@radiomilwaukee.org`.
 6. Copy the `pk_live_...` publishable key, the `sk_live_...` secret key and the demo user's id into the env files below.
 
 ### Convex production commands
 
-Run from `apps/console` on the Mac. `CONVEX_DEPLOY_KEY` (a `prod:...` key) comes from `apps/console/.env.production.local`, which is gitignored. It must never be copied to the VM.
+Run from `apps/console` on the Mac. The Convex deploy key (a `prod:...` key) comes from `apps/console/.env.production.local`, which is gitignored. It must never be copied to the VM.
 
 ```sh
 cd apps/console
+export CONVEX_DEPLOY_KEY=$(grep '^CONVEX_DEPLOY_KEY=' .env.production.local | cut -d= -f2-)
 npx convex env set CLERK_JWT_ISSUER_DOMAIN https://clerk.aircheck.rhythmlabradio.com
 npx convex deploy -y            # pushes functions, schema and the hourly cron
 npx convex run seed:seedDemo    # loads the sample workspace
+unset CONVEX_DEPLOY_KEY
 ```
 
 ### The VM's env file
@@ -67,18 +69,25 @@ cd ~/air-check
 docker compose --env-file ${HOME}/.aircheck/console.env -f deploy/compose.yaml up -d --build
 ```
 
+Every compose command needs `--env-file`, even `ps` and `logs`, because the compose file requires three values (the Convex URL, the Clerk publishable key and the app URL) and refuses to run without them. A shortcut for the rest of this page:
+
+```sh
+cd ~/air-check
+alias dc='docker compose --env-file ${HOME}/.aircheck/console.env -f deploy/compose.yaml'
+```
+
 Look at the state and the logs:
 
 ```sh
-docker compose -f deploy/compose.yaml ps          # console should say "healthy"
-docker compose -f deploy/compose.yaml logs -f console
-docker compose -f deploy/compose.yaml logs -f caddy
+dc ps                  # console should say "healthy"
+dc logs -f console
+dc logs -f caddy
 ```
 
 Restart without rebuilding:
 
 ```sh
-docker compose --env-file ${HOME}/.aircheck/console.env -f deploy/compose.yaml restart
+dc restart
 ```
 
 ### Getting new code onto the VM
@@ -94,6 +103,8 @@ Then run the start/update command above. If Convex functions changed, also run `
 
 ## Rolling back
 
+This needs the git clone from the section above. The current VM copy came from `git archive` and has no history, so there is nothing to check out until the clone is done.
+
 ```sh
 cd ~/air-check
 git log --oneline -10            # find the last good commit
@@ -107,14 +118,14 @@ When fixed, `git checkout main && git pull` to get back on the latest. A bad Con
 
 The demo stays open to judges until Dec 15. After that:
 
-1. Stop the VM from the Nebius console (or with the CLI). Stopping ends the compute charge. A reserved static IP may still be billed, so release it too if the site is going away for good.
+1. Stop the VM from the Nebius console (or with the CLI). I expect stopping to end the compute charge and a reserved static IP to keep billing, but neither is verified. Check the Nebius billing page, and release the IP too if the site is going away for good.
 2. To take the site down but keep the data, nothing else is needed. To remove it completely, delete the DNS records and the Clerk and Convex production projects.
 3. The hourly re-seed cron lives in Convex. If the Convex project stays up, remove its entry in `apps/console/convex/crons.ts` and run `npx convex deploy -y` to stop it.
 
 ## Evidence it works (checked 2026-10-26)
 
-- `http://` redirects to `https://` (308). `https://.../sign-in` returns 200 with the HSTS header (tells browsers to always use HTTPS).
-- `/demo` redirects (302) to a relative path, not to an internal address.
+- `http://` redirects to `https://` (308, a permanent redirect). `https://.../sign-in` returns 200 with the HSTS header (tells browsers to always use HTTPS).
+- `/demo` redirects (302, a temporary redirect) to a relative path, not to an internal address.
 - From outside, only ports 22, 80 and 443 are open. 3000, 8080, 8642, 18789 and 111 are closed.
 - The demo door's rate limit returns 429 after 10 tries, even with a forged `X-Forwarded-For` header, because the front door overwrites `X-Real-IP`.
 - In a real browser: `/demo` lands on `/today` as role demo, no development badge, approving shows "Approved · sample, not published" with a notice and a Trust row.
