@@ -145,7 +145,7 @@ export function createRunner(o: RunnerOptions): Runner {
           if (fin) return await finish(r.runId, synthetic(fin.event, info.output !== undefined ? { output: info.output } : {}), fin.status);
         }
         check = true; // any later pass follows a dropped stream
-        const result = await stream(sb, r.runId, hermesRunId, (seq) => { known = Math.max(known, seq); });
+        const result = await stream(sb, r.runId, hermesRunId, known, (seq) => { known = Math.max(known, seq); });
         if (result) return await finish(r.runId, undefined, result);
         attempt = 0;
       } catch (err) {
@@ -168,8 +168,10 @@ export function createRunner(o: RunnerOptions): Runner {
   }
 
   /** One pass over the events stream. Resolves with the terminal status, or undefined if the stream ended without one. */
-  async function stream(sb: Sandbox, runId: string, hermesRunId: string, sawSeq: (n: number) => void): Promise<Terminal | undefined> {
-    let seq = 0; // renumbered from 1 on every open; Convex skips seq <= lastSeq
+  async function stream(sb: Sandbox, runId: string, hermesRunId: string, fromSeq: number, sawSeq: (n: number) => void): Promise<Terminal | undefined> {
+    // R24: a reopened stream does not replay earlier events, so numbering continues after the last applied seq.
+    // Events emitted while disconnected are lost; the final result still arrives via GET or run.completed.
+    let seq = fromSeq;
     let buffer: RunEvent[] = [];
     let timer: NodeJS.Timeout | undefined;
     let chain: Promise<void> = Promise.resolve();

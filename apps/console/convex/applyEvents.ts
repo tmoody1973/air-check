@@ -5,7 +5,9 @@ import type { MutationCtx } from "./_generated/server";
 export interface IncomingEvent { event: string; data: Record<string, unknown>; t: number; seq?: number } // seq is required at the relay boundary; scripted events carry none
 
 /**
- * Applies events to a run in order and mirrors the reply onto the run's assistant message.
+ * Applies events to a run in order and mirrors the reply onto the run's assistant message. When the
+ * final output is longer than the streamed reply (deltas lost across a relay reconnect, R24), the
+ * message gets the output instead.
  * An event with `seq` at or below the run's lastSeq is a replay and is skipped (core's steps
  * are keyed by position, so the same batch twice would otherwise duplicate steps).
  */
@@ -21,10 +23,11 @@ export async function applyEvents(ctx: MutationCtx, run: Doc<"runs">, events: re
     state = applyRunEvent(state, e.event, e.data, at);
   }
   await ctx.db.patch(run._id, { state, updatedAt: at, ...(lastSeq !== undefined && { lastSeq }) });
-  if (state.reply !== undefined) {
+  const text = state.output && state.output.length > (state.reply?.length ?? 0) ? state.output : state.reply;
+  if (text !== undefined) {
     const msgs = await ctx.db.query("messages").withIndex("by_runId", (q) => q.eq("runId", run.runId)).collect();
     const assistant = msgs.find((m) => m.role === "assistant");
-    if (assistant && assistant.text !== state.reply) await ctx.db.patch(assistant._id, { text: state.reply });
+    if (assistant && assistant.text !== text) await ctx.db.patch(assistant._id, { text });
   }
   return state;
 }

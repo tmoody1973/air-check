@@ -135,11 +135,10 @@ describe("stopping", () => {
 });
 
 describe("dropped streams and restarts", () => {
-  test("a stream that drops mid-run is reconciled with GET and reopened, renumbering from 1", async () => {
-    real.events = (id, open, res) => {
-      sse(res, "tool.started", { tool: "t" });
-      sse(res, "tool.completed", { tool: "t" });
-      if (open === 1) return void res.end(); // dropped
+  test("a reopened stream continues numbering from lastSeq+1 (R24: Hermes does not replay), so no new event is skipped", async () => {
+    real.events = (_id, open, res) => {
+      if (open === 1) { sse(res, "tool.started", { tool: "a" }); sse(res, "tool.completed", { tool: "a" }); return void res.end(); } // dropped
+      sse(res, "tool.started", { tool: "b" }); // only events after the reconnect
       sse(res, "run.completed", { output: "done" });
       res.end();
     };
@@ -148,13 +147,14 @@ describe("dropped streams and restarts", () => {
     const id = convex.startedCalls[0]!.hermesRunId;
     expect(real.gets).toContain(id);
     expect(real.opens[id]).toBe(2);
-    expect(convex.seqs("r1")).toEqual([1, 2, 1, 2, 3]);
+    expect(convex.seqs("r1")).toEqual([1, 2, 3, 4]);
+    expect(convex.names("r1")).toEqual(["tool.started", "tool.completed", "tool.started", "run.completed"]);
   });
 
   test("a dropped stream whose run already finished gets one synthetic terminal event at lastSeq+1", async () => {
     real.events = (id, open, res) => {
-      sse(res, "message.delta", { delta: "a" }); sse(res, "message.delta", { delta: "b" });
-      if (open >= 2) real.info[id] = { status: "completed", output: "final" }; // finished while the relay was reconnecting
+      if (open === 1) { sse(res, "message.delta", { delta: "a" }); sse(res, "message.delta", { delta: "b" }); }
+      else real.info[id] = { status: "completed", output: "final" }; // finished while the relay was reconnecting; no replay (R24)
       res.end();
     };
     runner.onPending([row({ runId: "r1" })]);
@@ -179,7 +179,7 @@ describe("dropped streams and restarts", () => {
     runner.onPending([row({ runId: "r1", status: "running", hermesRunId: "h-live", lastSeq: 4 })]);
     await waitFor(() => convex.finishedCalls.length === 1);
     expect(real.opens["h-live"]).toBe(1);
-    expect(convex.seqs("r1")[0]).toBe(1);
+    expect(convex.seqs("r1")[0]).toBe(5); // continues after lastSeq 4
     expect(real.starts).toEqual([]);
   });
 
@@ -333,9 +333,8 @@ describe("permanent errors and lost runs (R26)", () => {
   test("relay.started throws after Hermes started the run -> the Hermes run is stopped", async () => {
     convex.started = async (runId, hermesRunId) => { convex.startedCalls.push({ runId, hermesRunId }); throw new ConvexError({ code: "UNAUTHORIZED" }); };
     runner.onPending([row({ runId: "r1" })]);
-    await waitFor(() => real.stops.length === 1, "stop");
+    await waitFor(() => logs.includes("run=r1 event=dropped n=1"), "dropped"); // logged after the stop is answered
     expect(real.stops).toEqual([convex.startedCalls[0]!.hermesRunId]);
-    expect(logs).toContain("run=r1 event=dropped n=1");
     expect(real.opens).toEqual({});
   });
 });

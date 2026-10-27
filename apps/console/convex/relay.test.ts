@@ -123,6 +123,22 @@ describe("relay.events", () => {
     expect((await t.withIdentity(human).query(api.chat.messages, { conversationId }))[1]!.text).toBe("xy");
   });
 
+  test("a chat run reconciled via the synthetic terminal event gets its message text from output", async () => {
+    const { t, runId, conversationId } = await started();
+    // Deltas sent while the relay was disconnected are lost (R24); only the start of the reply arrived.
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "Seun Kuti leads" }, 1)] });
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("run.completed", { output: "Seun Kuti leads Egypt 80, his father's band." }, 2)] });
+    await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
+    const msgs = await t.withIdentity(human).query(api.chat.messages, { conversationId });
+    expect(msgs[1]!.text).toBe("Seun Kuti leads Egypt 80, his father's band.");
+  });
+
+  test("a shorter output never replaces a longer streamed reply", async () => {
+    const { t, runId, conversationId } = await started();
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "A long streamed answer." }, 1), ev("run.completed", { output: "Short." }, 2)] });
+    expect((await t.withIdentity(human).query(api.chat.messages, { conversationId }))[1]!.text).toBe("A long streamed answer.");
+  });
+
   test("events for a finished run are ignored", async () => {
     const { t, runId } = await started();
     await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
