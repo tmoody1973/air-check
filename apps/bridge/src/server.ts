@@ -94,21 +94,28 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
   await transport.handleRequest(req, res, body);
 }
 
-/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit). */
+/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit),
+ * and /aircheck-demo/mcp (the same tool, demo workspace) when the demo token pair is configured. */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   const crate = createCrateProxy(config.crate);
-  const submit = packageSubmitTool({ siteUrl: config.convexSiteUrl, token: config.agentSubmitToken });
-  const routes: Record<string, Endpoint> = {
-    "/crate/mcp": { token: config.crateMcpToken, listTools: crate.listTools, callTool: crate.callTool },
-    "/aircheck/mcp": {
-      token: config.aircheckMcpToken,
+  const submitEndpoint = (token: string, submitToken: string): Endpoint => {
+    const submit = packageSubmitTool({ siteUrl: config.convexSiteUrl, token: submitToken });
+    return {
+      token,
       listTools: async () => [submit.tool],
       callTool: async (name, args) => {
         if (name !== submit.tool.name) throw new Error(`Tool ${name} is not available`);
         return submit.call(args);
       },
-    },
+    };
   };
+  const routes: Record<string, Endpoint> = {
+    "/crate/mcp": { token: config.crateMcpToken, listTools: crate.listTools, callTool: crate.callTool },
+    "/aircheck/mcp": submitEndpoint(config.aircheckMcpToken, config.agentSubmitToken),
+  };
+  // The judges' demo sandbox: its own MCP token, and a Convex token that lands in the demo workspace.
+  if (config.demoMcpToken && config.demoSubmitToken)
+    routes["/aircheck-demo/mcp"] = submitEndpoint(config.demoMcpToken, config.demoSubmitToken);
 
   const server = createServer({ cert: readFileSync(config.tlsCert), key: readFileSync(config.tlsKey) }, (req, res) => {
     handle(req, res, routes).catch((e: unknown) => {

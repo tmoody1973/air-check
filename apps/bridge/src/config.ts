@@ -10,6 +10,9 @@ export interface BridgeConfig {
   aircheckMcpToken: string;
   convexSiteUrl: string;
   agentSubmitToken: string;
+  /** Demo sandbox pair: both set or both absent. Absent means no /aircheck-demo/mcp route. */
+  demoMcpToken?: string;
+  demoSubmitToken?: string;
 }
 
 const MIN_TOKEN = 32;
@@ -37,10 +40,20 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
   const host = need("BRIDGE_HOST");
   // The bridge binds one specific address (10.104.0.41 on the VM), never every interface.
   if (WILDCARD_HOSTS.includes(host)) throw new Error("BRIDGE_HOST must be a specific address, not a wildcard");
-  const tokens = ["CRATE_MCP_TOKEN", "AIRCHECK_MCP_TOKEN", "AGENT_SUBMIT_TOKEN"].map(token);
-  if (new Set(tokens).size !== tokens.length)
-    throw new Error("CRATE_MCP_TOKEN, AIRCHECK_MCP_TOKEN and AGENT_SUBMIT_TOKEN must differ");
-  const [crateMcpToken, aircheckMcpToken, agentSubmitToken] = tokens as [string, string, string];
+  const demoNames = ["AIRCHECK_DEMO_MCP_TOKEN", "DEMO_AGENT_SUBMIT_TOKEN"] as const;
+  const demoSet = demoNames.filter((k) => env[k]?.trim());
+  if (demoSet.length === 1)
+    throw new Error(`${demoNames.join(" and ")} must be set together (only ${demoSet[0]} is set)`);
+  const names = ["CRATE_MCP_TOKEN", "AIRCHECK_MCP_TOKEN", "AGENT_SUBMIT_TOKEN", ...(demoSet.length ? demoNames : [])];
+  const tokens = names.map(token);
+  if (new Set(tokens).size !== tokens.length) throw new Error(`${names.join(", ")} must differ`);
+  const [crateMcpToken, aircheckMcpToken, agentSubmitToken, demoMcpToken, demoSubmitToken] = tokens as [
+    string,
+    string,
+    string,
+    string | undefined,
+    string | undefined,
+  ];
 
   return {
     host,
@@ -53,5 +66,7 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
     aircheckMcpToken,
     convexSiteUrl,
     agentSubmitToken,
+    demoMcpToken,
+    demoSubmitToken,
   };
 }
