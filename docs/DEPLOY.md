@@ -115,7 +115,7 @@ Both containers also keep at most three 10 MB log files each.
 
 ### After a reboot
 
-Both containers have `restart: unless-stopped`, and `docker` and `containerd` (the engine underneath Docker) are enabled at boot, so the site should come back by itself. A full VM reboot has not yet been tested with the stack running; that test is planned as the first task of Plan 4. Until then, after any reboot:
+Both containers have `restart: unless-stopped`, and `docker` and `containerd` (the engine underneath Docker) are enabled at boot, so the site comes back by itself. This was tested with a full VM reboot on 2026-10-27: the console answered 200 again, Hermes was healthy 55 seconds after boot, and the bridge and watchdog came up on their own (details in the Hermes section below). After any reboot, still check:
 
 ```sh
 dc ps     # console should say "healthy" and caddy should be "Up"
@@ -141,6 +141,126 @@ dc down
 2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above.
 3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
+
+## The Hermes sandbox
+
+Hermes is the AI agent that drafts show material. It runs inside a NemoClaw sandbox (a locked-down container) called `airc`. A program called the OpenShell gateway supervises the sandbox. Everything in this section runs on the VM.
+
+**What keeps it alive across a reboot**
+
+- **Linger is on.** The gateway is a systemd *user* service (systemd is Ubuntu's service manager), `nemoclaw-openshell-gateway.service`. Ubuntu only runs user services while someone is logged in over SSH, unless "linger" is on. It was off, so after a VM stop and start nothing launched the gateway and the sandbox went to phase `Error`. The fix, already applied: `sudo loginctl enable-linger user`. Do not undo it (`disable-linger` would bring the outage back).
+- **A boot unit.** `/etc/systemd/system/aircheck-hermes.service` (a copy lives in the repo at `deploy/hermes/aircheck-hermes.service`) runs `nemohermes airc start` at boot. Then it retries `nemohermes airc recover` every 15 seconds for up to 5 minutes. Both are needed: `start` does not bring back the forwarded port 8642 that the console talks to, and `recover` does, but only once the sandbox is up.
+- **A clean shutdown.** When the VM stops, the unit runs `openshell sandbox stop airc` before Docker and the gateway stop. Without it, Docker kills the container first, the gateway records an unexpected exit, and the sandbox lands in `Error` instead of `Stopped`.
+
+Check it:
+
+```sh
+nemohermes airc status                      # Phase should be Ready
+curl -s http://127.0.0.1:8642/health        # expect a 200 response
+systemctl status aircheck-hermes            # expect active (exited)
+```
+
+**If the sandbox is in `Error` anyway**
+
+`Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. The script is `~/.aircheck/reonboard.sh`. It loads `~/.airc/secrets.env`, uses the same settings as the original install, and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about 45 seconds.
+
+1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`.
+2. Run `~/.aircheck/reonboard.sh`.
+3. Register the two bridge tools again with the `mcp add` commands under "Registering the bridge with Hermes". Unverified: whether onboarding keeps the earlier registration. Re-running is safe either way.
+
+**Hermes loses its memory when this runs.** A copy of the Hermes home from before the outage is at `~/.aircheck/hermes-backup-2026-10-27/` on the VM. It holds keys tied to that machine, so never copy it off the VM.
+
+## The watchdog
+
+A timer checks every five minutes that Hermes and the bridge are answering, and texts Tarik on Telegram when one is not.
+
+- `/etc/systemd/system/aircheck-watchdog.timer` runs `~/.aircheck/watchdog.sh` (repo copy: `deploy/hermes/watchdog.sh`) 3 minutes after boot and then every 5 minutes.
+- It probes Hermes at `http://127.0.0.1:8642/health` and the bridge at `https://10.104.0.41:8443/healthz`.
+- When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing.
+- It remembers what it last reported in `~/.aircheck/watchdog.state`.
+- To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send.
+
+## The bridge
+
+The bridge is a small program that sits between Hermes and two things Hermes may not touch directly: the Crate research tools and the app's "submit a package" route. Hermes can only speak to remote tools over HTTPS with one bearer token (a secret string sent with each request), so the bridge provides exactly that. Decision 006 has the reasoning.
+
+**Why it is a host process, not a container.** The VM's firewall (ufw) protects ports on the host. Ports that Docker publishes skip ufw. Running the bridge under systemd on the host means one firewall rule decides who can reach it.
+
+- **Code:** `apps/bridge` in this repo, running from `~/aircheck-bridge` on the VM. The research tools come from `crate-cli`, cloned at `~/crate-cli` (commit `37f4ec2`, built with `npm ci && npm run build`). It has no LICENSE, so we call it and never copy it into this repo.
+- **Service:** `/etc/systemd/system/aircheck-bridge.service` (repo copy: `deploy/bridge/aircheck-bridge.service`). Logs: `journalctl -u aircheck-bridge`. It logs one line per call, such as `tool=<name> ok=<bool> ms=<n>`, and never the arguments.
+- **Settings:** `~/.aircheck/bridge.env` (mode 600). The variable names are in `deploy/bridge/bridge.env.example`.
+- **Address:** it listens only on the VM's private address `10.104.0.41`, port 8443. The endpoints are `/crate/mcp` (20 tools), `/aircheck/mcp` (one tool, `package_submit`) and `/healthz`.
+- **Which Crate tools Hermes gets:** MusicBrainz (6), Wikipedia (3), Bandcamp (7) and iTunes (4). `bandcamp_get_fan_collection` is blocked by name (Hard Rule 13). Crate ships with built-in keys, so Discogs, Last.fm and Ticketmaster would work too, but the bridge's allow-list hides them. Tarik chose keyless sources only for now. Widening is a one-line change to the allow-list.
+- **Links are limited.** Any `url` argument must be https on `bandcamp.com` or `*.bandcamp.com`. Crate makes those fetches from the host, outside the sandbox's network rules, so the bridge has to enforce this itself.
+
+**Firewall.** Only the sandbox network may reach the bridge:
+
+```sh
+sudo ufw allow from 172.18.0.0/16 to 10.104.0.41 port 8443 proto tcp
+```
+
+`172.18.0.0/16` is the `openshell-docker` network. The private address is translated (NAT) from the public IP, so this rule is the only thing keeping the bridge off the internet. Checked from the Mac: port 8443 times out, while port 443 connects as a control.
+
+### Registering the bridge with Hermes
+
+Load the two tokens from `bridge.env` into the shell first, then run:
+
+```sh
+set -a; . ~/.aircheck/bridge.env; set +a
+nemohermes airc mcp add crate --url https://10.104.0.41:8443/crate/mcp --env CRATE_MCP_TOKEN --trusted-private-host 10.104.0.41 --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection
+nemohermes airc mcp add aircheck --url https://10.104.0.41:8443/aircheck/mcp --env AIRCHECK_MCP_TOKEN --trusted-private-host 10.104.0.41
+```
+
+Check it:
+
+```sh
+nemohermes airc mcp status crate --json --tools     # expect ready, and trustedPrivateTarget.state "match"
+```
+
+Re-run both `mcp add` commands after any re-onboard (see the Hermes section for the unverified part).
+
+### Updating the bridge
+
+1. On the Mac, build a self-contained bundle: `pnpm --filter @aircheck/bridge deploy --prod --legacy <output folder>`.
+2. Pack it as a tarball with `COPYFILE_DISABLE=1 tar ...` (that variable stops macOS adding hidden metadata files) and copy it to the VM. `rsync` did not work.
+3. Unpack it over `~/aircheck-bridge` on the VM, then `sudo systemctl restart aircheck-bridge`.
+4. Check: `journalctl -u aircheck-bridge -n 20`, and the watchdog's `--dry-run`.
+
+Not written down because it was not recorded in the checks: the exact `tar` and `scp` arguments and the output folder name.
+
+### Where the agent's submit goes
+
+Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. The bridge currently points at the **dev** Convex deployment (`optimistic-lobster-654`), where the route is live. Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.
+
+## Certificates and renewal dates
+
+The bridge uses a private certificate authority (CA, the signer that vouches for a certificate) made for this project, because the bridge has no public hostname.
+
+| What | File | Made by | Expires | Renew |
+|---|---|---|---|---|
+| Private CA ("Air Check private CA", EC P-256) | `~/.aircheck/ca/ca.crt` and `ca.key` | `deploy/bridge/make-ca.sh` | 2031-10-26 | Needs a re-onboard of the sandbox |
+| Bridge leaf certificate (IP `10.104.0.41`) | `~/.aircheck/bridge/tls.crt` and `tls.key` | `deploy/bridge/make-leaf.sh 10.104.0.41` | **2027-10-27** | Re-run `make-leaf.sh 10.104.0.41`, then `sudo systemctl restart aircheck-bridge`. No sandbox rebuild, because the CA is the same |
+
+**Tarik: set a calendar reminder for early October 2027 to renew the leaf certificate.** If it lapses, Hermes cannot reach the bridge, and the watchdog will message you that the bridge is down.
+
+`ca.key` never leaves the VM. NemoClaw takes `ca.crt` on its own: it rejects a merged system bundle and adds the CA to its own list.
+
+## Pending after merge: point the bridge at prod
+
+Do these only after the `plan-4a/agent-side` PR is merged. Until then the bridge talks to dev on purpose.
+
+- [ ] Make a new random value for production, for example `openssl rand -hex 32`. Do not reuse the dev token.
+- [ ] From the Mac, with `CONVEX_DEPLOY_KEY` set as in "Convex production commands": `npx convex env set AGENT_SUBMIT_TOKEN <the new value>` in `apps/console`.
+- [ ] Deploy prod with the same section's `npx convex deploy -y`, so the `/agent/packages` route exists on `clever-deer-759`.
+- [ ] On the VM, edit `~/.aircheck/bridge.env`: put the same token value in, and set the Convex site address to `https://clever-deer-759.convex.site`. (The variable names are in `deploy/bridge/bridge.env.example`.)
+- [ ] `sudo systemctl restart aircheck-bridge`.
+- [ ] Check with `journalctl -u aircheck-bridge -n 20` and `~/.aircheck/watchdog.sh --dry-run`.
+- [ ] Unset `CONVEX_DEPLOY_KEY` on the Mac when done.
+
+## Evidence the agent side works (checked 2026-10-27)
+
+- **Final reboot test** (05:14:25Z): the console answered 200, the Hermes unit succeeded 55 seconds after boot, Hermes health was 200, the bridge was ok, both MCP servers were `ready` with `match`, the private address was unchanged, the shutdown log showed "Stopped sandbox airc", and the watchdog sent no alert. The first reboot exposed the `Error` problem and the second exposed the `recover` timing. Both are fixed.
+- **End to end:** Hermes run `run_71f865226db3481ab20181e0e475a685` called `mcp__crate__musicbrainz_search_artist` and then `mcp__aircheck__package_submit`. It finished in 18 seconds. Dev Convex got `pkg-10-9-26` in status `preparing_audio` with 31 tracks. See the V4 row in `docs/SPIKES.md`.
 
 ## Rolling back
 
@@ -175,6 +295,5 @@ The demo stays open to judges until Dec 15. After that:
 
 ## Known gaps
 
-- **Hermes (the AI agent that will draft show material) is currently down.** After the VM was stopped and started, the NemoClaw sandbox (the locked-down box Hermes runs in) stayed in an Error state, and `start` and `recover` cannot clear it (details in `docs/FRICTION_LOG.md`). The expected fix is a `rebuild` at the start of Plan 4. It needs Tarik's OK first, and Telegram (the chat app used for approval links) and Tavily (a web-search service) setup may need to be redone. The `~/.local` permission problem that blocked `start` was already fixed on the VM. The console does not depend on Hermes yet.
 - Google sign-in is not on in production (needs a Google OAuth client).
 - CI does not run the browser tests (decision 009), so run `pnpm --filter console e2e` before merging.
