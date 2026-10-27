@@ -12,6 +12,7 @@ export type Workspace = "demo" | "real";
 // The (console) layout reads the session on the server and supplies this; display only.
 const WorkspaceContext = createContext<Workspace>("real");
 export const WorkspaceProvider = WorkspaceContext.Provider;
+export const useWorkspace = () => useContext(WorkspaceContext);
 
 function Logo() {
   return (

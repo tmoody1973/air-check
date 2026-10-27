@@ -203,3 +203,10 @@ test("hour-1 length is stored with the MP3 and dropped when the audio is redone"
   const other = await gate.revise(rec.draft.id, goldenDraft({ audio: { hour1Id: "x", hour2Id } }));
   expect(other.draft.audio.hour1DurationSec).toBeUndefined();
 });
+
+test("flags and alternates are display-only: the fingerprint ignores them", async () => {
+  const base = goldenDraft();
+  const withMp3 = { ...base, audio: { ...base.audio, mp3Sha256: MP3 } };
+  expect(await fingerprint({ ...withMp3, flags: ["x"] })).toBe(await fingerprint(withMp3));
+  expect(await fingerprint({ ...withMp3, alternates: ["y"] })).toBe(await fingerprint(withMp3));
+});
