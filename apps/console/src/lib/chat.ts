@@ -28,6 +28,7 @@ const MESSAGES: Record<string, string> = {
   RATE_LIMITED: "Demo limit reached. Your message wasn't sent; try again in a few minutes.",
   INVALID_INPUT: "Messages can be up to 8,000 characters.",
   NOT_FOUND: "That conversation is gone.",
+  UNAUTHENTICATED: "Signing you in… try again in a moment.",
 };
 
 /** ConvexError carries `{ code }` in `.data`. Unknown codes (and `constructor`) get the generic line; detail goes to the console. */

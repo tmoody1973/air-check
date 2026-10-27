@@ -110,6 +110,27 @@ describe("RunProgressCard", () => {
       expect(screen.queryByText(/Request ID/)).not.toBeInTheDocument();
     });
 
+    it("Take over stays disabled with a hint until sign-in is ready", () => {
+      const fn = vi.fn();
+      render(<RunProgressCard {...base} authReady={false} status="running" state={liveState()} onTakeOver={fn} />);
+      expect(screen.getByRole("button", { name: "Take over" })).toBeDisabled();
+      expect(screen.getByText("Signing you in…")).toBeInTheDocument();
+    });
+
+    it("Take over is enabled once sign-in is ready", () => {
+      render(<RunProgressCard {...base} authReady status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByRole("button", { name: "Take over" })).toBeEnabled();
+      expect(screen.queryByText("Signing you in…")).not.toBeInTheDocument();
+    });
+
+    it("UNAUTHENTICATED shows the signing-in copy", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const fn = vi.fn(() => Promise.reject(Object.assign(new Error("x"), { data: { code: "UNAUTHENTICATED" } })));
+      render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={fn} />);
+      fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+      expect(await screen.findByText("Signing you in… try again in a moment.")).toBeInTheDocument();
+    });
+
     it("queued copy next to Take over", () => {
       render(<RunProgressCard {...base} status="queued" state={{ runId: "r", status: "running", steps: [] }} onTakeOver={() => {}} />);
       expect(screen.getByText("Waiting for the agent…")).toBeInTheDocument();

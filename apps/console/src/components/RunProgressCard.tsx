@@ -72,19 +72,19 @@ export function LiveTag() {
   );
 }
 
-const ERROR_COPY: Record<string, string> = { NOT_FOUND: "That run no longer exists." };
+const ERROR_COPY: Record<string, string> = { NOT_FOUND: "That run no longer exists.", UNAUTHENTICATED: "Signing you in… try again in a moment." };
 const GENERIC_ERROR = "Could not stop the run. Please try again.";
 
 // Server detail (request ids, stack text) goes to the console only, never to the page.
 function errorText(e: unknown): string {
   console.error("requestStop failed", e);
   const code = (e as { data?: { code?: string } })?.data?.code;
-  return (code && ERROR_COPY[code]) || GENERIC_ERROR;
+  return code && Object.hasOwn(ERROR_COPY, code) ? ERROR_COPY[code]! : GENERIC_ERROR;
 }
 
 /** `status` is the run row's status. The track line and percent bar appear only when there are upcoming rows. */
 export function RunProgressCard({
-  title, state, totals, upcoming = [], onTakeOver, status, source, runId, kind, packageId,
+  title, state, totals, upcoming = [], onTakeOver, status, source, runId, kind, packageId, authReady = true,
 }: {
   title: string;
   state: RunState;
@@ -96,6 +96,8 @@ export function RunProgressCard({
   runId?: string;
   kind?: "chat" | "draft-package";
   packageId?: string;
+  /** False until Convex has the Clerk token; taking over before then fails with UNAUTHENTICATED. */
+  authReady?: boolean;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,13 +153,13 @@ export function RunProgressCard({
         {canStop ? (
           <>
             <button
-              type="button" onClick={takeOver} disabled={stopping || pending}
+              type="button" onClick={takeOver} disabled={stopping || pending || !authReady}
               className="inline-flex min-h-11 items-center whitespace-nowrap rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold disabled:text-muted"
             >
               {stopping ? "Stopping at the next step…" : "Take over"}
             </button>
             <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
-              {status === "queued" ? "Waiting for the agent…" : kind === "draft-package" ? DRAFT_COPY : COPY}
+              {!authReady ? "Signing you in…" : status === "queued" ? "Waiting for the agent…" : kind === "draft-package" ? DRAFT_COPY : COPY}
             </span>
           </>
         ) : cancelled ? (

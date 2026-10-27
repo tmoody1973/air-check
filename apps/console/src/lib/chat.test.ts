@@ -31,10 +31,11 @@ describe("chatErrorText", () => {
     expect(chatErrorText(err("RATE_LIMITED"))).toBe("Demo limit reached. Your message wasn't sent; try again in a few minutes.");
     expect(chatErrorText(err("INVALID_INPUT"))).toBe("Messages can be up to 8,000 characters.");
     expect(chatErrorText(err("NOT_FOUND"))).toBe("That conversation is gone.");
+    expect(chatErrorText(err("UNAUTHENTICATED"))).toBe("Signing you in… try again in a moment.");
   });
   it("falls back for unknown codes, prototype keys and non-Convex errors", () => {
     const generic = "Couldn't send. Please try again.";
-    for (const code of ["UNAUTHENTICATED", "constructor", "toString", "__proto__"]) expect(chatErrorText(err(code))).toBe(generic);
+    for (const code of ["constructor", "toString", "__proto__"]) expect(chatErrorText(err(code))).toBe(generic);
     expect(chatErrorText(new Error("boom"))).toBe(generic);
     expect(chatErrorText(null)).toBe(generic);
   });

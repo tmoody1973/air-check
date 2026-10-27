@@ -105,7 +105,7 @@ describe("TracklistEditor", () => {
     const cases: [string, unknown, string][] = [
       ["RATE_LIMITED", new ConvexError({ code: "RATE_LIMITED" }), "Demo limit reached. Try again in a few minutes."],
       ["INVALID_INPUT", new ConvexError({ code: "INVALID_INPUT" }), "Check the date and the tracklist."],
-      ["UNAUTHENTICATED", new ConvexError({ code: "UNAUTHENTICATED" }), "Couldn't start the draft. Please try again."],
+      ["UNAUTHENTICATED", new ConvexError({ code: "UNAUTHENTICATED" }), "Signing you in… try again in a moment."],
       ["a generic Error", new Error("[CONVEX M(tracklist:draft)] Server Error boom"), "Couldn't start the draft. Please try again."],
       ["a prototype key", new ConvexError({ code: "constructor" }), "Couldn't start the draft. Please try again."],
     ];
@@ -122,5 +122,22 @@ describe("TracklistEditor", () => {
       expect(button()).toBeEnabled(); // can retry
       spy.mockRestore();
     });
+  });
+
+  it("keeps Draft package disabled with a hint until sign-in is ready", () => {
+    const { draft } = setup({ authReady: false });
+    type("Show date", "2026-10-02");
+    type("Tracklist", GOLDEN);
+    expect(button()).toBeDisabled();
+    expect(screen.getByText("Signing you in…")).toBeInTheDocument();
+    expect(draft).not.toHaveBeenCalled();
+  });
+
+  it("enables Draft package once sign-in is ready", () => {
+    setup({ authReady: true });
+    type("Show date", "2026-10-02");
+    type("Tracklist", GOLDEN);
+    expect(button()).toBeEnabled();
+    expect(screen.queryByText("Signing you in…")).not.toBeInTheDocument();
   });
 });

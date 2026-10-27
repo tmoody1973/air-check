@@ -20,13 +20,14 @@ const record = (): PackageRecord => ({
   },
 });
 
-function setup(o: { missing?: boolean; messages?: ChatMessage[] | undefined; runs?: Record<string, RunView | null | undefined>; pkgs?: Record<string, PackageRecord | null>; send?: (t: string) => Promise<unknown> } = {}) {
+function setup(o: { missing?: boolean; messages?: ChatMessage[] | undefined; runs?: Record<string, RunView | null | undefined>; pkgs?: Record<string, PackageRecord | null>; send?: (t: string) => Promise<unknown>; authReady?: boolean } = {}) {
   const send = vi.fn(o.send ?? (async () => ({})));
   const props = {
     messages: "messages" in o ? o.messages : [],
     send,
     useRun: (id: string) => o.runs?.[id],
     missing: o.missing,
+    authReady: o.authReady,
     usePackage: (id: string | undefined) => (id ? (o.pkgs?.[id] ?? null) : null),
   };
   const view = render(<ChatThread {...props} />);
@@ -94,6 +95,26 @@ describe("ChatThread sending", () => {
     type("go");
     enter();
     expect(send).toHaveBeenCalledWith("go");
+  });
+  it("keeps the box and Send disabled with a hint until sign-in is ready", () => {
+    const { send } = setup({ authReady: false });
+    expect(box()).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByText("Signing you in…")).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("enables the box and Send once sign-in is ready", () => {
+    setup({ authReady: true });
+    expect(box()).toBeEnabled();
+    type("hi");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    expect(screen.queryByText("Signing you in…")).not.toBeInTheDocument();
+  });
+  it("UNAUTHENTICATED shows the signing-in copy", async () => {
+    setup({ send: async () => { throw new ConvexError({ code: "UNAUTHENTICATED" }); } });
+    type("hello");
+    enter();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Signing you in… try again in a moment.");
   });
   it("on failure: plain message, pending message removed, text restored", async () => {
     setup({ send: async () => { throw new ConvexError({ code: "RATE_LIMITED" }); } });

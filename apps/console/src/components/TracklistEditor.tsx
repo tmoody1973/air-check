@@ -15,6 +15,7 @@ const GENERIC = "Couldn't start the draft. Please try again.";
 const MESSAGES: Record<string, string> = {
   RATE_LIMITED: "Demo limit reached. Try again in a few minutes.",
   INVALID_INPUT: "Check the date and the tracklist.",
+  UNAUTHENTICATED: "Signing you in… try again in a moment.",
 };
 const REASONS = {
   "no-separator": "Needs “Artist - Title”",
@@ -57,11 +58,14 @@ export function TracklistEditor({
   onDone,
   initial,
   loadFailed = false,
+  authReady = true,
 }: {
   draft: DraftFn;
   onDone: (runId: string) => void;
   initial?: DraftForm;
   loadFailed?: boolean;
+  /** False until Convex has the Clerk token; drafting before then fails with UNAUTHENTICATED. */
+  authReady?: boolean;
 }) {
   const [showDate, setShowDate] = useState(initial?.showDate ?? "");
   const [text, setText] = useState(initial?.tracklistText ?? "");
@@ -173,12 +177,13 @@ export function TracklistEditor({
           {error && <p role="alert" className="rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">{error}</p>}
           <button
             type="button"
-            disabled={!ready || busy}
+            disabled={!ready || busy || !authReady}
             onClick={submit}
             className="grid min-h-12 w-full place-items-center rounded-control border border-signal bg-signal px-5 text-[15px] font-semibold text-white disabled:opacity-60 sm:w-auto sm:self-start"
           >
             {busy ? "Drafting…" : "Draft package"}
           </button>
+          {!authReady && <p role="status" className="text-[12.5px] text-muted">Signing you in…</p>}
           {!ready && hint && <p className="text-[12.5px] text-muted">{hint}</p>}
         </div>
       </div>
