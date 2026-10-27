@@ -29,6 +29,19 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...env, [name]: "x".repeat(31) })).toThrow(name);
   });
 
+  it.each([
+    ["CRATE_MCP_TOKEN", "AIRCHECK_MCP_TOKEN"],
+    ["CRATE_MCP_TOKEN", "AGENT_SUBMIT_TOKEN"],
+    ["AIRCHECK_MCP_TOKEN", "AGENT_SUBMIT_TOKEN"],
+  ])("rejects %s equal to %s", (a, b) => {
+    const same = "z".repeat(40);
+    expect(() => loadConfig({ ...env, [a]: same, [b]: same })).toThrow(/must differ/);
+  });
+
+  it.each(["0.0.0.0", "::", "[::]", "  "])("rejects the wildcard host %j", (host) => {
+    expect(() => loadConfig({ ...env, BRIDGE_HOST: host })).toThrow("BRIDGE_HOST");
+  });
+
   it("rejects a bad port", () => {
     expect(() => loadConfig({ ...env, BRIDGE_PORT: "84x3" })).toThrow("BRIDGE_PORT");
   });

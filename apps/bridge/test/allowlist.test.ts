@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedCrateTool } from "../src/allowlist.js";
+import { checkCrateArgs, DENIED_CRATE_TOOLS, isAllowedCrateTool } from "../src/allowlist.js";
 
 describe("isAllowedCrateTool", () => {
   it.each(["musicbrainz_search_artist", "wikipedia_x", "bandcamp_x", "itunes_x"])("allows %s", (name) => {
@@ -23,5 +23,45 @@ describe("isAllowedCrateTool", () => {
     "",
   ])("refuses %s", (name) => {
     expect(isAllowedCrateTool(name)).toBe(false);
+  });
+});
+
+describe("DENIED_CRATE_TOOLS", () => {
+  it("hides bandcamp_get_fan_collection although its prefix is allowed (Hard Rule 13)", () => {
+    expect(DENIED_CRATE_TOOLS).toContain("bandcamp_get_fan_collection");
+    expect(isAllowedCrateTool("bandcamp_get_fan_collection")).toBe(false);
+    expect(isAllowedCrateTool("bandcamp_get_album")).toBe(true);
+  });
+});
+
+describe("checkCrateArgs", () => {
+  it.each([
+    { url: "https://artist.bandcamp.com/album/x" },
+    { url: "https://bandcamp.com/discover" },
+    { url: "https://Artist.Bandcamp.com:443/x" },
+    { artist: "Sault", category: "features" },
+    { q: "Sault", limit: 5, nested: { ok: true } },
+    {},
+    undefined,
+  ])("allows %j", (args) => {
+    expect(checkCrateArgs("bandcamp_get_album", args)).toBeNull();
+  });
+
+  it.each([
+    ["http scheme", { url: "http://artist.bandcamp.com" }],
+    ["lookalike host", { url: "https://bandcamp.com.evil.com" }],
+    ["host in the query only", { url: "https://evil.com/?x=bandcamp.com" }],
+    ["metadata address", { url: "https://169.254.169.254/latest/meta-data" }],
+    ["credentials", { url: "https://user:pw@artist.bandcamp.com" }],
+    ["explicit port", { url: "https://artist.bandcamp.com:8443" }],
+    ["unparseable url", { url: "artist.bandcamp.com/album/x" }],
+    ["non-string url", { url: 42 }],
+    ["url hidden in another field", { query: "Sault https://evil.com" }],
+    ["url nested in an array", { urls: ["https://evil.com"] }],
+    ["other scheme", { q: "file:///etc/passwd" }],
+  ])("refuses %s without echoing the URL", (_label, args) => {
+    const reason = checkCrateArgs("bandcamp_get_album", args);
+    expect(reason).toBeTypeOf("string");
+    expect(reason).not.toMatch(/evil|169\.254|8443|user:pw|passwd/);
   });
 });

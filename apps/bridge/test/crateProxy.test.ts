@@ -24,7 +24,7 @@ describe("createCrateProxy against a fake Crate", () => {
 
   it("lists only allowlisted tools", async () => {
     const names = (await proxy.listTools()).map((t) => t.name).sort();
-    expect(names).toEqual(["musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_get_artist_page", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
   });
 
   it("passes arguments through and hides parent secrets from the child", async () => {
@@ -38,10 +38,43 @@ describe("createCrateProxy against a fake Crate", () => {
     expect(existsSync(join(cwd, "telegraph-called"))).toBe(false);
   });
 
+  it("refuses the fan collection tool without reaching the child", async () => {
+    await expect(proxy.callTool("bandcamp_get_fan_collection", { username: "x" })).rejects.toThrow(/not available/);
+    expect(existsSync(join(cwd, "bandcamp_get_fan_collection-called"))).toBe(false);
+  });
+
+  it("refuses a non-Bandcamp URL without reaching the child", async () => {
+    const call = proxy.callTool("bandcamp_get_artist_page", { url: "https://169.254.169.254/latest/meta-data" });
+    await expect(call).rejects.toThrow(/refused/i);
+    await expect(call).rejects.not.toThrow(/169\.254/);
+    expect(existsSync(join(cwd, "bandcamp_get_artist_page-called"))).toBe(false);
+  });
+
+  it("forwards a Bandcamp URL", async () => {
+    const r = await proxy.callTool("bandcamp_get_artist_page", { url: "https://artist.bandcamp.com/album/x" });
+    expect(textOf(r)).toBe("fetched");
+  });
+
   it("times out a hung call with an MCP error", async () => {
     const start = Date.now();
     await expect(proxy.callTool("musicbrainz_sleep", {})).rejects.toThrow(/timed out/i);
     expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it("replaces a child after three timeouts in a row", async () => {
+    const before = JSON.parse(textOf(await proxy.callTool("musicbrainz_echo", {}))).pid;
+    for (let i = 0; i < 3; i++) await expect(proxy.callTool("musicbrainz_sleep", {})).rejects.toThrow(/timed out/i);
+    const after = JSON.parse(textOf(await proxy.callTool("musicbrainz_echo", {}))).pid;
+    expect(after).not.toBe(before);
+  });
+
+  it("keeps the child after fewer than three timeouts in a row", async () => {
+    const before = JSON.parse(textOf(await proxy.callTool("musicbrainz_echo", {}))).pid;
+    for (let i = 0; i < 2; i++) await expect(proxy.callTool("musicbrainz_sleep", {})).rejects.toThrow(/timed out/i);
+    await proxy.callTool("musicbrainz_echo", {}); // a success resets the count
+    await expect(proxy.callTool("musicbrainz_sleep", {})).rejects.toThrow(/timed out/i);
+    const after = JSON.parse(textOf(await proxy.callTool("musicbrainz_echo", {}))).pid;
+    expect(after).toBe(before);
   });
 
   it("respawns the child after it exits", async () => {

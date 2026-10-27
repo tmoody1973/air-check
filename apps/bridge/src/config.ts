@@ -13,6 +13,7 @@ export interface BridgeConfig {
 }
 
 const MIN_TOKEN = 32;
+const WILDCARD_HOSTS = ["0.0.0.0", "::", "[::]"];
 
 /** Reads the bridge's environment. Errors name the variable, never its value. */
 export function loadConfig(env: Record<string, string | undefined>): BridgeConfig {
@@ -33,16 +34,24 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
   if (!URL.canParse(convexSiteUrl) || new URL(convexSiteUrl).protocol !== "https:")
     throw new Error("CONVEX_SITE_URL must be an https URL");
 
+  const host = need("BRIDGE_HOST");
+  // The bridge binds one specific address (10.104.0.41 on the VM), never every interface.
+  if (WILDCARD_HOSTS.includes(host)) throw new Error("BRIDGE_HOST must be a specific address, not a wildcard");
+  const tokens = ["CRATE_MCP_TOKEN", "AIRCHECK_MCP_TOKEN", "AGENT_SUBMIT_TOKEN"].map(token);
+  if (new Set(tokens).size !== tokens.length)
+    throw new Error("CRATE_MCP_TOKEN, AIRCHECK_MCP_TOKEN and AGENT_SUBMIT_TOKEN must differ");
+  const [crateMcpToken, aircheckMcpToken, agentSubmitToken] = tokens as [string, string, string];
+
   return {
-    host: need("BRIDGE_HOST"),
+    host,
     port,
     tlsCert: need("TLS_CERT"),
     tlsKey: need("TLS_KEY"),
     // Crate runs on the same Node as the bridge, so systemd's PATH does not matter.
     crate: { command: process.execPath, args: ["dist/mcp-server.js"], cwd: need("CRATE_DIR"), timeoutMs: 30_000 },
-    crateMcpToken: token("CRATE_MCP_TOKEN"),
-    aircheckMcpToken: token("AIRCHECK_MCP_TOKEN"),
+    crateMcpToken,
+    aircheckMcpToken,
     convexSiteUrl,
-    agentSubmitToken: token("AGENT_SUBMIT_TOKEN"),
+    agentSubmitToken,
   };
 }

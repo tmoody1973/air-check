@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { request, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -98,7 +98,7 @@ describe("bridge HTTPS server", () => {
     const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/list") });
     expect(r.status).toBe(200);
     const names = JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual(["musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_get_artist_page", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
   });
 
   it("/crate/mcp forwards an allowed call and refuses a hidden one", async () => {
@@ -114,6 +114,17 @@ describe("bridge HTTPS server", () => {
       body: rpc("tools/call", { name: "telegraph_post", arguments: {} }),
     });
     expect(JSON.parse(no.body).error.message).toMatch(/not available/);
+    expect(existsSync(join(dir, "telegraph-called"))).toBe(false);
+  });
+
+  it("offers tools only: prompts/list is method-not-found", async () => {
+    const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("prompts/list") });
+    expect(JSON.parse(r.body).error.code).toBe(-32601);
+  });
+
+  it("refuses a JSON-RPC batch with 400", async () => {
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: [rpc("tools/list")] });
+    expect(r.status).toBe(400);
   });
 
   it("/aircheck/mcp lists package_submit only", async () => {

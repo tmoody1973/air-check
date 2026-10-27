@@ -60,11 +60,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY) throw new HttpError(413);
     chunks.push(chunk);
   }
+  let body: unknown;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     throw new HttpError(400);
   }
+  if (Array.isArray(body)) throw new HttpError(400); // one JSON-RPC message per request, no batches
+  return body;
 }
 
 function reply(res: ServerResponse, status: number, body = "", headers: Record<string, string> = {}) {

@@ -5,7 +5,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const schema = { type: "object", properties: { q: { type: "string" } } };
-const tools = ["musicbrainz_echo", "telegraph_post", "musicbrainz_sleep", "musicbrainz_exit"].map((name) => ({
+const tools = [
+  "musicbrainz_echo",
+  "telegraph_post",
+  "musicbrainz_sleep",
+  "musicbrainz_exit",
+  "bandcamp_get_artist_page",
+  "bandcamp_get_fan_collection",
+].map((name) => ({
   name,
   description: `fake ${name}`,
   inputSchema: schema,
@@ -22,6 +29,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "telegraph_post":
       writeFileSync("telegraph-called", "yes"); // relative to the cwd the proxy gives the child
       return text("posted");
+    case "bandcamp_get_artist_page":
+    case "bandcamp_get_fan_collection":
+      writeFileSync(`${name}-called`, "yes");
+      return text("fetched");
     case "musicbrainz_sleep":
       await new Promise((r) => setTimeout(r, 10_000));
       return text("slept");
