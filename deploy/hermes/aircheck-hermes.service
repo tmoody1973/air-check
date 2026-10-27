@@ -28,7 +28,7 @@ ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemoherm
 # records an unexpected exit and the sandbox lands in phase Error, which
 # neither `start` nor `rebuild` can leave (docs/FRICTION_LOG.md, 2026-10-27).
 ExecStop=/home/user/.local/bin/openshell sandbox stop airc
-TimeoutStartSec=600
+TimeoutStartSec=900
 TimeoutStopSec=120
 
 [Install]
