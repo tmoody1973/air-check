@@ -3,19 +3,11 @@ import { describe, expect, it } from "vitest";
 import { type AgentPackageInput, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
-import { sha256Hex } from "../src/relay/sha256";
 
 const lines = readFileSync(new URL("./fixtures/openshell-log-lines.txt", import.meta.url), "utf8").trim().split("\n");
 const net = lines.filter((l) => l.includes("NET:OPEN"));
 const L = (host: string, ts: string, verb = "DENIED") =>
   `[${ts}] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] ${verb} /usr/bin/python3.13(226) -> ${host}:443 [policy:- engine:opa]`;
-
-describe("sha256Hex", () => {
-  it("matches known vectors", () => {
-    expect(sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    expect(sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-  });
-});
 
 describe("parseAuditLine", () => {
   it("parses every NET:OPEN fixture line", () => {
@@ -29,7 +21,7 @@ describe("parseAuditLine", () => {
     const p = parseAuditLine(net.find((l) => l.includes("openrouter.ai"))!)!;
     expect(p).toMatchObject({ decision: "blocked", host: "openrouter.ai", port: 443, binary: "/usr/bin/python3.13", at: 1793105781224 });
     expect(p.reason).toContain("is not allowed by any policy");
-    expect(p.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(p.key).toBe("blocked|openrouter.ai:443|" + Math.floor(1793105781.224 / 60));
   });
   it("handles an allowed IP host", () => {
     const p = parseAuditLine(net.find((l) => l.includes("10.104.0.41:8443"))!)!;

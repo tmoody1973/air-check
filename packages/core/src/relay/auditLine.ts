@@ -1,5 +1,3 @@
-import { sha256Hex } from "./sha256";
-
 export interface AuditEvent {
   /** Dedupe key: decision|host:port|time bucket (minute if blocked, hour if allowed). */
   key: string;
@@ -24,7 +22,7 @@ export function parseAuditLine(line: string): AuditEvent | null {
   const port = Number(m[5]);
   const bucket = Math.floor(ts / (decision === "blocked" ? 60 : 3600));
   return {
-    key: sha256Hex(`${decision}|${host}:${port}|${bucket}`),
+    key: `${decision}|${host}:${port}|${bucket}`,
     at: Math.round(ts * 1000),
     decision,
     host,
