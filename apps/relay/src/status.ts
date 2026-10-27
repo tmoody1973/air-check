@@ -30,7 +30,12 @@ export function pollStatus(o: StatusOptions): { stop(): void; ready: Promise<voi
       o.log(`status sandbox=${s.name} ok=false`);
     }
   };
-  const all = () => Promise.all(o.sandboxes.map(once)).then(() => undefined);
+  let inFlight = false; // a slow nemohermes must not stack polls
+  const all = async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try { await Promise.all(o.sandboxes.map(once)); } finally { inFlight = false; }
+  };
   const ready = all();
   const timer = setInterval(() => void all(), o.everyMs ?? 5 * 60_000);
   return { stop: () => clearInterval(timer), ready };

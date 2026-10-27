@@ -64,4 +64,18 @@ describe("pollStatus", () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(convex.statusCalls.length).toBe(n);
   });
+
+  test("never starts a poll while the previous one is still running", async () => {
+    let started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const convex = new FakeConvex();
+    const p = pollStatus({ sandboxes: [{ name: "airc", workspace: "real" }], bin: "b", convex, log: () => {}, everyMs: 5, exec: async (_b, a) => { if (a[1] === "status") { started++; await gate; return STATUS; } return POLICY; } });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(started).toBe(1);
+    release();
+    await p.ready;
+    p.stop();
+    expect(convex.statusCalls).toHaveLength(1);
+  });
 });
