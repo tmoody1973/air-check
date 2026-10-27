@@ -24,7 +24,7 @@ describe("createCrateProxy against a fake Crate", () => {
 
   it("lists only allowlisted tools", async () => {
     const names = (await proxy.listTools()).map((t) => t.name).sort();
-    expect(names).toEqual(["bandcamp_get_artist_page", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
   });
 
   it("passes arguments through and hides parent secrets from the child", async () => {
@@ -43,15 +43,22 @@ describe("createCrateProxy against a fake Crate", () => {
     expect(existsSync(join(cwd, "bandcamp_get_fan_collection-called"))).toBe(false);
   });
 
-  it("refuses a non-Bandcamp URL without reaching the child", async () => {
-    const call = proxy.callTool("bandcamp_get_artist_page", { url: "https://169.254.169.254/latest/meta-data" });
-    await expect(call).rejects.toThrow(/refused/i);
-    await expect(call).rejects.not.toThrow(/169\.254/);
+  it("refuses the URL-taking page tools without reaching the child (Hard Rule 5)", async () => {
+    await expect(proxy.callTool("bandcamp_get_artist_page", { url: "https://artist.bandcamp.com" })).rejects.toThrow(
+      /not available/,
+    );
     expect(existsSync(join(cwd, "bandcamp_get_artist_page-called"))).toBe(false);
   });
 
-  it("forwards a Bandcamp URL", async () => {
-    const r = await proxy.callTool("bandcamp_get_artist_page", { url: "https://artist.bandcamp.com/album/x" });
+  it("URL guard (defence in depth) refuses a non-Bandcamp URL on an allowed tool without reaching the child", async () => {
+    const call = proxy.callTool("bandcamp_search_bandcamp", { url: "https://169.254.169.254/latest/meta-data" });
+    await expect(call).rejects.toThrow(/refused/i);
+    await expect(call).rejects.not.toThrow(/169\.254/);
+    expect(existsSync(join(cwd, "bandcamp_search_bandcamp-called"))).toBe(false);
+  });
+
+  it("forwards a Bandcamp URL on an allowed tool", async () => {
+    const r = await proxy.callTool("bandcamp_search_bandcamp", { url: "https://artist.bandcamp.com/album/x" });
     expect(textOf(r)).toBe("fetched");
   });
 

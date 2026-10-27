@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { request, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -17,8 +18,19 @@ const fakeCrate = fileURLToPath(new URL("./fixtures/fake-crate.mjs", import.meta
 
 let server: Server;
 let port: number;
+let convexStub: HttpServer;
+const convexHits: { auth?: string; body: string }[] = [];
 
 beforeAll(async () => {
+  convexStub = createHttpServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      convexHits.push({ auth: req.headers.authorization, body });
+      res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub" }));
+    });
+  });
+  await new Promise<void>((r) => convexStub.listen(0, "127.0.0.1", r));
   execFileSync("openssl", [
     "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
     "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
@@ -32,12 +44,15 @@ beforeAll(async () => {
     crate: { command: process.execPath, args: [fakeCrate], cwd: dir, timeoutMs: 2000 },
     crateMcpToken: crateToken,
     aircheckMcpToken: aircheckToken,
-    convexSiteUrl: "https://127.0.0.1:1", // unreachable: these tests never submit
+    convexSiteUrl: `http://127.0.0.1:${(convexStub.address() as AddressInfo).port}`, // local stub
     agentSubmitToken: "s".repeat(40),
   });
   port = (server.address() as AddressInfo).port;
 });
-afterAll(() => new Promise<void>((r) => server.close(() => r())));
+afterAll(async () => {
+  await new Promise<void>((r) => server.close(() => r()));
+  await new Promise<void>((r) => convexStub.close(() => r()));
+});
 
 function send(path: string, opts: { method?: string; token?: string; body?: unknown } = {}) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
@@ -98,7 +113,7 @@ describe("bridge HTTPS server", () => {
     const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/list") });
     expect(r.status).toBe(200);
     const names = JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual(["bandcamp_get_artist_page", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
   });
 
   it("/crate/mcp forwards an allowed call and refuses a hidden one", async () => {
@@ -130,5 +145,30 @@ describe("bridge HTTPS server", () => {
   it("/aircheck/mcp lists package_submit only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
     expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit"]);
+  });
+
+  it("/aircheck/mcp refuses an unknown tool name", async () => {
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_approve", arguments: {} }),
+    });
+    expect(JSON.parse(r.body).error.message).toMatch(/not available/);
+  });
+
+  it("/aircheck/mcp package_submit reaches the Convex stub and returns the success text", async () => {
+    convexHits.length = 0;
+    const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2", extra: "dropped" };
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_submit", arguments: args }),
+    });
+    const out = JSON.parse(r.body).result;
+    expect(out.isError).toBe(false);
+    expect(out.content[0].text).toMatch(/^Submitted pkg-stub/);
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
+    expect(JSON.parse(convexHits[0]!.body)).not.toHaveProperty("extra");
   });
 });

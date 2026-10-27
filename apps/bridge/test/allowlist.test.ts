@@ -30,7 +30,20 @@ describe("DENIED_CRATE_TOOLS", () => {
   it("hides bandcamp_get_fan_collection although its prefix is allowed (Hard Rule 13)", () => {
     expect(DENIED_CRATE_TOOLS).toContain("bandcamp_get_fan_collection");
     expect(isAllowedCrateTool("bandcamp_get_fan_collection")).toBe(false);
-    expect(isAllowedCrateTool("bandcamp_get_album")).toBe(true);
+  });
+
+  it.each([
+    "bandcamp_get_artist_page",
+    "bandcamp_get_album",
+    "bandcamp_get_artist_tracks",
+    "bandcamp_get_bandcamp_editorial",
+  ])("hides %s: enrich by artist and title, never by URL (Hard Rule 5)", (name) => {
+    expect(DENIED_CRATE_TOOLS).toContain(name);
+    expect(isAllowedCrateTool(name)).toBe(false);
+  });
+
+  it.each(["bandcamp_search_bandcamp", "bandcamp_discover_music", "bandcamp_get_tag_info"])("keeps %s", (name) => {
+    expect(isAllowedCrateTool(name)).toBe(true);
   });
 });
 
@@ -44,7 +57,7 @@ describe("checkCrateArgs", () => {
     {},
     undefined,
   ])("allows %j", (args) => {
-    expect(checkCrateArgs("bandcamp_get_album", args)).toBeNull();
+    expect(checkCrateArgs("bandcamp_search_bandcamp", args)).toBeNull();
   });
 
   it.each([
@@ -60,7 +73,7 @@ describe("checkCrateArgs", () => {
     ["url nested in an array", { urls: ["https://evil.com"] }],
     ["other scheme", { q: "file:///etc/passwd" }],
   ])("refuses %s without echoing the URL", (_label, args) => {
-    const reason = checkCrateArgs("bandcamp_get_album", args);
+    const reason = checkCrateArgs("bandcamp_search_bandcamp", args);
     expect(reason).toBeTypeOf("string");
     expect(reason).not.toMatch(/evil|169\.254|8443|user:pw|passwd/);
   });

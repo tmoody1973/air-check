@@ -2,9 +2,18 @@
 // publishing (Hard Rule 7), is hidden from tools/list and refused on tools/call.
 const ALLOWED_PREFIXES = ["musicbrainz_", "wikipedia_", "bandcamp_", "itunes_"] as const;
 
-// Exact names refused even though their prefix is allowed. Hard Rule 13: the Bandcamp collection is
-// read only by the ingest worker.
-export const DENIED_CRATE_TOOLS: readonly string[] = ["bandcamp_get_fan_collection"];
+// Exact names refused even though their prefix is allowed.
+// - bandcamp_get_fan_collection: Hard Rule 13, the collection is read only by the ingest worker.
+// - the four URL-taking Bandcamp page tools: Hard Rule 5, enrich by artist and title, never by following
+//   URLs. The URL guard below stays as defence in depth. Relaxing this needs an exception recorded in
+//   decision 006, ARCHITECTURE 3.7 and Hard Rule 5.
+export const DENIED_CRATE_TOOLS: readonly string[] = [
+  "bandcamp_get_fan_collection",
+  "bandcamp_get_artist_page",
+  "bandcamp_get_album",
+  "bandcamp_get_artist_tracks",
+  "bandcamp_get_bandcamp_editorial",
+];
 
 export function isAllowedCrateTool(name: string): boolean {
   if (DENIED_CRATE_TOOLS.includes(name)) return false;

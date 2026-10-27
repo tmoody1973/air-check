@@ -11,6 +11,7 @@ const tools = [
   "musicbrainz_sleep",
   "musicbrainz_exit",
   "bandcamp_get_artist_page",
+  "bandcamp_search_bandcamp",
   "bandcamp_get_fan_collection",
 ].map((name) => ({
   name,
@@ -30,6 +31,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       writeFileSync("telegraph-called", "yes"); // relative to the cwd the proxy gives the child
       return text("posted");
     case "bandcamp_get_artist_page":
+    case "bandcamp_search_bandcamp":
     case "bandcamp_get_fan_collection":
       writeFileSync(`${name}-called`, "yes");
       return text("fetched");

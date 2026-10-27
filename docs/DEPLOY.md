@@ -141,6 +141,14 @@ dc down
 2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above.
 3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
+5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:
+   - Linger on: `sudo loginctl enable-linger user`. The VM user must be uid 1001 (the units hard-code `user@1001` and `/run/user/1001`).
+   - The three units: `aircheck-hermes.service`, `aircheck-bridge.service` and `aircheck-watchdog.service` plus its `.timer` (copies in `deploy/`).
+   - The private CA and leaf certificate: `deploy/bridge/make-ca.sh`, then `make-leaf.sh <private ip>`.
+   - `crate-cli` cloned to `~/crate-cli` at commit `37f4ec2`, built with `npm ci && npm run build`.
+   - `~/.aircheck/bridge.env` (mode 600) from `deploy/bridge/bridge.env.example`.
+   - The ufw rule that lets only the sandbox network reach port 8443.
+   - Both `nemohermes airc mcp add` commands (crate and aircheck).
 
 ## The Hermes sandbox
 
@@ -159,6 +167,8 @@ nemohermes airc status                      # Phase should be Ready
 curl -s http://127.0.0.1:8642/health        # expect a 200 response
 systemctl status aircheck-hermes            # expect active (exited)
 ```
+
+`active (exited)` does not mean Hermes is healthy: the unit stays active even if `recover` gave up after 5 minutes (that is deliberate, so a failed unit cannot skip the clean shutdown). The real check is `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8642/health`.
 
 **If the sandbox is in `Error` anyway**
 
@@ -189,9 +199,9 @@ The bridge is a small program that sits between Hermes and two things Hermes may
 - **Code:** `apps/bridge` in this repo, running from `~/aircheck-bridge` on the VM. The research tools come from `crate-cli`, cloned at `~/crate-cli` (commit `37f4ec2`, built with `npm ci && npm run build`). It has no LICENSE, so we call it and never copy it into this repo.
 - **Service:** `/etc/systemd/system/aircheck-bridge.service` (repo copy: `deploy/bridge/aircheck-bridge.service`). Logs: `journalctl -u aircheck-bridge`. It logs one line per call, such as `tool=<name> ok=<bool> ms=<n>`, and never the arguments.
 - **Settings:** `~/.aircheck/bridge.env` (mode 600). The variable names are in `deploy/bridge/bridge.env.example`.
-- **Address:** it listens only on the VM's private address `10.104.0.41`, port 8443. The endpoints are `/crate/mcp` (20 tools), `/aircheck/mcp` (one tool, `package_submit`) and `/healthz`.
-- **Which Crate tools Hermes gets:** MusicBrainz (6), Wikipedia (3), Bandcamp (7) and iTunes (4). `bandcamp_get_fan_collection` is blocked by name (Hard Rule 13). Crate ships with built-in keys, so Discogs, Last.fm and Ticketmaster would work too, but the bridge's allow-list hides them. Tarik chose keyless sources only for now. Widening is a one-line change to the allow-list.
-- **Links are limited.** Any `url` argument must be https on `bandcamp.com` or `*.bandcamp.com`. Crate makes those fetches from the host, outside the sandbox's network rules, so the bridge has to enforce this itself.
+- **Address:** it listens only on the VM's private address `10.104.0.41`, port 8443. The endpoints are `/crate/mcp` (16 tools), `/aircheck/mcp` (one tool, `package_submit`) and `/healthz`.
+- **Which Crate tools Hermes gets:** MusicBrainz (6), Wikipedia (3), Bandcamp (3: `search_bandcamp`, `discover_music`, `get_tag_info`) and iTunes (4). `bandcamp_get_fan_collection` is blocked by name (Hard Rule 13). The four Bandcamp tools that take a page URL (`bandcamp_get_artist_page`, `bandcamp_get_album`, `bandcamp_get_artist_tracks`, `bandcamp_get_bandcamp_editorial`) are blocked too (Hard Rule 5: enrich by artist and title, never by following URLs). Relaxing this needs Tarik to record an exception in decision 006, ARCHITECTURE 3.7 and Hard Rule 5. Crate ships with built-in keys, so Discogs, Last.fm and Ticketmaster would work too, but the bridge's allow-list hides them. Tarik chose keyless sources only for now. Widening is a one-line change to the allow-list.
+- **Links are limited (defence in depth).** Any `url` argument must be https on `bandcamp.com` or `*.bandcamp.com`. Crate makes those fetches from the host, outside the sandbox's network rules, so the bridge has to enforce this itself.
 
 **Firewall.** Only the sandbox network may reach the bridge:
 
@@ -201,14 +211,36 @@ sudo ufw allow from 172.18.0.0/16 to 10.104.0.41 port 8443 proto tcp
 
 `172.18.0.0/16` is the `openshell-docker` network. The private address is translated (NAT) from the public IP, so this rule is the only thing keeping the bridge off the internet. Checked from the Mac: port 8443 times out, while port 443 connects as a control.
 
+### If the private address changes
+
+It has not changed across three reboots, but if it ever does (say `<new ip>`):
+
+1. Make a new leaf certificate: `deploy/bridge/make-leaf.sh <new ip>`.
+2. Edit `BRIDGE_HOST` in `~/.aircheck/bridge.env`.
+3. Edit the probe IP in `~/.aircheck/watchdog.sh`.
+4. Replace the ufw rule: delete the old `sudo ufw allow from 172.18.0.0/16 to 10.104.0.41 port 8443 proto tcp` and add it with the new address.
+5. `sudo systemctl restart aircheck-bridge`.
+6. `nemohermes airc mcp remove crate` and `mcp remove aircheck`, then both `mcp add` commands below with the new URL and `--trusted-private-host <new ip>`.
+
+### After a Node upgrade (nvm)
+
+Both units (`aircheck-bridge.service` and `aircheck-hermes.service`) hard-code `/home/user/.nvm/versions/node/v22.23.4`. After an nvm Node upgrade, edit both units to the new folder, then `sudo systemctl daemon-reload` and restart both.
+
 ### Registering the bridge with Hermes
 
-Load the two tokens from `bridge.env` into the shell first, then run:
+Export only the two tokens from `bridge.env` (not the whole file), then run:
 
 ```sh
-set -a; . ~/.aircheck/bridge.env; set +a
-nemohermes airc mcp add crate --url https://10.104.0.41:8443/crate/mcp --env CRATE_MCP_TOKEN --trusted-private-host 10.104.0.41 --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection
+export CRATE_MCP_TOKEN="$(grep ^CRATE_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
+export AIRCHECK_MCP_TOKEN="$(grep ^AIRCHECK_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
+nemohermes airc mcp add crate --url https://10.104.0.41:8443/crate/mcp --env CRATE_MCP_TOKEN --trusted-private-host 10.104.0.41 --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection --deny-tool bandcamp_get_artist_page --deny-tool bandcamp_get_album --deny-tool bandcamp_get_artist_tracks --deny-tool bandcamp_get_bandcamp_editorial
 nemohermes airc mcp add aircheck --url https://10.104.0.41:8443/aircheck/mcp --env AIRCHECK_MCP_TOKEN --trusted-private-host 10.104.0.41
+```
+
+For a registration that already exists, update the deny list in place (the bridge hides these tools anyway; this is the second lock):
+
+```sh
+nemohermes airc mcp update crate --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection --deny-tool bandcamp_get_artist_page --deny-tool bandcamp_get_album --deny-tool bandcamp_get_artist_tracks --deny-tool bandcamp_get_bandcamp_editorial
 ```
 
 Check it:
@@ -221,12 +253,13 @@ Re-run both `mcp add` commands after any re-onboard (see the Hermes section for 
 
 ### Updating the bridge
 
-1. On the Mac, build a self-contained bundle: `pnpm --filter @aircheck/bridge deploy --prod --legacy <output folder>`.
-2. Pack it as a tarball with `COPYFILE_DISABLE=1 tar ...` (that variable stops macOS adding hidden metadata files) and copy it to the VM. `rsync` did not work.
-3. Unpack it over `~/aircheck-bridge` on the VM, then `sudo systemctl restart aircheck-bridge`.
-4. Check: `journalctl -u aircheck-bridge -n 20`, and the watchdog's `--dry-run`.
+1. On the Mac: `pnpm --filter @aircheck/bridge build && pnpm --filter @aircheck/bridge deploy --prod --legacy <dir>` (a self-contained bundle in `<dir>`).
+2. Pack it: `COPYFILE_DISABLE=1 tar -C <dir> --exclude ./test --exclude ./src -czf bridge.tgz .` (the variable stops macOS adding hidden metadata files).
+3. Copy it: `scp bridge.tgz user@<the VM's static IP>:/tmp/`
+4. On the VM: `tar -xzf /tmp/bridge.tgz -C ~/aircheck-bridge && rm /tmp/bridge.tgz`. Tar warnings about `LIBARCHIVE.xattr` headers are harmless.
+5. `sudo systemctl restart aircheck-bridge`, then check `curl -s --cacert ~/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz` (expect `ok`), `journalctl -u aircheck-bridge -n 20`, and the watchdog's `--dry-run`.
 
-Not written down because it was not recorded in the checks: the exact `tar` and `scp` arguments and the output folder name.
+`rsync` with a `user@host:path` target did not work in practice; use `scp`.
 
 ### Where the agent's submit goes
 
@@ -249,8 +282,9 @@ The bridge uses a private certificate authority (CA, the signer that vouches for
 
 Do these only after the `plan-4a/agent-side` PR is merged. Until then the bridge talks to dev on purpose.
 
-- [ ] Make a new random value for production, for example `openssl rand -hex 32`. Do not reuse the dev token.
+- [ ] Make a new random value for production, for example `openssl rand -hex 24`. Do not reuse the dev token.
 - [ ] From the Mac, with `CONVEX_DEPLOY_KEY` set as in "Convex production commands": `npx convex env set AGENT_SUBMIT_TOKEN <the new value>` in `apps/console`.
+- [ ] `npx convex env set AIRCHECK_PRIVATE_TERMS '<comma-separated list>'` on prod, with the private words that must never appear in a public description. Or leave it empty on purpose: empty means the private-term check in public descriptions does nothing.
 - [ ] Deploy prod with the same section's `npx convex deploy -y`, so the `/agent/packages` route exists on `clever-deer-759`.
 - [ ] On the VM, edit `~/.aircheck/bridge.env`: put the same token value in, and set the Convex site address to `https://clever-deer-759.convex.site`. (The variable names are in `deploy/bridge/bridge.env.example`.)
 - [ ] `sudo systemctl restart aircheck-bridge`.

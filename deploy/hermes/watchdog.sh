@@ -29,8 +29,19 @@ before="$(cat "${STATE}" 2>/dev/null || echo ok)"
 
 [[ "${now}" == "${before}" ]] && exit 0
 
+# Split "down:A,B" into lists to tell a partial recovery from a new outage.
+IFS=',' read -ra was <<< "${before#down:}"
+recovered=()
+if [[ "${before}" != "ok" ]]; then
+  for n in "${was[@]}"; do
+    [[ ",${now#down:}," == *",${n},"* ]] || recovered+=("${n}")
+  done
+fi
+
 if [[ "${now}" == "ok" ]]; then
   msg="Air Check: everything is back up at $(date +%H:%M) (was ${before#down:} down)."
+elif (( ${#recovered[@]} > 0 )); then
+  msg="Air Check: $(IFS=,; echo "${recovered[*]}") recovered at $(date +%H:%M); ${now#down:} still down."
 else
   msg="Air Check: ${now#down:} is down since $(date +%H:%M). Console unaffected."
 fi
@@ -40,11 +51,14 @@ if (( DRY_RUN )); then
   exit 0
 fi
 
-# shellcheck disable=SC1090
-set -a; . "${SECRETS}"; set +a
+# Read only the two values needed (not the whole secrets file).
+TELEGRAM_BOT_TOKEN="$(grep '^TELEGRAM_BOT_TOKEN=' "${SECRETS}" | cut -d= -f2-)"
+TELEGRAM_ALLOWED_IDS="$(grep '^TELEGRAM_ALLOWED_IDS=' "${SECRETS}" | cut -d= -f2-)"
 chat="${TELEGRAM_ALLOWED_IDS%%,*}"
-if curl -sf -m 10 -o /dev/null "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-     --data-urlencode "chat_id=${chat}" --data-urlencode "text=${msg}"; then
+# The URL (which holds the bot token) goes in via stdin config so it never shows in `ps`.
+if printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "${TELEGRAM_BOT_TOKEN}" |
+     curl -sf -m 10 -o /dev/null -K - \
+       --data-urlencode "chat_id=${chat}" --data-urlencode "text=${msg}"; then
   echo "${now}" > "${STATE}"
 else
   # Leave the state unchanged so the next tick retries the message.
