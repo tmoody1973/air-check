@@ -66,6 +66,35 @@ describe("PackageDecision", () => {
     expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
     expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("aria-disabled", "true");
     await act(async () => resolve({ ok: true }));
+    // still locked after success until the record shows the decided status
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
+  });
+
+  it("preparing_audio disables Approve and Skip and says why", () => {
+    setup(record({ status: "preparing_audio", fingerprint: undefined }));
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
+    expect(screen.getByText("The audio is still being prepared.")).toBeInTheDocument();
+  });
+
+  it("pins the reviewed package; a live change needs Reload and sends the pinned fingerprint", async () => {
+    const decide = vi.fn<DecideFn>(async () => ({ ok: true }));
+    const a = record({ fingerprint: "fpA" }, { title: "Title A" });
+    const b = record({ fingerprint: "fpB" }, { title: "Title B" });
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} onReload={() => {}} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(a));
+    rerender(ui(b));
+    expect(screen.getByText("This package changed. Open the latest version.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Title A" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(screen.getByRole("heading", { name: "Title B" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(decide).toHaveBeenCalledWith("approve", "fpB");
   });
 
   it("stale approve shows reload message", async () => {

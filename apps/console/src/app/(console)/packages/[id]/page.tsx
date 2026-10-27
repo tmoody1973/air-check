@@ -12,9 +12,9 @@ export default function PackagePage() {
   const record = useQuery(api.packages.get, { packageId: id });
   const decideMutation = useMutation(api.packages.decide);
 
-  // The fingerprint sent is the one on screen; a stale page gets PACKAGE_CHANGED from the gate.
-  const decide: DecideFn = async (decision) => {
-    const res = await decideMutation({ packageId: id, fingerprint: record?.fingerprint ?? "", decision });
+  // The fingerprint is the one the host reviewed (pinned in PackageDecision), not the live one.
+  const decide: DecideFn = async (decision, fingerprint) => {
+    const res = await decideMutation({ packageId: id, fingerprint, decision });
     return res.ok ? { ok: true } : res;
   };
 

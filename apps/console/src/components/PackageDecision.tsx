@@ -10,7 +10,7 @@ import { Pill, type PillTone } from "./Pill";
 import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
-export type DecideFn = (decision: "approve" | "skip") => Promise<DecideResult>;
+export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -37,10 +37,10 @@ function statusPill(rec: PackageRecord): { tone: PillTone; label: string } {
 const codePoints = (s: string) => [...s].length;
 
 export function PackageDecision({
-  record,
+  record: live,
   workspace,
   decide,
-  onReload = () => window.location.reload(),
+  onReload,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
@@ -50,6 +50,12 @@ export function PackageDecision({
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
   const [open, setOpen] = useState(false);
+  // Pin what the host reviews: the first record seen stays on screen until they choose to reload.
+  const [snap, setSnap] = useState<PackageRecord | null>(live);
+  const [decided, setDecided] = useState(false);
+  if (!snap && live) setSnap(live);
+  const record = (decided ? live : snap) ?? snap ?? live;
+  const changed = !decided && !!snap && !!live && (live.fingerprint !== snap.fingerprint || live.status !== snap.status);
 
   if (!record)
     return <p className="rounded-card border border-line bg-surface p-5 text-ink-soft">Package not found</p>;
@@ -59,16 +65,23 @@ export function PackageDecision({
   const flags = draft.flags ?? [];
   const closing = draft.tracks.filter((t) => t.closing).length;
   const deciding = record.status === "awaiting_review" || record.status === "preparing_audio";
-  const canApprove = record.status === "awaiting_review" && !!record.fingerprint;
-  const busy = pending !== null;
+  const ready = record.status === "awaiting_review" && !!record.fingerprint;
+  const canApprove = ready && !changed;
+  const busy = pending !== null || decided;
+  const reload = () => {
+    setSnap(live);
+    setNotice(null);
+    onReload?.();
+  };
 
   async function run(decision: "approve" | "skip") {
-    if (!record?.fingerprint) return;
+    if (!record?.fingerprint || changed) return;
     setPending(decision);
     setNotice(null);
     try {
-      const res = await decide(decision);
-      if (!res.ok)
+      const res = await decide(decision, record.fingerprint);
+      if (res.ok) setDecided(true);
+      else
         setNotice({
           code: res.code,
           text: res.code === "NOT_READY" ? "The audio is still being prepared." : res.message,
@@ -165,11 +178,14 @@ export function PackageDecision({
               ? "Demo workspace · Sample data. Publishing to Mixcloud is switched off."
               : "This will be public on Mixcloud"}
           </p>
-          {notice && (
+          {!ready && record.status === "preparing_audio" && (
+            <p className="text-[12.5px] text-muted">The audio is still being prepared.</p>
+          )}
+          {(changed || notice) && (
             <div role="alert" className="flex flex-wrap items-center gap-3 rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">
-              <span className="min-w-0 flex-1">{notice.text}</span>
-              {notice.code === "PACKAGE_CHANGED" && (
-                <button type="button" onClick={onReload} className="min-h-11 rounded-control border border-problem-text px-4 font-medium">Reload</button>
+              <span className="min-w-0 flex-1">{changed ? "This package changed. Open the latest version." : notice?.text}</span>
+              {(changed || notice?.code === "PACKAGE_CHANGED") && (
+                <button type="button" onClick={reload} className="min-h-11 rounded-control border border-problem-text px-4 font-medium">Reload</button>
               )}
             </div>
           )}
@@ -184,7 +200,7 @@ export function PackageDecision({
             >
               Edit
             </Link>
-            <button type="button" disabled={busy} onClick={() => run("skip")} className={`${BTN} border-line-strong bg-surface text-ink`}>
+            <button type="button" disabled={busy || changed || !record.fingerprint} onClick={() => run("skip")} className={`${BTN} border-line-strong bg-surface text-ink`}>
               {pending === "skip" ? "Skipping…" : "Skip"}
             </button>
           </div>
