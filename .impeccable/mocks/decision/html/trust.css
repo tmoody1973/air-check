@@ -1,0 +1,25 @@
+@import url("mock.css");
+body { width: 1280px; min-height: 800px; }
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 800px; }
+.side { background: var(--sidebar); border-right: 1px solid var(--line); padding: 20px 14px; }
+.side .brand { padding: 0 8px 18px; }
+.nav a { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: 10px; color: var(--ink); text-decoration: none; font-size: 14.5px; }
+.nav a i { width: 7px; height: 7px; border-radius: 2px; background: var(--line-strong); }
+.nav a.on { background: var(--surface); font-weight: 600; border: 1px solid var(--line); }
+.nav a.on i { background: var(--signal); }
+.content { padding: 0; }
+.head { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 32px; border-bottom: 1px solid var(--line); }
+.head h1 { font-size: 30px; }
+.headpills { display: flex; gap: 8px; }
+.body { padding: 24px 32px; }
+.sample { font: 400 10.5px/1 var(--mono); letter-spacing: .1em; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; font: 400 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+tr.blocked td { background: #fbefec; }
+.res { display: inline-block; padding: 2px 9px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+.res.ok { background: var(--signal-soft); color: var(--signal-deep); }
+.res.no { background: var(--problem-bg); color: var(--problem-text); }
+.res.wait { background: var(--caution-bg); color: var(--caution-text); }
+.why { color: var(--muted); font-size: 12.5px; }

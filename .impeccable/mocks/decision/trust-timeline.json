@@ -1,0 +1,15 @@
+{
+  "surface": "Trust page (desktop first)",
+  "source": "HTML mock rendered with headless Chrome at 1280x800 @1.5x",
+  "html": "html/trust-timeline.html",
+  "approved": true,
+  "approvedBy": "Tarik",
+  "approvedAt": "2026-10-26",
+  "seed": "21307efd",
+  "dealt": [
+    "rules-and-log",
+    "one-timeline",
+    "incident-report"
+  ],
+  "note": "Risk named on card: blocked rows less prominent when skimming; consider defaulting the filter to Blocked in the demo workspace (Claude suggestion, not decided)."
+}

@@ -1,0 +1,44 @@
+{
+  "title": "Package page on your phone: pick a layout",
+  "question": "You open a package from the Telegram link. Flags come first, then Approve. Which layout should the package page use? (Colors and fonts stay Air Check's; only the arrangement differs.)",
+  "options": [
+    {
+      "id": "checklist",
+      "label": "Checklist, then approve",
+      "kicker": "THE ROLL",
+      "lineage": "a producer's pre-flight checklist",
+      "thesis": "Every review flag is a line you acknowledge; Approve unlocks only when nothing is left unread.",
+      "palette": ["#F5F3EE", "#FFFFFF", "#1C1B18", "#0E6A5B", "#F6E7C8"],
+      "materials": ["warm paper", "white cards with 1px rules", "one green signal"],
+      "viewport": "Phone. Header strip with show date and status. 'For your review: 2 flags' list with a tick circle per flag. Collapsed rows for Title, Description, Tracklist (31). Player bar with Jump to hour 2. Sticky bottom: 'This will be public on Mixcloud' and a green Approve that is disabled until both flags are ticked, with Edit and Skip beside it.",
+      "risk": "Ticking can feel like busywork when flags are trivial.",
+      "comp": ".impeccable/mocks/decision/checklist.webp"
+    },
+    {
+      "id": "what-changed",
+      "label": "What Air Check changed",
+      "lineage": "an editor's marked-up proof",
+      "thesis": "Show the agent's work as before-and-after pairs, so trust comes from seeing each change and its reason.",
+      "palette": ["#F5F3EE", "#FFFFFF", "#1C1B18", "#0E6A5B", "#F4D9D5"],
+      "materials": ["warm paper", "struck-through 'from' text", "mono source labels"],
+      "viewport": "Phone. 'What changed' section first: Drive 'Ly Qua Dub' → Paper 'Lý Qua Dub', 'Left out of description: pre-air verify list (unverified)', 'Left out: one personal detail (handle with care)'. Each row has a source label (Drive / Paper / Notes). Then the public title and description, tracklist, player bar, sticky Approve / Edit / Skip with the public warning.",
+      "risk": "Longer page; the decision sits further down.",
+      "comp": ".impeccable/mocks/decision/what-changed.webp"
+    },
+    {
+      "id": "one-screen",
+      "label": "One-screen decision",
+      "lineage": "a boarding pass",
+      "thesis": "Everything needed to decide fits one phone screen; details are one tap away.",
+      "palette": ["#F5F3EE", "#FFFFFF", "#1C1B18", "#0E6A5B"],
+      "materials": ["single white card on paper", "large serif title", "big touch targets"],
+      "viewport": "Phone. One card: serif title, tags row, '31 tracks · 2 closing · 5 tags', the two flags as short lines, 'See everything' link, player bar, then three large stacked buttons: Approve (green), Edit, Skip, with 'This will be public on Mixcloud' above them.",
+      "risk": "Hides the tracklist and description behind a tap.",
+      "comp": ".impeccable/mocks/decision/one-screen.webp"
+    }
+  ],
+  "reroll": { "registers": [] },
+  "steer": true,
+  "canon": false,
+  "buildPath": { "value": "comp", "toggle": true }
+}

@@ -1,0 +1,79 @@
+{
+  "title": "Trust page: pick a layout",
+  "question": "Built for judges first: they should 'get' the locked room in seconds. Which layout should the Trust page use? (Colors and fonts stay Air Check's; data shown is labeled Sample, taken from today's real sandbox tests.)",
+  "options": [
+    {
+      "id": "rules-and-log",
+      "label": "The rules, then the log",
+      "kicker": "THE ROLL",
+      "lineage": "a building's posted access policy beside its door log",
+      "thesis": "Show the allow-list in plain words next to everything the agent tried, so the locked room explains itself.",
+      "palette": [
+        "#F5F3EE",
+        "#FFFFFF",
+        "#1C1B18",
+        "#0E6A5B",
+        "#F4D9D5"
+      ],
+      "materials": [
+        "warm paper",
+        "white cards",
+        "red-tinted blocked rows"
+      ],
+      "viewport": "Desktop. A 'Waiting for you' bar on top. Left: 'What the agent is allowed to reach' with 4 destinations and why each exists, plus 'the agent holds no Box, Drive, Dropbox or Mixcloud keys'. Right: 'What it tried to reach', blocked first.",
+      "risk": "Two panels compete; the log gets narrow columns.",
+      "comp": ".impeccable/mocks/decision/trust-rules.webp"
+    },
+    {
+      "id": "one-timeline",
+      "label": "One timeline",
+      "lineage": "a flight recorder's event log",
+      "thesis": "One honest stream of everything: what waits for you, what the agent did, where it reached, with filters.",
+      "palette": [
+        "#F5F3EE",
+        "#FFFFFF",
+        "#1C1B18",
+        "#0E6A5B",
+        "#F4D9D5"
+      ],
+      "materials": [
+        "filter chips",
+        "single wide table",
+        "mono times and hosts"
+      ],
+      "viewport": "Desktop. Filter chips (All \u00b7 Waiting \u00b7 Agent actions \u00b7 Network \u00b7 Blocked) over one wide table mixing actions and network requests in time order, blocked rows tinted red.",
+      "risk": "Blocked events don't stand out as much for a judge skimming the video.",
+      "comp": ".impeccable/mocks/decision/trust-timeline.webp"
+    },
+    {
+      "id": "incident-report",
+      "label": "Incident reports",
+      "lineage": "a security incident report",
+      "thesis": "Each blocked attempt gets its own plain-language report card; routine traffic sits quietly below.",
+      "palette": [
+        "#F5F3EE",
+        "#FFFFFF",
+        "#1C1B18",
+        "#7A2019",
+        "#F4D9D5"
+      ],
+      "materials": [
+        "serif report headlines",
+        "fact grid",
+        "plain-English consequence line"
+      ],
+      "viewport": "Desktop. Two report cards side by side: 'The agent tried to open example.com' and 'Hermes tried to contact its maker', each with program, destination, rule, outcome and one plain sentence. Below: 'Everything else it reached today'.",
+      "risk": "On a quiet day with no blocks, the top of the page is empty.",
+      "comp": ".impeccable/mocks/decision/trust-incident.webp"
+    }
+  ],
+  "reroll": {
+    "registers": []
+  },
+  "steer": true,
+  "canon": false,
+  "buildPath": {
+    "value": "comp",
+    "toggle": true
+  }
+}

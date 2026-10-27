@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="trust.css"><style>
+.chat{max-width:760px;margin:0 auto;padding:28px 0}
+.you{margin-left:auto;width:fit-content;max-width:520px;background:var(--ink);color:#f5f3ee;padding:10px 16px;border-radius:14px;font-size:14.5px}
+.say{margin:18px 0 10px;color:var(--ink-soft);font-size:14.5px}
+.gen{padding:0}
+.gh{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px}
+.gh h2{font:400 22px/1.2 var(--serif)}
+.prog{height:4px;margin:0 20px;background:var(--surface-quiet);border-radius:2px;position:relative}
+.prog i{position:absolute;inset:0 59% 0 0;background:var(--signal);border-radius:2px}
+.now{display:flex;justify-content:space-between;padding:10px 20px 6px;font-size:13px;color:var(--muted)}
+.step{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:start;padding:11px 20px;border-top:1px solid var(--line);font-size:14px}
+.step .n{font:400 12px/20px var(--mono);color:var(--muted)}
+.src{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.s{font:400 11px/1 var(--mono);color:var(--ink-soft);border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:var(--surface)}
+.s.v{background:var(--caution-bg);border-color:transparent;color:var(--caution-text)}
+.st{font-size:12.5px;white-space:nowrap}
+.done{color:var(--signal-deep)} .live{color:var(--ink);font-weight:600} .q{color:var(--muted)}
+.step.cur{background:#fbfaf6}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--signal);margin-right:6px;vertical-align:1px}
+.skip{color:var(--muted)}
+.actions{display:flex;gap:8px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)}
+.btn.sm{height:40px;padding:0 16px;font-size:14px;white-space:nowrap;flex:none}
+.foot{padding:10px 20px 14px;font:400 11px/1.4 var(--mono);color:var(--muted);border-top:1px solid var(--line)}
+</style></head><body><div class="shell">
+<aside class="side"><div class="brand"><svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 7v4M6 4v10M10 1v16M14 5v8M18 3v12"/></svg>Air Check</div><nav class="nav"><a><i></i>Today</a><a class="on"><i></i>Chat</a><a><i></i>Plan</a><a><i></i>Tracklist</a><a><i></i>Episodes</a><a><i></i>Release radar</a><a><i></i>Trust</a><a><i></i>Skills and memory</a></nav></aside>
+<section class="content"><div class="head"><h1>Show notes, 10.2.26</h1><div class="headpills"><span class="pill"><span class="dot"></span>Sandbox on</span><span class="pill">4 destinations allowed</span></div></div>
+<div class="chat">
+<div class="you">Write show notes for the 10-2-26 final tracklist.</div>
+<p class="say">Working through hour 1 now. Every fact gets a source; anything thin is marked [verify]. Closing tracks are skipped.</p>
+<section class="card gen">
+ <div class="gh"><h2>Writing show notes · Hour 1</h2><span class="sample">SAMPLE</span></div>
+ <div class="prog"><i></i></div>
+ <div class="now"><span>6 of 14 tracks · 1 closing track skipped</span><span>about 3 min left</span></div>
+ <div class="step"><span class="n">H1.4</span><div>Resavoir – “4th Cloud” feat. Gregory Uhlmann<div class="src"><span class="s">musicbrainz.org</span><span class="s">bandcamp.com</span><span class="s">tavily · 2 sources</span></div></div><span class="st done">Done</span></div>
+ <div class="step"><span class="n">H1.5</span><div>Michael Kiwanuka – “Summer Clothes”<div class="src"><span class="s">musicbrainz.org</span><span class="s">discogs.com</span><span class="s v">[verify] release date: sources disagree</span></div></div><span class="st done">Done</span></div>
+ <div class="step cur"><span class="n">H1.6</span><div>The Midnight Hour – “Water’s Edge”<div class="src"><span class="s">checking label on Discogs…</span></div></div><span class="st live"><span class="pulse"></span>Working</span></div>
+ <div class="step"><span class="n">H1.7</span><div class="q">Elliott Skinner – “Don’t Be A Runner”</div><span class="st q">Next</span></div>
+ <div class="step"><span class="n">H1.15</span><div class="skip">Channell &amp; 2bfrank – “Just Move” · closing track, no notes</div><span class="st q">Skipped</span></div>
+ <div class="actions"><div class="btn sm">Take over</div><span class="small muted">Stops after this track and opens the draft for you to edit. The agent won't overwrite anything you change.</span></div>
+ <div class="foot">Live from the agent's run · steps stream in as they happen</div>
+</section>
+</div></section></div></body></html>
