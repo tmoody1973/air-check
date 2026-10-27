@@ -74,6 +74,7 @@ export class FakeConvex implements RelayConvex {
   eventCalls: { runId: string; events: { event: string; data: Record<string, unknown>; t: number; seq: number }[] }[] = [];
   finishedCalls: { runId: string; status: string }[] = [];
   activityCalls: { workspace: string; events: unknown[] }[] = [];
+  statusCalls: { workspace: string; phase: string | null; allowedHosts: number }[] = [];
   startedResult = true;
   onFinished: (runId: string) => void = () => {};
   subscribePending() { return () => {}; }
@@ -81,6 +82,7 @@ export class FakeConvex implements RelayConvex {
   async events(runId: string, events: FakeConvex["eventCalls"][number]["events"]) { this.eventCalls.push({ runId, events }); }
   async finished(runId: string, status: "completed" | "cancelled" | "failed") { this.finishedCalls.push({ runId, status }); this.onFinished(runId); }
   async activity(workspace: "real" | "demo", events: unknown[]) { this.activityCalls.push({ workspace, events }); }
+  async status(workspace: "real" | "demo", phase: string | null, allowedHosts: number) { this.statusCalls.push({ workspace, phase, allowedHosts }); }
   seqs(runId: string) { return this.eventCalls.filter((c) => c.runId === runId).flatMap((c) => c.events.map((e) => e.seq)); }
   names(runId: string) { return this.eventCalls.filter((c) => c.runId === runId).flatMap((c) => c.events.map((e) => e.event)); }
 }

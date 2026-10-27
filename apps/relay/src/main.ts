@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { connectConvex } from "./convex.js";
 import { HermesClient } from "./hermes.js";
 import { createRunner } from "./runner.js";
+import { pollStatus } from "./status.js";
 
 // Hard Rule 8: journald (stdout) only. Lines carry ids and counts, never input, replies, tool arguments or tokens.
 const log = (line: string) => console.log(line);
@@ -28,8 +29,9 @@ function main(): void {
   });
   const unsubscribe = convex.subscribePending(runner.onPending, () => log("pending subscription_error"));
   const followers = config.sandboxes.map((s) => followAudit({ name: s.name, workspace: s.workspace, bin: config.nemohermesBin, convex, spawn: spawnLogs, log }));
+  const status = pollStatus({ sandboxes: config.sandboxes, bin: config.nemohermesBin, convex, log });
   log(`relay started sandboxes=${config.sandboxes.map((s) => s.name).join(",") || "none"}`);
-  const shutdown = () => { unsubscribe(); runner.stop(); followers.forEach((f) => f.stop()); void convex.close().finally(() => process.exit(0)); };
+  const shutdown = () => { unsubscribe(); runner.stop(); followers.forEach((f) => f.stop()); status.stop(); void convex.close().finally(() => process.exit(0)); };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
 }

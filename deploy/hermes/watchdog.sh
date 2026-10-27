@@ -17,6 +17,7 @@ DRY_RUN=0
 PROBES=(
   "Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8642/health"
   "Crate bridge|curl -sf -m 5 -o /dev/null --cacert ${HOME}/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz"
+  "Relay|systemctl is-active --quiet aircheck-relay"
 )
 
 down=()
