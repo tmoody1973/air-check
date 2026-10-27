@@ -1,0 +1,24 @@
+# Starts the Hermes sandbox at boot. The OpenShell gateway it needs is a
+# systemd *user* service, which only runs at boot because linger is enabled
+# (`sudo loginctl enable-linger user`, see docs/DEPLOY.md).
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable aircheck-hermes
+[Unit]
+Description=Air Check: start the Hermes sandbox (NemoClaw)
+After=docker.service network-online.target user@1001.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=user
+Environment=PATH=/home/user/.local/bin:/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+# `start` brings the sandbox to Ready but (OpenShell 0.0.116) does not restore the
+# host port forward for :8642, so `recover` runs next; it is a no-op when healthy.
+ExecStart=-/home/user/.local/bin/nemohermes airc start
+ExecStart=/home/user/.local/bin/nemohermes airc recover
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

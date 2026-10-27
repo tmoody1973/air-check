@@ -1,0 +1,8 @@
+[Unit]
+Description=Air Check: watchdog probe (Telegram alert on change)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=user
+ExecStart=/home/user/.aircheck/watchdog.sh
