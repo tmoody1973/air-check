@@ -11,3 +11,13 @@ A running retro. Each entry answers three questions: what did we expect, what ha
 **What do we now believe?** "Restarts itself" has to be tested with a real reboot, not assumed from the parts. It took two failed reboots to find both problems. Anything we run beside a vendor's tool also needs its own alarm, because the vendor's tool did not tell us it was down. Unverified: whether re-onboarding keeps the registered bridge tools, so the runbook says to re-register them.
 
 In my words: 
+
+## 2026-10-27: The test that wrote to production
+
+**What did we expect?** That a test of the new console-to-Hermes path on the dev database would stay on dev. The relay was pointed at dev, so we assumed everything it touched was dev too.
+
+**What happened?** The agent-side bridge had already been switched to prod that morning. When the test draft run called `package_submit`, the call went to prod. One call succeeded and very likely created a test package, `pkg-10-16-26`, on prod. It is stuck in "preparing audio", so it cannot be approved or published. Tarik is checking it and will delete it in the Convex dashboard. The same tests also showed something good: without clear rules, the first draft run called `package_submit` 15 times and our own checks rejected every one. With the rules written into the instruction (exact first line, 4 to 6 leads, title template, character budget, at most 5 tags, stop after two rejections) it succeeded.
+
+**What do we now believe?** Before testing any end-to-end path, list every hop and confirm each one points at the same deployment. A test is only as contained as its least-contained step. Whether the package was fully removed is not verified yet.
+
+In my words:
