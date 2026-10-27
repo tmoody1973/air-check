@@ -7,12 +7,13 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       args:
-        NEXT_PUBLIC_CONVEX_URL: ${NEXT_PUBLIC_CONVEX_URL}
-        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_CONVEX_URL: ${NEXT_PUBLIC_CONVEX_URL:?set in ~/.aircheck/console.env}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set in ~/.aircheck/console.env}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set in ~/.aircheck/console.env}
     image: aircheck-console:local
     env_file: ${HOME}/.aircheck/console.env
     # No `ports`: Docker publishes bypass ufw. Only caddy is reachable from outside.
+    init: true
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -24,7 +25,7 @@ services:
     pids_limit: 256
     healthcheck:
       # node:24-slim has no curl.
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/sign-in').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/sign-in').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

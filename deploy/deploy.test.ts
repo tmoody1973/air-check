@@ -69,4 +69,32 @@ describe("deploy files", () => {
       "CLERK_SECRET_KEY", "AIRCHECK_DEMO_USER_ID", "NEXT_TELEMETRY_DISABLED", "CLERK_TELEMETRY_DISABLED",
     ]);
   });
+
+  it("build args fail loudly when unset", () => {
+    for (const k of ["NEXT_PUBLIC_CONVEX_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_APP_URL"]) {
+      expect(web.build.args[k]).toMatch(new RegExp(`^\\$\\{${k}:\\?.+\\}$`));
+    }
+  });
+
+  it("console has init and a 127.0.0.1 healthcheck", () => {
+    expect(web.init).toBe(true);
+    expect(web.healthcheck.test.join(" ")).toContain("http://127.0.0.1:3000/sign-in");
+  });
+
+  it("no secret can enter the image", () => {
+    const ignore = readFileSync(resolve(__dirname, "../.dockerignore"), "utf8").split("\n");
+    expect(ignore).toContain(".env*");
+    expect(ignore).toContain("**/.env*");
+    const d = read("Dockerfile");
+    expect(d).not.toContain("CLERK_SECRET_KEY");
+    const args = d.split("\n").filter((l) => /^\s*ARG\b/.test(l));
+    expect(args.length).toBeGreaterThan(0);
+    for (const l of args) expect(l).toMatch(/^\s*ARG NEXT_PUBLIC_/);
+  });
+
+  it("caddy sends HSTS without includeSubDomains or preload", () => {
+    const c = read("Caddyfile").replace(/#.*$/gm, "");
+    expect(c).toContain('header Strict-Transport-Security "max-age=31536000"');
+    expect(c).not.toMatch(/includeSubDomains|preload/);
+  });
 });
