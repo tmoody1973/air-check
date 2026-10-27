@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type AgentPackageInput, checkDescription, descriptionFirstLine, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
+import { type AgentPackageInput, buildTitle, titleLeadsBudget, checkDescription, descriptionFirstLine, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
 
@@ -56,6 +56,20 @@ describe("draftPackageInput", () => {
     expect(o).toContain("Rhythm Lab Radio, week of October 16, 2026, hosted by Tarik Moody and produced by Radio Milwaukee.");
     expect(o).toContain("pending-hour-1");
     expect(o).toContain("If package_submit is rejected twice, stop and report its problems in one short message.");
+  });
+  it("shows the title template and the exact leads budget", () => {
+    const o = draftPackageInput({ showDate: "2026-10-16", tracklistText: "x", notes: "" });
+    expect(o).toContain("RLR 10.16.26 | ");
+    expect(o).toContain(`at most ${titleLeadsBudget("2026-10-16")} characters`);
+    expect(titleLeadsBudget("2026-10-16")).toBe(99 - [..."RLR 10.16.26 | "].length - [..." and more"].length);
+  });
+  it("leads at the budget build a title under 100; one over throws", () => {
+    const budget = titleLeadsBudget("2026-10-16");
+    const leadsOfLen = (n: number) => { const rest = n - 6; const a = Math.floor(rest / 4); return ["A".repeat(a), "B".repeat(a), "C".repeat(a), "D".repeat(rest - 3 * a)]; };
+    const ok = leadsOfLen(budget);
+    expect(ok.join(", ").length).toBe(budget);
+    expect([...buildTitle("2026-10-16", ok)].length).toBe(99);
+    expect(() => buildTitle("2026-10-16", leadsOfLen(budget + 1))).toThrow(RangeError);
   });
   it("a description starting with descriptionFirstLine passes the first-line check", () => {
     for (const d of ["2026-10-16", "2027-01-03"]) {
