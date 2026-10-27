@@ -1,5 +1,7 @@
 export type StepStatus = "working" | "done" | "error";
-export interface RunStep { id: string; tool: string; preview: string; status: StepStatus; startedAt: number; durationSec?: number }
+export interface RunStep { id: string; tool: string; preview: string; status: StepStatus; startedAt: number; durationSec?: number;
+  /** Display-only: position label such as "H1.4" and source chips. The reducer never reads or writes them. */
+  label?: string; sources?: string[] }
 export interface RunState {
   runId: string;
   status: "running" | "stopping" | "completed" | "cancelled" | "failed" | "interrupted";

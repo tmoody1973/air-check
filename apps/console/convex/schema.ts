@@ -44,4 +44,13 @@ export default defineSchema({
     releasedOn: v.optional(v.string()),
     playedNote: v.optional(v.string()),
   }).index("by_workspace", ["workspace"]),
+  runs: defineTable({
+    workspace: workspaceV,
+    runId: v.string(),
+    title: v.string(),
+    state: v.any(), // RunState, typed by core
+    // Display-only Next/Skipped rows; the seed (Task 13) stores them.
+    upcoming: v.optional(v.array(v.object({ label: v.string(), text: v.string(), status: v.union(v.literal("next"), v.literal("skipped")) }))),
+    updatedAt: v.number(),
+  }).index("by_runId", ["runId"]),
 });

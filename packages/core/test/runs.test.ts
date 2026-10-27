@@ -33,4 +33,10 @@ describe("applyRunEvent", () => {
     expect(s3.steps[0]!.status).toBe("done");
     expect(applyRunEvent(s, "run.completed", { output: "ok" }, 3)).toMatchObject({ status: "completed", output: "ok" });
   });
+  it("leaves display-only label and sources untouched", () => {
+    const base = initialRun("r1");
+    const withMeta = { ...base, steps: [{ id: "r1-0", tool: "t", preview: "p", status: "working" as const, startedAt: 1, label: "H1.4", sources: ["musicbrainz.org"] }] };
+    const s = applyRunEvent(withMeta, "tool.completed", { tool: "t" }, 2);
+    expect(s.steps[0]).toMatchObject({ status: "done", label: "H1.4", sources: ["musicbrainz.org"] });
+  });
 });
