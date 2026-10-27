@@ -16,3 +16,18 @@ describe("createRateLimiter", () => {
     expect(allow("a", 60_000)).toBe(true);
   });
 });
+
+describe("createRateLimiter eviction", () => {
+  it("limiter evicts empty keys", () => {
+    const allow = createRateLimiter(1, 1000);
+    allow("old", 0);
+    allow("new", 5000); // sweeps "old" (window empty)
+    expect(allow.size()).toBe(1);
+  });
+
+  it("never holds more than 10,000 keys", () => {
+    const allow = createRateLimiter(1, 60_000);
+    for (let i = 0; i < 10_050; i++) allow(`k${i}`, i);
+    expect(allow.size()).toBeLessThanOrEqual(10_000);
+  });
+});
