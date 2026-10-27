@@ -1,0 +1,7 @@
+[
+  { "event": "tool.started", "data": { "tool": "terminal", "preview": "sleep 5 && echo step-1" } },
+  { "event": "tool.completed", "data": { "tool": "terminal", "duration": 5.1 } },
+  { "event": "tool.started", "data": { "tool": "terminal", "preview": "sleep 5 && echo step-2" } },
+  { "event": "tool.completed", "data": { "tool": "terminal", "duration": 5.0 } },
+  { "event": "run.cancelled", "data": {} }
+]

@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/* Tokens copied from DESIGN.md front matter. Three faces only; no shadows, gradients or emoji. */
+@theme {
+  --color-paper: #F5F3EE;
+  --color-sidebar: #EDEAE2;
+  --color-surface: #FFFFFF;
+  --color-surface-quiet: #F0EDE5;
+  --color-line: #DDD8CC;
+  --color-line-strong: #CFC9BB;
+  --color-chip: #E4E0D5;
+  --color-ink: #1C1B18;
+  --color-ink-soft: #3F3B33;
+  --color-muted: #655F54;
+  --color-signal: #0E6A5B;
+  --color-signal-deep: #0A4F44;
+  --color-signal-soft: #DCEDE8;
+  --color-signal-on-dark: #5CC8B2;
+  --color-caution-bg: #F6E7C8;
+  --color-caution-text: #5A3E00;
+  --color-problem-bg: #F4D9D5;
+  --color-problem-text: #7A2019;
+  --color-problem-row: #FBEFEC;
+  --color-on-air: #B8322A;
+
+  --radius-control: 10px;
+  --radius-card: 14px;
+
+  --font-serif: var(--font-instrument-serif), serif;
+  --font-sans: var(--font-dm-sans), sans-serif;
+  --font-mono: var(--font-dm-mono), monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

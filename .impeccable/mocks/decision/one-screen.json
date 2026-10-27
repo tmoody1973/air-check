@@ -1,0 +1,14 @@
+{
+  "surface": "package page /packages/<id> (phone)",
+  "source": "HTML mock rendered with headless Chrome at 390x844 @2x (OpenAI key invalid, Tarik chose HTML mocks)",
+  "html": "html/one-screen.html",
+  "approved": true,
+  "approvedBy": "Tarik",
+  "approvedAt": "2026-10-26",
+  "seed": "1845fda8",
+  "dealt": [
+    "checklist",
+    "what-changed",
+    "one-screen"
+  ]
+}

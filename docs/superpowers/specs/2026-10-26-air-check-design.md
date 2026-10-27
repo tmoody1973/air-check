@@ -165,6 +165,14 @@ The jobs and acceptance criteria are in `docs/PRD.md` section 5. This section ad
 
 Also still undesigned, per `design/README.md`: the provenance view for each package field, the model panel (which Nemotron handled which step), and empty, loading, error and offline states.
 
+
+### 6.3 Approved layouts (Oct 26 design pass, Impeccable)
+Mockups are HTML pages built with DESIGN.md's tokens and screenshotted with headless Chrome. The OpenAI image key was invalid, so Tarik chose HTML mockups instead. Approval records are the `*.json` files next to each image in `.impeccable/mocks/decision/`.
+- **Package page (phone): "One-screen decision"** (`one-screen.webp`, seed `1845fda8`). One white card holds the serif title, tags, three counts (tracks, closing tracks, description characters) and the numbered review flags, with a "See description, tracklist and sources" link. Below it come the player bar with "Jump to hour 2", the line "This will be public on Mixcloud", and stacked Approve, Edit and Skip. Flags come first, as Tarik asked. Not chosen: checklist-gated Approve, and a before/after "What changed" list.
+- **Trust (desktop first): "One timeline"** (`trust-timeline.webp`, seed `21307efd`). Filter chips (All, Waiting for you, Agent actions, Network, Blocked), then one wide table with time, kind, what happened, where and result. Blocked rows are tinted red with the reason. Risk named on the card: blocks stand out less for a skimming judge, so the demo workspace may default the filter to Blocked **(Claude's suggestion, not decided)**. Not chosen: rules-plus-log, and incident reports.
+- **Live-progress + Take over card** (`progress.webp`). A progress bar with "N of M tracks · closing tracks skipped", then one row per track with its source chips and any `[verify]` chip, the current row marked "Working", and closing tracks shown "Skipped". A Take over button reads "stops after this track and opens the draft". Approved as is.
+- Craft rule applied: no eyebrow label above headings on new surfaces. Status is carried by pills ("Draft · 2 flags") instead.
+
 ## 7. What to take from openmuse
 
 Cloned and read on Oct 26 (commit `a4944f4`): README, `docs/EXPERIENCE.md`, `docs/VERIFICATION.md`, `docs/COMPUTER.md`, `docs/RICH-THREADS.md`, `docs/demos/jev-generative-ui.md`, `infra/compose.yaml`, `apps/server/src/actions.ts`, `apps/server/src/engine/tanstack-agent.ts`, the Ideas service (`apps/server/src/engine/service.ts` around `refreshIdeas` and `decideIdea`), domain types (`packages/domain/src/agent.ts`, `index.ts`), `ActivityScreen` in `apps/mobile/src/screens.tsx`, and `apps/mobile/src/browser-tool-card.tsx`. Not read: the rest of the task engine, the browser worker's `network.ts` and `proxy.ts`, and most of the mobile UI.

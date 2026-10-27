@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="trust.css"><style>
+.inc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.report{padding:18px 20px;border-color:#e8bdb6}
+.rtop{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.report h2{font:400 24px/1.15 var(--serif)}
+.facts{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;margin-top:12px;font-size:13.5px}
+.facts dt{color:var(--muted)}
+.facts dd{margin:0}
+.plain{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-soft)}
+.routine{padding:6px 8px}
+.logh{display:flex;justify-content:space-between;align-items:center;padding:12px 12px 6px}
+</style></head><body><div class="shell"><aside class="side"><div class="brand"><svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 7v4M6 4v10M10 1v16M14 5v8M18 3v12"/></svg>Air Check</div><nav class="nav"><a><i></i>Today</a><a><i></i>Chat</a><a><i></i>Plan</a><a><i></i>Tracklist</a><a><i></i>Episodes</a><a><i></i>Release radar</a><a class="on"><i></i>Trust</a><a><i></i>Skills and memory</a></nav></aside><section class="content"><div class="head"><h1>Trust</h1><div class="headpills"><span class="pill"><span class="dot"></span>Sandbox on</span><span class="pill">4 destinations allowed</span></div></div><div class="body">
+<div class="inc">
+<section class="card report"><div class="rtop"><span class="res no">Blocked · 00:23:55</span><span class="sample">SAMPLE</span></div><h2>The agent tried to open example.com</h2>
+<dl class="facts"><dt>Program</dt><dd class="mono">/usr/bin/curl</dd><dt>Destination</dt><dd class="mono">example.com:443</dd><dt>Rule</dt><dd>Not on the allow-list (policy engine: OPA)</dd><dt>Outcome</dt><dd>Stopped before it left the sandbox</dd></dl>
+<p class="plain">Nothing was sent. If this were a link inside a forwarded email, this is exactly what keeps it from being opened.</p></section>
+<section class="card report"><div class="rtop"><span class="res no">Blocked · 00:22:53</span><span class="sample">SAMPLE</span></div><h2>Hermes tried to contact its maker</h2>
+<dl class="facts"><dt>Program</dt><dd class="mono">python3.13 (Hermes)</dd><dt>Destination</dt><dd class="mono">portal.nousresearch.com:443</dd><dt>Rule</dt><dd>Not on the allow-list (policy engine: OPA)</dd><dt>Outcome</dt><dd>Stopped before it left the sandbox</dd></dl>
+<p class="plain">The agent software reached out on its own. The sandbox stopped it anyway; nothing leaves without a rule.</p></section>
+</div>
+<section class="card routine"><div class="logh"><h2>Everything else it reached today</h2><span class="small muted">3 allowed · 1 waiting for you</span></div>
+<table><thead><tr><th>Time</th><th>Action</th><th>Destination</th><th>Result</th></tr></thead><tbody>
+<tr><td class="mono">00:26:10</td><td><b>RLR 10.2.26</b> ready for your approval</td><td class="mono">—</td><td><span class="res wait">Needs you</span></td></tr>
+<tr><td class="mono">00:23:11</td><td>Model call (Nemotron 3 Super)</td><td class="mono">Nebius Token Factory</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:23:40</td><td>Checked for new Telegram messages</td><td class="mono">api.telegram.org</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:24:02</td><td>Web search for release dates</td><td class="mono">api.tavily.com</td><td><span class="res ok">Allowed</span></td></tr>
+</tbody></table></section></div></section></div></body></html>

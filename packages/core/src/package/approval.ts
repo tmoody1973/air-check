@@ -37,6 +37,8 @@ export interface AudioRef {
   hour1Id: string;
   hour2Id: string;
   mp3Sha256: string;
+  /** Derived from the MP3, so it is stored but not fingerprinted. */
+  hour1DurationSec?: number;
 }
 
 export interface Transition {
@@ -65,7 +67,7 @@ export class GateError extends Error {
   }
 }
 
-const APPROVER_DOMAIN = "@radiomilwaukee.org";
+export const APPROVER_DOMAIN = "@radiomilwaukee.org";
 const DECIDED: readonly PackageStatus[] = ["approved", "skipped", "publishing", "succeeded", "failed", "outcome_unknown"];
 
 export type PublishResult =
@@ -135,7 +137,7 @@ export class ApprovalGate {
     const next = await this.store.compareAndSwap(
       id,
       { status: "preparing_audio" },
-      { draft, status: "awaiting_review", fingerprint: fingerprint(draft) },
+      { draft, status: "awaiting_review", fingerprint: await fingerprint(draft) },
     );
     if (!next) throw new GateError("NOT_READY", `package ${id} is not waiting for audio`);
     await this.emit(id, "preparing_audio", "awaiting_review", "media");
@@ -148,11 +150,12 @@ export class ApprovalGate {
     const sameAudio = draft.audio.hour1Id === cur.draft.audio.hour1Id && draft.audio.hour2Id === cur.draft.audio.hour2Id;
     // ponytail: the existing MP3 is carried over only when the source hours are unchanged; otherwise audio is prepared again
     const mp3Sha256 = sameAudio ? cur.draft.audio.mp3Sha256 : undefined;
+    const hour1DurationSec = sameAudio ? cur.draft.audio.hour1DurationSec : undefined;
     // id, workspace and show date belong to the record, never to the agent's revision
     const base = withoutMp3({ ...draft, id, workspace: cur.draft.workspace, showDate: cur.draft.showDate });
-    const revised = mp3Sha256 ? { ...base, audio: { ...base.audio, mp3Sha256 } } : base;
+    const revised = mp3Sha256 ? { ...base, audio: { ...base.audio, mp3Sha256, hour1DurationSec } } : base;
     const patch: Partial<PackageRecord> = mp3Sha256
-      ? { draft: revised, status: "awaiting_review", fingerprint: fingerprint(revised) }
+      ? { draft: revised, status: "awaiting_review", fingerprint: await fingerprint(revised) }
       : { draft: revised, status: "preparing_audio", fingerprint: undefined };
     const next = await this.store.compareAndSwap(id, { status: "awaiting_review", fingerprint: cur.fingerprint }, patch);
     if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while revising`);

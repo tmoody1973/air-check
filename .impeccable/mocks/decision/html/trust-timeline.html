@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="trust.css"><style>
+.chips{display:flex;gap:8px;margin-bottom:16px}
+.chip{height:34px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;border:1px solid var(--line);border-radius:9999px;background:var(--surface);font-size:13.5px}
+.chip.on{background:var(--ink);color:#f5f3ee;border-color:var(--ink)}
+.chip b{font-weight:600}
+.tl{padding:6px 8px}
+.kind{font:400 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+</style></head><body><div class="shell"><aside class="side"><div class="brand"><svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 7v4M6 4v10M10 1v16M14 5v8M18 3v12"/></svg>Air Check</div><nav class="nav"><a><i></i>Today</a><a><i></i>Chat</a><a><i></i>Plan</a><a><i></i>Tracklist</a><a><i></i>Episodes</a><a><i></i>Release radar</a><a class="on"><i></i>Trust</a><a><i></i>Skills and memory</a></nav></aside><section class="content"><div class="head"><h1>Trust</h1><div class="headpills"><span class="pill"><span class="dot"></span>Sandbox on</span><span class="pill">4 destinations allowed</span></div></div><div class="body">
+<div class="chips"><span class="chip on">All <b>9</b></span><span class="chip">Waiting for you <b>1</b></span><span class="chip">Agent actions <b>3</b></span><span class="chip">Network <b>5</b></span><span class="chip" style="color:var(--problem-text)">Blocked <b>2</b></span><span style="flex:1"></span><span class="sample" style="align-self:center">SAMPLE</span></div>
+<section class="card tl"><table><thead><tr><th>Time</th><th>Kind</th><th>What happened</th><th>Where</th><th>Result</th></tr></thead><tbody>
+<tr><td class="mono">00:26:10</td><td class="kind">Waiting</td><td><b>RLR 10.2.26</b> ready for your approval · 2 flags</td><td class="mono">—</td><td><span class="res wait">Needs you</span></td></tr>
+<tr class="blocked"><td class="mono">00:23:55</td><td class="kind">Network</td><td>Agent ran <span class="mono">curl</span></td><td class="mono">example.com</td><td><span class="res no">Blocked</span><div class="why">Not on the allow-list</div></td></tr>
+<tr><td class="mono">00:23:41</td><td class="kind">Action</td><td>Drafted the Mixcloud package (title, 5 tags, description)</td><td class="mono">—</td><td><span class="res ok">Done</span></td></tr>
+<tr><td class="mono">00:23:11</td><td class="kind">Network</td><td>Model call (Nemotron 3 Super)</td><td class="mono">Nebius Token Factory</td><td><span class="res ok">Allowed</span></td></tr>
+<tr class="blocked"><td class="mono">00:22:53</td><td class="kind">Network</td><td>Hermes contacted its maker</td><td class="mono">portal.nousresearch.com</td><td><span class="res no">Blocked</span><div class="why">Not on the allow-list</div></td></tr>
+<tr><td class="mono">00:22:40</td><td class="kind">Action</td><td>Updated skill: title style (you shortened a title)</td><td class="mono">—</td><td><span class="res ok">Done</span></td></tr>
+<tr><td class="mono">00:22:02</td><td class="kind">Network</td><td>Web search for release dates</td><td class="mono">api.tavily.com</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:21:40</td><td class="kind">Network</td><td>Checked for new Telegram messages</td><td class="mono">api.telegram.org</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:21:12</td><td class="kind">Action</td><td>Fact-checked 31 tracks (2 open claims)</td><td class="mono">—</td><td><span class="res ok">Done</span></td></tr>
+</tbody></table></section></div></section></div></body></html>

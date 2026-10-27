@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="trust.css"><style>
+.grid{display:grid;grid-template-columns:360px 1fr;gap:20px}
+.rules{padding:18px 20px}
+.rules h2{font-size:15px;margin-bottom:4px}
+.rule{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.rule:first-of-type{border-top:0}
+.rule .host{font:500 12.5px/1.3 var(--mono)}
+.rule .what{font-size:13.5px;color:var(--ink-soft)}
+.lock{padding:14px 0 0;font-size:13px;color:var(--ink-soft);border-top:1px solid var(--line);margin-top:4px}
+.log{padding:6px 8px 8px}
+.logh{display:flex;justify-content:space-between;align-items:center;padding:12px 12px 6px}
+.waitbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;margin-bottom:20px}
+.waitbar b{font-weight:600}
+.btn.sm{height:38px;padding:0 14px;font-size:14px}
+</style></head><body><div class="shell"><aside class="side"><div class="brand"><svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 7v4M6 4v10M10 1v16M14 5v8M18 3v12"/></svg>Air Check</div><nav class="nav"><a><i></i>Today</a><a><i></i>Chat</a><a><i></i>Plan</a><a><i></i>Tracklist</a><a><i></i>Episodes</a><a><i></i>Release radar</a><a class="on"><i></i>Trust</a><a><i></i>Skills and memory</a></nav></aside><section class="content"><div class="head"><h1>Trust</h1><div class="headpills"><span class="pill"><span class="dot"></span>Sandbox on</span><span class="pill">4 destinations allowed</span></div></div><div class="body">
+<div class="card waitbar"><div><span class="res wait">Waiting for you</span>&nbsp;&nbsp;<b>RLR 10.2.26</b> is ready to approve · 2 flags</div><div class="btn primary sm">Review package</div></div>
+<div class="grid">
+<section class="card rules"><h2>What the agent is allowed to reach</h2><p class="why">Everything else is blocked before it leaves the sandbox.</p>
+<div class="rule"><div><div class="host">Nebius Token Factory</div><div class="what">Lets the agent think (NVIDIA Nemotron)</div></div></div>
+<div class="rule"><div><div class="host">api.telegram.org</div><div class="what">Your morning digest and replies to you only</div></div></div>
+<div class="rule"><div><div class="host">api.tavily.com</div><div class="what">Web search for fact-checking</div></div></div>
+<div class="rule"><div><div class="host">pypi.org</div><div class="what">Software packages the agent's tools need</div></div></div>
+<p class="lock">The agent holds no Box, Drive, Dropbox or Mixcloud keys. Your keys are swapped in at the exit, never seen inside.</p></section>
+<section class="card log"><div class="logh"><h2>What it tried to reach <span class="small muted" style="font-weight:400">· blocked first</span></h2><span class="sample">SAMPLE</span></div>
+<table><thead><tr><th>Time</th><th>Action</th><th>Destination</th><th>Result</th></tr></thead><tbody><tr class="blocked"><td class="mono">00:23:55</td><td>Agent ran <span class="mono">curl</span></td><td class="mono">example.com</td><td><span class="res no">Blocked</span><div class="why">Not on the allow-list</div></td></tr>
+<tr class="blocked"><td class="mono">00:22:53</td><td>Hermes contacted its maker</td><td class="mono">portal.nousresearch.com</td><td><span class="res no">Blocked</span><div class="why">Not on the allow-list</div></td></tr>
+<tr><td class="mono">00:23:11</td><td>Model call (Nemotron 3 Super)</td><td class="mono">Nebius Token Factory</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:23:40</td><td>Checked for new Telegram messages</td><td class="mono">api.telegram.org</td><td><span class="res ok">Allowed</span></td></tr>
+<tr><td class="mono">00:24:02</td><td>Web search for release dates</td><td class="mono">api.tavily.com</td><td><span class="res ok">Allowed</span></td></tr></tbody></table></section>
+</div></div></section></div></body></html>

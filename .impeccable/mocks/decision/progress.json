@@ -1,0 +1,9 @@
+{
+  "surface": "live-progress + Take over card (chat / Plan / show notes)",
+  "source": "HTML mock rendered with headless Chrome at 1280x800 @1.5x",
+  "html": "html/progress.html",
+  "approved": true,
+  "approvedBy": "Tarik",
+  "approvedAt": "2026-10-26",
+  "note": "Extension of the existing generated-UI card; no concept roll (local addition)."
+}

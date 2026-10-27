@@ -1,0 +1,10 @@
+.env.local
+.agents/
+.claude/
+skills-lock.json
+AGENTS.md
+CLAUDE.md
+e2e/.auth/
+test-results/
+playwright-report/
+.next-e2e/

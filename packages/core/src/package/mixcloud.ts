@@ -14,8 +14,12 @@ export interface PackageDraft {
   tags: string[];
   description: string;
   tracks: Track[];
-  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string };
+  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string; hour1DurationSec?: number };
   picture?: string;
+  /** Notes for the reviewer. Display only: never in the fingerprint or the upload. */
+  flags?: string[];
+  /** Other title options. Display only: never in the fingerprint or the upload. */
+  alternates?: string[];
 }
 
 /** Artist and song only. Hard Rule 11: no start times, ever. */

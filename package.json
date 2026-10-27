@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p packages/core"
+    "typecheck": "tsc --noEmit -p packages/core && pnpm --filter console typecheck",
+    "build": "pnpm --filter console build",
+    "seed:demo": "pnpm --filter console exec convex run seed:seedDemo"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

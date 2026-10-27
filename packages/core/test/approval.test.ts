@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "vitest";
-import { type Actor, ApprovalGate, canPublish, fingerprint, GateError, type Transition } from "../src/index";
+import { type Actor, ApprovalGate, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
 import { goldenDraft } from "./helpers/goldens";
 import { memoryStore } from "./helpers/memory-store";
 
@@ -38,7 +39,7 @@ test("cannot approve before audio exists", async () => {
   expect(await code(gate.decide(rec.draft.id, "anything", "approve", tarik))).toBe("NOT_READY");
   const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id: "h1", hour2Id: "h2", mp3Sha256: "b".repeat(64) });
   expect(withAudio.status).toBe("awaiting_review");
-  expect(withAudio.fingerprint).toBe(fingerprint({ ...draft, audio: { ...draft.audio, mp3Sha256: "b".repeat(64) } }));
+  expect(withAudio.fingerprint).toBe(await fingerprint({ ...draft, audio: { ...draft.audio, mp3Sha256: "b".repeat(64) } }));
 });
 
 test("agent cannot approve", async () => {
@@ -100,15 +101,15 @@ test("revise cannot change the workspace", async () => {
   expect(await code(gate.claimForPublish(id))).toBe("DEMO_CANNOT_PUBLISH");
 });
 
-test("fingerprint covers the workspace", () => {
-  expect(fingerprint(goldenDraft({ workspace: "demo" }))).not.toBe(fingerprint(goldenDraft()));
+test("fingerprint covers the workspace", async () => {
+  expect(await fingerprint(goldenDraft({ workspace: "demo" }))).not.toBe(await fingerprint(goldenDraft()));
 });
 
 test("the agent cannot supply the MP3 hash", async () => {
   const rec = await gate.submit(goldenDraft()); // goldenDraft carries an mp3Sha256
   expect(rec.status).toBe("preparing_audio");
   expect(rec.draft.audio.mp3Sha256).toBeUndefined();
-  expect(await code(gate.decide(rec.draft.id, fingerprint(goldenDraft()), "approve", tarik))).toBe("NOT_READY");
+  expect(await code(gate.decide(rec.draft.id, await fingerprint(goldenDraft()), "approve", tarik))).toBe("NOT_READY");
 });
 
 test("revise never takes an MP3 hash from the draft", async () => {
@@ -156,15 +157,56 @@ test("transitions record who acted", async () => {
   ]);
 });
 
-test("fingerprint covers the mp3", () => {
+test("fingerprint covers the mp3", async () => {
   const a = goldenDraft();
   const b = goldenDraft({ audio: { ...a.audio, mp3Sha256: "c".repeat(64) } });
-  expect(fingerprint(a)).not.toBe(fingerprint(b));
-  expect(() => fingerprint(goldenDraft({ audio: { hour1Id: "h1", hour2Id: "h2" } }))).toThrow();
+  expect(await fingerprint(a)).not.toBe(await fingerprint(b));
+  await expect(fingerprint(goldenDraft({ audio: { hour1Id: "h1", hour2Id: "h2" } }))).rejects.toThrow();
 });
 
-test("fingerprint is stable across key order", () => {
+test("fingerprint is stable across key order", async () => {
   const a = goldenDraft();
   const reordered = { ...a, audio: { mp3Sha256: a.audio.mp3Sha256, hour2Id: a.audio.hour2Id, hour1Id: a.audio.hour1Id } };
-  expect(fingerprint(reordered)).toBe(fingerprint(a));
+  expect(await fingerprint(reordered)).toBe(await fingerprint(a));
+});
+
+test("fingerprint is identical to the node:crypto value", async () => {
+  const d = goldenDraft();
+  // the fixed shape and key order below is what the gate has always hashed; node:crypto is used here only
+  const canonical = JSON.stringify({
+    description: d.description,
+    hour1Id: d.audio.hour1Id,
+    hour2Id: d.audio.hour2Id,
+    mp3Sha256: d.audio.mp3Sha256,
+    picture: d.picture,
+    sections: toSections(d.tracks),
+    tags: d.tags,
+    title: d.title,
+    workspace: d.workspace,
+  });
+  expect(await fingerprint(d)).toBe(createHash("sha256").update(canonical).digest("hex"));
+});
+
+test("hour-1 length does not change the fingerprint", async () => {
+  const a = goldenDraft();
+  const b = goldenDraft({ audio: { ...a.audio, hour1DurationSec: 3601 } });
+  expect(await fingerprint(b)).toBe(await fingerprint(a));
+});
+
+test("hour-1 length is stored with the MP3 and dropped when the audio is redone", async () => {
+  const rec = await gate.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3, hour1DurationSec: 3601 });
+  expect(withAudio.draft.audio.hour1DurationSec).toBe(3601);
+  const same = await gate.revise(rec.draft.id, goldenDraft());
+  expect(same.draft.audio.hour1DurationSec).toBe(3601);
+  const other = await gate.revise(rec.draft.id, goldenDraft({ audio: { hour1Id: "x", hour2Id } }));
+  expect(other.draft.audio.hour1DurationSec).toBeUndefined();
+});
+
+test("flags and alternates are display-only: the fingerprint ignores them", async () => {
+  const base = goldenDraft();
+  const withMp3 = { ...base, audio: { ...base.audio, mp3Sha256: MP3 } };
+  expect(await fingerprint({ ...withMp3, flags: ["x"] })).toBe(await fingerprint(withMp3));
+  expect(await fingerprint({ ...withMp3, alternates: ["y"] })).toBe(await fingerprint(withMp3));
 });
