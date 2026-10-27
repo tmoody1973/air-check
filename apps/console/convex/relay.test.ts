@@ -58,7 +58,7 @@ describe("relay.pending / started / finished", () => {
     const t = convexTest(schema, modules);
     const a = await t.withIdentity(human).mutation(api.chat.send, { text: "hi" });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
-      { runId: a.runId, workspace: "real", kind: "chat", input: "hi", conversationId: a.conversationId, stopRequested: false, hermesRunId: undefined },
+      { runId: a.runId, workspace: "real", kind: "chat", input: "hi", conversationId: a.conversationId, stopRequested: false, hermesRunId: undefined, status: "queued", lastSeq: undefined },
     ]);
   });
 
@@ -69,11 +69,21 @@ describe("relay.pending / started / finished", () => {
     const b = await me.mutation(api.chat.send, { text: "b" });
     expect(await t.mutation(api.relay.started, { token: RELAY, runId: a.runId, hermesRunId: "h" })).toEqual({ started: true });
     expect(await t.mutation(api.relay.started, { token: RELAY, runId: a.runId, hermesRunId: "h" })).toEqual({ started: true });
-    expect(await t.query(api.relay.pending, { token: RELAY })).toHaveLength(1);
+    expect((await t.query(api.relay.pending, { token: RELAY })).map((r) => r.status)).toEqual(["queued", "running"]);
     await me.mutation(api.runs.requestStop, { runId: b.runId });
     expect(await t.mutation(api.relay.started, { token: RELAY, runId: b.runId, hermesRunId: "h2" })).toEqual({ started: false });
     const rows = await t.run((ctx) => ctx.db.query("runs").collect());
     expect(rows.map((r) => [r.status, r.hermesRunId])).toEqual([["running", "h"], ["cancelled", undefined]]);
+  });
+
+  test("pending also returns running runs with hermesRunId and lastSeq, and stops once terminal", async () => {
+    const { t, runId, conversationId } = await started();
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "x" }, 7)] });
+    expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
+      { runId, workspace: "real", kind: "chat", input: "hi", conversationId, stopRequested: false, hermesRunId: "h1", status: "running", lastSeq: 7 },
+    ]);
+    await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
+    expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([]);
   });
 
   test("finished sets the terminal status once", async () => {

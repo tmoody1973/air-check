@@ -20,18 +20,21 @@ async function findRun(ctx: QueryCtx, runId: string): Promise<Doc<"runs">> {
   return run;
 }
 
-/** Live runs waiting to start, plus runs the user asked to stop. Scripted runs never appear. */
+/**
+ * Live runs the relay must act on: queued (to start), stopping (to stop), and running (so a restarted
+ * relay can pick its streams back up). Scripted runs never appear.
+ */
 export const pending = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requireRelay(token);
-    const byStatus = (status: "queued" | "stopping") => ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect();
-    const [queued, stopping] = await Promise.all([byStatus("queued"), byStatus("stopping")]);
-    return [...queued, ...stopping.filter((r) => r.stopRequested)]
+    const byStatus = (status: "queued" | "stopping" | "running") => ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect();
+    const [queued, stopping, running] = await Promise.all([byStatus("queued"), byStatus("stopping"), byStatus("running")]);
+    return [...queued, ...stopping.filter((r) => r.stopRequested), ...running]
       .filter((r) => r.source === "live")
       .map((r) => ({
         runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, conversationId: r.conversationId,
-        stopRequested: r.stopRequested, hermesRunId: r.hermesRunId,
+        stopRequested: r.stopRequested, hermesRunId: r.hermesRunId, status: r.status, lastSeq: r.lastSeq,
       }));
   },
 });

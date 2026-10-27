@@ -177,7 +177,7 @@ describe("runs.requestStop", () => {
     expect(await byId(a.runId)).toMatchObject({ status: "cancelled", stopRequested: false });
     expect(await byId(b.runId)).toMatchObject({ status: "stopping", stopRequested: true });
     expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([
-      { runId: b.runId, workspace: "real", kind: "chat", input: "b", conversationId: b.conversationId, stopRequested: true, hermesRunId: "h-b" },
+      { runId: b.runId, workspace: "real", kind: "chat", input: "b", conversationId: b.conversationId, stopRequested: true, hermesRunId: "h-b", status: "stopping", lastSeq: undefined },
     ]);
     await t.mutation(api.relay.finished, { token: RELAY, runId: b.runId, status: "cancelled" });
     await me.mutation(api.runs.requestStop, { runId: b.runId });
