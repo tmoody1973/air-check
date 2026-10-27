@@ -29,4 +29,19 @@ export default defineSchema({
     reason: v.optional(v.string()),
     packageId: v.optional(v.string()),
   }).index("by_workspace_at", ["workspace", "at"]),
+  verifications: defineTable({
+    workspace: workspaceV,
+    claim: v.string(),
+    status: v.union(v.literal("conflict"), v.literal("could-not-verify"), v.literal("confirmed")),
+    show: v.optional(v.string()),
+  }).index("by_workspace_status", ["workspace", "status"]),
+  releases: defineTable({
+    workspace: workspaceV,
+    artist: v.string(),
+    title: v.string(),
+    label: v.optional(v.string()),
+    type: v.optional(v.union(v.literal("album"), v.literal("single"), v.literal("ep"))),
+    releasedOn: v.optional(v.string()),
+    playedNote: v.optional(v.string()),
+  }).index("by_workspace", ["workspace"]),
 });

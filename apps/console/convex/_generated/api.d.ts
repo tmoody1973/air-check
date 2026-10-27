@@ -9,9 +9,11 @@
  */
 
 import type * as activity from "../activity.js";
+import type * as cutoff from "../cutoff.js";
 import type * as gate from "../gate.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
+import type * as today from "../today.js";
 
 import type {
   ApiFromModules,
@@ -21,9 +23,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   activity: typeof activity;
+  cutoff: typeof cutoff;
   gate: typeof gate;
   packageStore: typeof packageStore;
   packages: typeof packages;
+  today: typeof today;
 }>;
 
 /**
