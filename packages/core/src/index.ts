@@ -15,3 +15,4 @@ export * from "./boundaries";
 export * from "./runs";
 export * from "./relay/auditLine";
 export * from "./relay/prompts";
+export * from "./relay/sandboxStatus";
