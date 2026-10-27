@@ -1,5 +1,6 @@
-import { buildPackageDraft, GateError } from "@aircheck/core";
+import { buildPackageDraft } from "@aircheck/core";
 import { httpRouter } from "convex/server";
+import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { MIN_TOKEN_LENGTH, pickInput, tokenMatches } from "./agentSubmit";
@@ -24,7 +25,7 @@ const submitPackage = httpAction(async (ctx, req) => {
     const rec = await ctx.runMutation(internal.packages.submit, { draft: built.draft });
     return json(201, { packageId: built.draft.id, status: rec.status });
   } catch (e) {
-    if (e instanceof GateError && e.code === "ALREADY_EXISTS") return json(409, { error: "ALREADY_EXISTS" });
+    if (e instanceof ConvexError && (e.data as { code?: string }).code === "ALREADY_EXISTS") return json(409, { error: "ALREADY_EXISTS" });
     throw e;
   }
 });

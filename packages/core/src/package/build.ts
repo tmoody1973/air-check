@@ -26,7 +26,7 @@ function describeIssue(i: DescriptionIssue): string {
     case "tracklist":
       return `description lists tracks (${i.titles.join(", ")}); the tracklist belongs in sections`;
     case "private":
-      return `description contains a private term: "${i.term}"`;
+      return "description contains a private term";
   }
 }
 

@@ -1,5 +1,5 @@
 import { GateError, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import { toRecord } from "./packageStore";
@@ -65,7 +65,15 @@ export const decide = mutation({
 // Internal: reachable only with the deploy key (Plans 4 and 5).
 export const submit = internalMutation({
   args: { draft: v.any() },
-  handler: (ctx, { draft }) => gateFor(ctx).submit(asDraft(draft)),
+  handler: async (ctx, { draft }) => {
+    try {
+      return await gateFor(ctx).submit(asDraft(draft));
+    } catch (e) {
+      // Only ConvexError data survives the hop to an HTTP action on a deployed backend.
+      if (e instanceof GateError) throw new ConvexError({ code: e.code, message: e.message });
+      throw e;
+    }
+  },
 });
 
 const audioV = v.object({

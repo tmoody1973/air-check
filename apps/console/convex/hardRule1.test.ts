@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import http from "./http";
 
 // Hard Rule 1: the only public mutation (or action) is packages.decide. HTTP actions are public
-// by nature, so any httpAction export counts as an exposed write (none are allowed today). Convex marks
+// by nature, so any httpAction export counts as an exposed write (the one allowed is the agent route, pinned below). Convex marks
 // registered functions with isPublic / isInternal / isMutation / isAction.
 type Registered = { isPublic?: boolean; isInternal?: boolean; isMutation?: boolean; isAction?: boolean; isHttp?: boolean };
 
@@ -38,4 +38,15 @@ test("the agent route reaches only internal.packages.submit", () => {
     expect([...refs].filter((r) => r !== "internal.packages.submit")).toEqual([]);
   }
   expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain("internal.packages.submit");
+});
+
+test("the agent route files import only what they should and make one ctx.run call", () => {
+  const read = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
+  const httpSrc = read("./http.ts");
+  const rel = [...httpSrc.matchAll(/from "(\.[^"]*)"/g)].map((m) => m[1]).sort();
+  expect(rel).toEqual(["./_generated/api", "./_generated/server", "./agentSubmit"]);
+  const agent = read("./agentSubmit.ts");
+  expect(agent).not.toMatch(/_generated/);
+  expect(agent).not.toMatch(/\bctx\b/);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation"]);
 });

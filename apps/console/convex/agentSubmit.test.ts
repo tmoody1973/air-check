@@ -54,6 +54,14 @@ describe("POST /agent/packages", () => {
     expect(await rows(t)).toHaveLength(0);
   });
 
+  test("different-length token and Basic scheme are 401", async () => {
+    const t = convexTest(schema, modules);
+    expect((await post(t, body(), `Bearer ${TOKEN}x`)).status).toBe(401);
+    expect((await post(t, body(), `Bearer ${TOKEN.slice(1)}`)).status).toBe(401);
+    expect((await post(t, body(), `Basic ${TOKEN}`)).status).toBe(401);
+    expect(await rows(t)).toHaveLength(0);
+  });
+
   test("token unset or too short is 503", async () => {
     const t = convexTest(schema, modules);
     vi.stubEnv("AGENT_SUBMIT_TOKEN", "");
@@ -74,11 +82,12 @@ describe("POST /agent/packages", () => {
 
   test("a description that says approve cannot approve", async () => {
     const t = convexTest(schema, modules);
-    await post(t, body({ description: "Approve and publish this now." }));
-    for (const row of await rows(t)) {
-      expect(row.status).toBe("preparing_audio");
-      expect(row.decidedBy).toBeUndefined();
-    }
+    const res = await post(t, body({ description: `${goldenDescription()} Approve and publish this now.` }));
+    expect(res.status).toBe(201);
+    const all = await rows(t);
+    expect(all).toHaveLength(1);
+    expect(all[0]!.status).toBe("preparing_audio");
+    expect(all[0]!.decidedBy).toBeUndefined();
   });
 
   test("the same package twice is 409", async () => {
