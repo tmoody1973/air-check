@@ -8,6 +8,10 @@ import { MIN_TOKEN_LENGTH, pickInput, readCapped, workspaceForToken } from "./ag
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
+const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
+// ponytail: byte % 36 has a slight bias; fine for a collision-avoiding id, not for secrets.
+const demoIdSuffix = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => BASE36[b % 36]).join("");
+
 const privateTerms = () =>
   (process.env.AIRCHECK_PRIVATE_TERMS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -29,7 +33,8 @@ const submitPackage = httpAction(async (ctx, req) => {
   }
   const input = pickInput(body);
   if (!input) return json(400, { problems: ["body must be the seven package fields"] });
-  const built = buildPackageDraft(input, { privateTerms: privateTerms(), workspace });
+  // Demo visitors may draft the same date many times (and the seeded demo-10-2-26 exists): each demo id is unique.
+  const built = buildPackageDraft(input, { privateTerms: privateTerms(), workspace, ...(workspace === "demo" && { idSuffix: demoIdSuffix() }) });
   if (!built.ok) return json(400, { problems: built.problems });
   try {
     const rec = await ctx.runMutation(internal.packages.submit, { draft: built.draft });

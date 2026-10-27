@@ -30,8 +30,12 @@ function describeIssue(i: DescriptionIssue): string {
   }
 }
 
-/** Compose the existing checks into one draft, or a list of problems. Never a partial draft. */
-export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms: string[]; workspace?: "real" | "demo" }): BuildResult {
+/**
+ * Compose the existing checks into one draft, or a list of problems. Never a partial draft.
+ * `idSuffix` (demo only) makes each demo draft's id unique: demo-M-D-YY-<suffix>. The caller supplies
+ * the randomness so this stays pure. Real ids are always pkg-M-D-YY.
+ */
+export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms: string[]; workspace?: "real" | "demo"; idSuffix?: string }): BuildResult {
   const problems: string[] = [];
   const date = input.showDate.match(/^\d{2}(\d{2})-(\d{2})-(\d{2})$/);
   if (!date) return { ok: false, problems: [`showDate is not an ISO date: ${input.showDate}`] };
@@ -68,7 +72,9 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   return {
     ok: true,
     draft: {
-      id: `${opts.workspace === "demo" ? "demo" : "pkg"}-${Number(date[2])}-${Number(date[3])}-${date[1]}`,
+      id: opts.workspace === "demo"
+        ? `demo-${Number(date[2])}-${Number(date[3])}-${date[1]}${opts.idSuffix ? `-${opts.idSuffix}` : ""}`
+        : `pkg-${Number(date[2])}-${Number(date[3])}-${date[1]}`,
       workspace: opts.workspace ?? "real",
       showDate: input.showDate,
       title,

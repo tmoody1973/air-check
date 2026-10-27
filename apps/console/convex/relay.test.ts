@@ -158,6 +158,18 @@ describe("relay.events", () => {
     expect(await t.run((ctx) => ctx.db.query("packages").collect())).toEqual(before);
   });
 
+  test("R2 links a suffixed demo id, not the seeded id it starts with", async () => {
+    const t = convexTest(schema, modules);
+    const sent = await t.withIdentity({ ...human, role: "demo" }).mutation(api.chat.send, { text: "hi" });
+    await t.mutation(api.relay.started, { token: RELAY, runId: sent.runId, hermesRunId: "h" });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("packages", { packageId: "demo-10-2-26", workspace: "demo", status: "awaiting_review", draft: {} });
+      await ctx.db.insert("packages", { packageId: "demo-10-2-26-x7k2q", workspace: "demo", status: "preparing_audio", draft: {} });
+    });
+    await t.mutation(api.relay.events, { token: RELAY, runId: sent.runId, events: [ev("message.delta", { delta: "Submitted demo-10-2-26-x7k2q." })] });
+    expect((await run(t)).packageId).toBe("demo-10-2-26-x7k2q");
+  });
+
   test("reads the id from a package_submit tool.completed", async () => {
     const { t, runId } = await started();
     await t.run((ctx) => ctx.db.insert("packages", { packageId: "pkg-1-2-26", workspace: "real", status: "preparing_audio", draft: {} }));

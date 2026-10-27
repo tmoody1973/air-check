@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { formatTrack } from "@aircheck/core";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "../../../packages/core/test/helpers/fixtures";
 import { goldenDraft, goldenTracks } from "../../../packages/core/test/helpers/goldens";
+import { internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -122,7 +123,7 @@ describe("POST /agent/packages", () => {
     vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
     const t = convexTest(schema, modules);
     expect((await post(t, body(), `Bearer ${DEMO}`)).status).toBe(201);
-    expect((await rows(t))[0]).toMatchObject({ workspace: "demo", status: "preparing_audio", packageId: "demo-10-2-26" });
+    expect((await rows(t))[0]).toMatchObject({ workspace: "demo", status: "preparing_audio", packageId: expect.stringMatching(/^demo-10-2-26-[a-z0-9]{5}$/) });
     expect((await rows(t))[0]!.draft.workspace).toBe("demo");
     const t2 = convexTest(schema, modules);
     expect((await post(t2, body())).status).toBe(201);
@@ -136,10 +137,24 @@ describe("POST /agent/packages", () => {
     const t = convexTest(schema, modules);
     const oct9 = () => body({ showDate: "2026-10-09", description: goldenDescription().replace("October 2, 2026", "October 9, 2026") });
     expect((await post(t, oct9(), `Bearer ${DEMO}`)).status).toBe(201);
-    expect((await rows(t))[0]!.packageId).toBe("demo-10-9-26");
+    expect((await rows(t))[0]!.packageId).toMatch(/^demo-10-9-26-[a-z0-9]{5}$/);
     const real = await post(t, oct9());
     expect(real.status).toBe(201);
-    expect((await rows(t)).map((r) => r.packageId).sort()).toEqual(["demo-10-9-26", "pkg-10-9-26"]);
+    expect((await rows(t)).map((r) => r.packageId).sort()).toEqual([expect.stringMatching(/^demo-10-9-26-/), "pkg-10-9-26"]);
+  });
+
+  test("two demo submits for the same date both succeed with different ids, never the seeded demo-10-2-26", async () => {
+    const DEMO = "d".repeat(40);
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const a = await post(t, body(), `Bearer ${DEMO}`);
+    const b = await post(t, body(), `Bearer ${DEMO}`);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    const [idA, idB] = [(await a.json()).packageId, (await b.json()).packageId];
+    expect(idA).toMatch(/^demo-10-2-26-[a-z0-9]{5}$/);
+    expect(idB).toMatch(/^demo-10-2-26-[a-z0-9]{5}$/);
+    expect(idA).not.toBe(idB);
   });
 
   test("the same value for both tokens is a misconfiguration: 503, nothing written", async () => {

@@ -57,7 +57,8 @@ export const started = mutation({
   },
 });
 
-const ID_IN_TEXT = /\b(?:pkg|demo)-\d{1,2}-\d{1,2}-\d{2}\b/g;
+// Demo ids carry a 5-character suffix (demo-10-2-26-x7k2q); the seeded demo-10-2-26 and real ids do not.
+const ID_IN_TEXT = /\b(?:pkg|demo)-\d{1,2}-\d{1,2}-\d{2}(?:-[a-z0-9]{5})?\b/g;
 
 /** R2: the first package id the run produced that really exists in the run's own workspace. */
 async function packageIdFor(ctx: MutationCtx, run: Doc<"runs">, state: RunState, batch: readonly { event: string; data: Record<string, unknown> }[]): Promise<string | undefined> {
