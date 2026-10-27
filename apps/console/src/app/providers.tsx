@@ -3,6 +3,7 @@
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
 import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { PlayerProvider } from "../components/PlayerProvider";
 import { useState, type ReactNode } from "react";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -11,7 +12,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ClerkProvider telemetry={false} signInUrl="/sign-in" signInFallbackRedirectUrl="/today">
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-        {children}
+        <PlayerProvider>{children}</PlayerProvider>
       </ConvexProviderWithClerk>
     </ClerkProvider>
   );
