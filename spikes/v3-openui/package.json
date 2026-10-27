@@ -1,0 +1,1 @@
+{"name":"spike-v3-openui","private":true,"type":"module","dependencies":{"@openuidev/lang-core":"^1.0.1","zod":"^4.6.7"}}
