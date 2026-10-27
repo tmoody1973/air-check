@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Clearly fake keys: clerkMiddleware needs them to construct, nothing here reaches the network.
 // A live-style key keeps Clerk from starting its dev-instance handshake redirect.
@@ -38,5 +38,32 @@ describe("proxy", () => {
   it("/sign-in is public", async () => {
     const res = await run("/sign-in");
     expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("proxy options", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    vi.doUnmock("@clerk/nextjs/server");
+  });
+
+  async function optionsFor(appUrl: string) {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
+    const clerkMiddleware = vi.fn(() => () => undefined);
+    vi.resetModules();
+    vi.doMock("@clerk/nextjs/server", async (orig) => ({ ...(await orig<object>()), clerkMiddleware }));
+    await import("./proxy");
+    return (clerkMiddleware.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+  }
+
+  it("authorizedParties set from NEXT_PUBLIC_APP_URL", async () => {
+    const opts = await optionsFor("https://aircheck.rhythmlabradio.com");
+    expect(opts.authorizedParties).toEqual(["https://aircheck.rhythmlabradio.com"]);
+  });
+
+  it("sets no authorizedParties when NEXT_PUBLIC_APP_URL is unset", async () => {
+    const opts = await optionsFor("");
+    expect(opts.authorizedParties).toBeUndefined();
   });
 });

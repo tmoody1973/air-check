@@ -1,0 +1,23 @@
+# Logging: there is no `log` directive, so Caddy writes no access log. The
+# sign-in link /sign-in?__clerk_ticket=... carries a one-time token and must
+# never land on disk. Caddy still logs its own errors (startup, certificates),
+# and proxy failures are logged as http.log.error entries that can include the
+# request URI. The global block below drops those from the default log.
+{
+	log default {
+		exclude http.log.error
+	}
+	# UDP 443 is not published, so do not advertise HTTP/3 to browsers.
+	servers {
+		protocols h1 h2
+	}
+}
+
+aircheck.rhythmlabradio.com {
+	header Strict-Transport-Security "max-age=31536000"
+
+	reverse_proxy console:3000 {
+		# header_up with a value replaces whatever the client sent; /demo trusts only this header.
+		header_up X-Real-IP {remote_host}
+	}
+}

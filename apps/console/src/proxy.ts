@@ -1,10 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { appOrigin } from "./lib/app-origin";
 
+const origin = appOrigin();
 const isPublic = createRouteMatcher(["/sign-in(.*)", "/demo"]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();
-}, { signInUrl: "/sign-in" });
+}, {
+  signInUrl: "/sign-in",
+  // Production only: reject session tokens minted for any other origin (subdomain cookie leaks).
+  ...(origin ? { authorizedParties: [origin] } : {}),
+});
 
 export const config = {
   matcher: [
