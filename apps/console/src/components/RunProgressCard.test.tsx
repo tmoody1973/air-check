@@ -65,9 +65,15 @@ describe("RunProgressCard", () => {
     };
     render(<RunProgressCard title="t" state={state} totals={{ tracks: 2, closingSkipped: 0 }} onTakeOver={() => {}} />);
     expect(screen.getByText("H1.5")).toBeInTheDocument();
-    expect(screen.getByText("discogs.com")).not.toHaveClass("bg-caution-bg");
-    expect(screen.getByText("[verify] sources disagree")).toHaveClass("bg-caution-bg", "text-caution-text");
-    expect(screen.getByText("[verify]", { selector: "span" })).toHaveClass("bg-caution-bg");
+    const normal = screen.getByText("discogs.com");
+    expect(normal).toHaveClass("bg-surface", "text-ink-soft", "border-line");
+    expect(normal).not.toHaveClass("bg-caution-bg");
+    for (const el of [screen.getByText("[verify] sources disagree"), screen.getByText("[verify]", { selector: "span" })]) {
+      expect(el).toHaveClass("bg-caution-bg", "text-caution-text");
+      expect(el).not.toHaveClass("bg-surface");
+      expect(el).not.toHaveClass("text-ink-soft");
+      expect(el).not.toHaveClass("border-line");
+    }
   });
 
   it("guards zero total and shows Sample tag", () => {

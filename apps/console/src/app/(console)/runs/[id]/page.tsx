@@ -23,7 +23,7 @@ export default function RunPage() {
   const totals = { tracks: state.steps.length + upcoming.length, closingSkipped: upcoming.filter((u) => u.status === "skipped").length };
 
   return (
-    <Shell title={run.title}>
+    <Shell title="Live progress">
       <div className="max-w-2xl">
         <RunProgressCard title={run.title} state={state} totals={totals} upcoming={upcoming} sample={workspace === "demo"} onTakeOver={() => setNote(true)} />
         {note && <p className="mt-3 text-sm text-muted">Take over connects to the agent in a later build.</p>}

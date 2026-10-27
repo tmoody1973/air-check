@@ -6,11 +6,14 @@ export interface RunTotals { tracks: number; closingSkipped: number }
 
 const COPY = "Stops after this track and opens the draft for you to edit. The agent won't overwrite anything you change.";
 const VERIFY = "[verify]";
-const chip = "rounded-md border border-line bg-surface px-1.5 py-1 font-mono text-[11px] leading-none text-ink-soft";
-const caution = "bg-caution-bg text-caution-text border-transparent";
+const chipBase = "rounded-md border px-1.5 py-1 font-mono text-[11px] leading-none";
+const neutral = "border-line bg-surface text-ink-soft";
+const caution = "border-transparent bg-caution-bg text-caution-text";
+// Never combine neutral and caution colour utilities on one element; stylesheet order would decide.
+const chipClass = (isVerify: boolean) => `${chipBase} ${isVerify ? caution : neutral}`;
 
 function Chip({ text }: { text: string }) {
-  return <span className={`${chip} ${text.includes(VERIFY) ? caution : ""}`}>{text}</span>;
+  return <span className={chipClass(text.includes(VERIFY))}>{text}</span>;
 }
 
 const STATUS_WORD: Record<RunStep["status"], string> = { working: "Working", done: "Done", error: "Error" };
@@ -42,7 +45,7 @@ function StepRow({ step, index }: { step: RunStep; index: number }) {
     <Row label={step.label ?? String(index + 1)} status={word} current={step.status === "working"}>
       <div className="break-words">
         {step.preview}
-        {verify && <> <span className={`${chip} ${caution}`}>{VERIFY}</span></>}
+        {verify && <> <span className={chipClass(true)}>{VERIFY}</span></>}
       </div>
       {!!step.sources?.length && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
