@@ -1,0 +1,23 @@
+# Air Check bridge: the sandboxed agent's HTTPS MCP endpoints (Crate research
+# tools + package_submit) on the VM's private address. Runs on the host, not in
+# Docker, so ufw (not Docker's own iptables rules) decides who can reach it.
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable --now aircheck-bridge
+[Unit]
+Description=Air Check: Crate + package_submit MCP bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=user
+EnvironmentFile=/home/user/.aircheck/bridge.env
+WorkingDirectory=/home/user/aircheck-bridge
+ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-bridge/dist/server.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

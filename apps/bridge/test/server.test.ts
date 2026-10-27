@@ -1,0 +1,174 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
+import { request, type Server } from "node:https";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startServer } from "../src/server.js";
+
+const dir = mkdtempSync(join(tmpdir(), "bridge-tls-"));
+const cert = join(dir, "tls.crt");
+const key = join(dir, "tls.key");
+const crateToken = "c".repeat(40);
+const aircheckToken = "a".repeat(40);
+const fakeCrate = fileURLToPath(new URL("./fixtures/fake-crate.mjs", import.meta.url));
+
+let server: Server;
+let port: number;
+let convexStub: HttpServer;
+const convexHits: { auth?: string; body: string }[] = [];
+
+beforeAll(async () => {
+  convexStub = createHttpServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      convexHits.push({ auth: req.headers.authorization, body });
+      res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub" }));
+    });
+  });
+  await new Promise<void>((r) => convexStub.listen(0, "127.0.0.1", r));
+  execFileSync("openssl", [
+    "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+    "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+    "-keyout", key, "-out", cert,
+  ], { stdio: "ignore" });
+  server = await startServer({
+    host: "127.0.0.1",
+    port: 0,
+    tlsCert: cert,
+    tlsKey: key,
+    crate: { command: process.execPath, args: [fakeCrate], cwd: dir, timeoutMs: 2000 },
+    crateMcpToken: crateToken,
+    aircheckMcpToken: aircheckToken,
+    convexSiteUrl: `http://127.0.0.1:${(convexStub.address() as AddressInfo).port}`, // local stub
+    agentSubmitToken: "s".repeat(40),
+  });
+  port = (server.address() as AddressInfo).port;
+});
+afterAll(async () => {
+  await new Promise<void>((r) => server.close(() => r()));
+  await new Promise<void>((r) => convexStub.close(() => r()));
+});
+
+function send(path: string, opts: { method?: string; token?: string; body?: unknown } = {}) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: opts.method ?? "GET",
+        ca: readFileSync(cert),
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.on("error", reject);
+    req.end(opts.body === undefined ? undefined : JSON.stringify(opts.body));
+  });
+}
+
+const rpc = (method: string, params: unknown = {}) => ({ jsonrpc: "2.0", id: 1, method, params });
+
+describe("bridge HTTPS server", () => {
+  it("GET /healthz is 200 ok with no auth", async () => {
+    expect(await send("/healthz")).toEqual({ status: 200, body: "ok" });
+  });
+
+  it("unknown paths are 404", async () => {
+    expect((await send("/other")).status).toBe(404);
+  });
+
+  it("/crate/mcp without a bearer is 401", async () => {
+    expect((await send("/crate/mcp", { method: "POST", body: rpc("tools/list") })).status).toBe(401);
+  });
+
+  it("each endpoint refuses the other endpoint's token", async () => {
+    expect((await send("/crate/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") })).status).toBe(401);
+    expect((await send("/aircheck/mcp", { method: "POST", token: crateToken, body: rpc("tools/list") })).status).toBe(401);
+  });
+
+  it("GET on an MCP path is 405", async () => {
+    expect((await send("/crate/mcp", { token: crateToken })).status).toBe(405);
+  });
+
+  it("refuses a body over the NemoClaw cap", async () => {
+    const big = rpc("tools/list", { pad: "x".repeat(140_000) });
+    expect((await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: big })).status).toBe(413);
+  });
+
+  it("/crate/mcp lists only allowlisted tools", async () => {
+    const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/list") });
+    expect(r.status).toBe(200);
+    const names = JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name).sort();
+    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+  });
+
+  it("/crate/mcp forwards an allowed call and refuses a hidden one", async () => {
+    const ok = await send("/crate/mcp", {
+      method: "POST",
+      token: crateToken,
+      body: rpc("tools/call", { name: "musicbrainz_echo", arguments: { q: "x" } }),
+    });
+    expect(JSON.parse(ok.body).result.content[0].text).toContain('"q":"x"');
+    const no = await send("/crate/mcp", {
+      method: "POST",
+      token: crateToken,
+      body: rpc("tools/call", { name: "telegraph_post", arguments: {} }),
+    });
+    expect(JSON.parse(no.body).error.message).toMatch(/not available/);
+    expect(existsSync(join(dir, "telegraph-called"))).toBe(false);
+  });
+
+  it("offers tools only: prompts/list is method-not-found", async () => {
+    const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("prompts/list") });
+    expect(JSON.parse(r.body).error.code).toBe(-32601);
+  });
+
+  it("refuses a JSON-RPC batch with 400", async () => {
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: [rpc("tools/list")] });
+    expect(r.status).toBe(400);
+  });
+
+  it("/aircheck/mcp lists package_submit only", async () => {
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit"]);
+  });
+
+  it("/aircheck/mcp refuses an unknown tool name", async () => {
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_approve", arguments: {} }),
+    });
+    expect(JSON.parse(r.body).error.message).toMatch(/not available/);
+  });
+
+  it("/aircheck/mcp package_submit reaches the Convex stub and returns the success text", async () => {
+    convexHits.length = 0;
+    const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2", extra: "dropped" };
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_submit", arguments: args }),
+    });
+    const out = JSON.parse(r.body).result;
+    expect(out.isError).toBe(false);
+    expect(out.content[0].text).toMatch(/^Submitted pkg-stub/);
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
+    expect(JSON.parse(convexHits[0]!.body)).not.toHaveProperty("extra");
+  });
+});

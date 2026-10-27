@@ -74,7 +74,8 @@ Important data rules:
 | Models (Nemotron) | Nebius Token Factory | Registered in NemoClaw as a custom OpenAI-compatible provider |
 | Agent: Hermes in the OpenShell sandbox (NemoClaw) | One Nebius AI Cloud Linux VM, Docker | No GPU needed with hosted inference. Dashboard (18789) and API (8642) stay on loopback |
 | Console (Next.js) and reverse proxy | Same VM | HTTPS, Clerk sign-in, is the only public entry and the public demo URL. The AgentMail webhook also enters here |
-| Ingest worker, publisher, Crate research service | Same VM, separate containers | Hold the source and Mixcloud credentials. Secrets in separate env files, never mounted into the sandbox. A second VM would separate them more strongly if time allows |
+| Ingest worker, publisher | Same VM, separate containers | Hold the source and Mixcloud credentials. Secrets in separate env files, never mounted into the sandbox. A second VM would separate them more strongly if time allows |
+| Crate research service (behind the bridge) | Same VM, a host process under systemd (not a container), on the private address only | The host firewall (ufw) protects host ports, but ports published by Docker skip ufw. A host process bound to the private address with one ufw rule (allow only the `openshell-docker` network) keeps it off the internet. Runbook: `docs/DEPLOY.md` |
 | Media worker (ffmpeg join and MP3 encode) | Container on the VM; optionally a Nebius Serverless Job (P2) | Plan about 3 GB scratch for one show in flight (two WAVs are about 1.26 GB); process one show at a time and delete after upload |
 | State and auth | Convex Cloud and Clerk (hosted services, as in TarikOS) | Not on Nebius. Disclose in the README: compute and models run on Nebius; auth and the app database are hosted services |
 | External services | Telegram, Tavily, AgentMail, Mixcloud, Box / Google / Dropbox | Only the ones on the sandbox allow-list are reachable from the agent |

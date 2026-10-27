@@ -9,9 +9,11 @@
  */
 
 import type * as activity from "../activity.js";
+import type * as agentSubmit from "../agentSubmit.js";
 import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as gate from "../gate.js";
+import type * as http from "../http.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as runs from "../runs.js";
@@ -27,9 +29,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   activity: typeof activity;
+  agentSubmit: typeof agentSubmit;
   crons: typeof crons;
   cutoff: typeof cutoff;
   gate: typeof gate;
+  http: typeof http;
   packageStore: typeof packageStore;
   packages: typeof packages;
   runs: typeof runs;
