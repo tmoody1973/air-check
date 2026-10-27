@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { RUN_INSTRUCTIONS } from "@aircheck/core";
 import { api } from "./_generated/api";
 import schema from "./schema";
+import { SCRIPTED_EVENTS } from "./scriptedEvents";
 
 const modules = import.meta.glob("./**/*.*s");
 const human = { subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true };
@@ -134,6 +135,10 @@ describe("demo limits", () => {
 });
 
 describe("scripted replay", () => {
+  test("no scripted event mentions a real pkg- id", () => {
+    expect(JSON.stringify(SCRIPTED_EVENTS)).not.toMatch(/pkg-/);
+  });
+
   test("plays the stored events, ends completed and fills the assistant message", async () => {
     vi.stubEnv("DEMO_LIVE", "0");
     const t = convexTest(schema, modules);
@@ -142,9 +147,9 @@ describe("scripted replay", () => {
     const [run] = await all(t, "runs");
     expect(run).toMatchObject({ runId, status: "completed" });
     expect(run!.state.status).toBe("completed");
-    expect(run!.state.steps.length).toBeGreaterThan(0);
+    expect(run!.state.steps).toHaveLength(3);
     const msgs = await t.withIdentity(demo()).query(api.chat.messages, { conversationId });
-    expect(msgs[1]!.text.length).toBeGreaterThan(0);
+    expect(msgs[1]!.text).toContain("demo-10-2-26-u9qqq");
     expect(msgs[1]!.text).toBe(run!.state.reply);
   });
 
