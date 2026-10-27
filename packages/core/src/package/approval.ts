@@ -67,7 +67,7 @@ export class GateError extends Error {
   }
 }
 
-const APPROVER_DOMAIN = "@radiomilwaukee.org";
+export const APPROVER_DOMAIN = "@radiomilwaukee.org";
 const DECIDED: readonly PackageStatus[] = ["approved", "skipped", "publishing", "succeeded", "failed", "outcome_unknown"];
 
 export type PublishResult =
