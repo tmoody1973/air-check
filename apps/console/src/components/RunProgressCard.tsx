@@ -1,3 +1,5 @@
+import { useState } from "react";
+import Link from "next/link";
 import type { RunState, RunStep } from "@aircheck/core";
 import { SampleTag } from "./SampleTag";
 import { Pill } from "./Pill";
@@ -57,38 +59,81 @@ function StepRow({ step, index }: { step: RunStep; index: number }) {
   );
 }
 
+export type RunRowStatus = "queued" | "running" | "stopping" | "completed" | "cancelled" | "failed";
+
+const linkClass = "inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-2";
+
+function LiveTag() {
+  return (
+    <span className="inline-block rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] leading-none tracking-[0.1em] text-muted uppercase">
+      Live · Nemotron
+    </span>
+  );
+}
+
+function errorText(e: unknown): string {
+  const data = (e as { data?: { code?: string } })?.data;
+  return data?.code ?? (e instanceof Error ? e.message : "Something went wrong");
+}
+
+/**
+ * `status` is the run row's status. Leave it out for the original seeded track-by-track card, which
+ * reads state.status. The track line and percent bar appear only when there are upcoming rows (or no `status`).
+ */
 export function RunProgressCard({
-  title, state, totals, upcoming = [], sample = false, onTakeOver,
+  title, state, totals, upcoming = [], sample = false, onTakeOver, status, source, runId, kind, packageId,
 }: {
   title: string;
   state: RunState;
   totals: RunTotals;
   upcoming?: UpcomingRow[];
   sample?: boolean;
-  onTakeOver: () => void;
+  onTakeOver: () => unknown;
+  status?: RunRowStatus;
+  source?: "live" | "scripted";
+  runId?: string;
+  kind?: "chat" | "draft-package";
+  packageId?: string;
 }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const modern = status !== undefined;
   const done = state.steps.filter((s) => s.status === "done").length;
   const pct = totals.tracks > 0 ? Math.min(100, Math.round((done / totals.tracks) * 100)) : 0;
-  const stopping = state.status === "stopping";
-  const cancelled = state.status === "cancelled";
+  const stopping = (status ?? state.status) === "stopping";
+  const cancelled = (status ?? state.status) === "cancelled";
+  const trackMode = !modern || upcoming.length > 0;
   const skipped = totals.closingSkipped;
+  const canStop = !cancelled && (!modern || status === "queued" || status === "running" || status === "stopping");
+
+  async function takeOver() {
+    setPending(true);
+    setError(null);
+    try { await onTakeOver(); } catch (e) { setError(errorText(e)); } finally { setPending(false); }
+  }
 
   return (
     <section className="overflow-hidden rounded-card border border-line bg-surface">
       <style>{`.run-pulse{animation:run-pulse 1.4s ease-in-out infinite}@keyframes run-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.run-pulse{animation:none}}`}</style>
       <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
         <h2 className="font-serif text-[22px] leading-tight">{title}</h2>
-        {sample && <SampleTag />}
+        {source === "live" ? <LiveTag /> : source === "scripted" ? <SampleTag>Sample · scripted</SampleTag> : sample && <SampleTag />}
       </div>
-      <div
-        role="progressbar" aria-label="Tracks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
-        className="relative mx-5 h-1 rounded-sm bg-surface-quiet"
-      >
-        <i className="absolute inset-y-0 left-0 rounded-sm bg-signal" style={{ width: `${pct}%` }} />
-      </div>
-      <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">
-        {done} of {totals.tracks} tracks · {skipped} closing {skipped === 1 ? "track" : "tracks"} skipped
-      </p>
+      {trackMode ? (
+        <>
+          <div
+            role="progressbar" aria-label="Tracks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
+            className="relative mx-5 h-1 rounded-sm bg-surface-quiet"
+          >
+            <i className="absolute inset-y-0 left-0 rounded-sm bg-signal" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">
+            {done} of {totals.tracks} tracks · {skipped} closing {skipped === 1 ? "track" : "tracks"} skipped
+          </p>
+        </>
+      ) : (
+        <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">{done} {done === 1 ? "step" : "steps"} done</p>
+      )}
       <ul>
         {state.steps.map((s, i) => <StepRow key={s.id} step={s} index={i} />)}
         {upcoming.map((u) => (
@@ -98,19 +143,28 @@ export function RunProgressCard({
         ))}
       </ul>
       <div className="flex flex-wrap items-center gap-3 border-t border-line px-5 py-3.5">
-        {cancelled ? (
-          <p className="text-sm font-semibold">Stopped. Your draft is open.</p>
-        ) : (
+        {canStop ? (
           <>
             <button
-              type="button" onClick={onTakeOver} disabled={stopping}
+              type="button" onClick={takeOver} disabled={stopping || pending}
               className="inline-flex min-h-11 items-center whitespace-nowrap rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold disabled:text-muted"
             >
-              {stopping ? "Stopping after this track…" : "Take over"}
+              {stopping ? (modern ? "Stopping at the next step…" : "Stopping after this track…") : "Take over"}
             </button>
-            <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">{COPY}</span>
+            <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
+              {status === "queued" ? "Waiting for the agent…" : COPY}
+            </span>
           </>
+        ) : cancelled ? (
+          <p className="text-sm font-semibold">{modern ? "Stopped. You have it from here." : "Stopped. Your draft is open."}</p>
+        ) : status === "failed" ? (
+          <p className="text-sm font-semibold text-problem-text">The run stopped with an error.</p>
+        ) : null}
+        {error && <p role="alert" className="basis-full text-sm text-problem-text">Could not stop the run: {error}</p>}
+        {cancelled && modern && kind === "draft-package" && runId && (
+          <Link href={`/tracklist?from=${encodeURIComponent(runId)}`} className={linkClass}>Edit and draft again</Link>
         )}
+        {packageId && <Link href={`/packages/${encodeURIComponent(packageId)}`} className={linkClass}>Review package</Link>}
       </div>
       <p className="border-t border-line px-5 pb-3.5 pt-2.5 font-mono text-[11px] leading-snug text-muted">
         Live from the agent&apos;s run · steps stream in as they happen

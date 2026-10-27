@@ -81,4 +81,73 @@ describe("RunProgressCard", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
     expect(screen.getByText("Sample")).toBeInTheDocument();
   });
+
+  describe("live run states", () => {
+    const base = { title: "t", totals: { tracks: 0, closingSkipped: 0 }, source: "live" as const };
+    const liveState = (): RunState => ({ ...running(), status: "running" });
+
+    it("take over calls the handler once, disables while in flight, and shows errors plainly", async () => {
+      let reject!: (e: Error) => void;
+      const fn = vi.fn(() => new Promise<void>((_, r) => { reject = r; }));
+      render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={fn} />);
+      const b = screen.getByRole("button", { name: "Take over" });
+      fireEvent.click(b);
+      fireEvent.click(b);
+      expect(fn).toHaveBeenCalledOnce();
+      expect(b).toBeDisabled();
+      reject(new Error("NOT_FOUND"));
+      expect(await screen.findByText(/NOT_FOUND/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Take over" })).not.toBeDisabled();
+    });
+
+    it("queued copy", () => {
+      render(<RunProgressCard {...base} status="queued" state={{ runId: "r", status: "running", steps: [] }} onTakeOver={() => {}} />);
+      expect(screen.getByText("Waiting for the agent…")).toBeInTheDocument();
+    });
+    it("stopping copy and disabled button", () => {
+      render(<RunProgressCard {...base} status="stopping" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Stopping at the next step…")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Stopping at the next step/ })).toBeDisabled();
+    });
+    it("cancelled copy, no take over", () => {
+      render(<RunProgressCard {...base} status="cancelled" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Stopped. You have it from here.")).toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+    it("failed copy", () => {
+      render(<RunProgressCard {...base} status="failed" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("The run stopped with an error.")).toBeInTheDocument();
+    });
+    it("completed has no take over", () => {
+      render(<RunProgressCard {...base} status="completed" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+    });
+    it("run without upcoming shows N steps done and no progressbar", () => {
+      render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("1 step done")).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+    it("run with upcoming keeps the track line and bar", () => {
+      render(<RunProgressCard {...base} totals={totals} upcoming={upcoming} status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("1 of 4 tracks · 1 closing track skipped")).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    });
+    it("source tags", () => {
+      const { rerender } = render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Live · Nemotron")).toBeInTheDocument();
+      rerender(<RunProgressCard {...base} source="scripted" status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Sample · scripted")).toBeInTheDocument();
+      expect(screen.queryByText("Live · Nemotron")).not.toBeInTheDocument();
+    });
+    it("cancelled draft-package links to Tracklist; chat does not", () => {
+      const { rerender } = render(<RunProgressCard {...base} runId="r9" kind="draft-package" status="cancelled" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByRole("link", { name: "Edit and draft again" })).toHaveAttribute("href", "/tracklist?from=r9");
+      rerender(<RunProgressCard {...base} runId="r9" kind="chat" status="cancelled" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.queryByRole("link", { name: "Edit and draft again" })).not.toBeInTheDocument();
+    });
+    it("Review package link", () => {
+      render(<RunProgressCard {...base} packageId="p1" status="completed" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByRole("link", { name: "Review package" })).toHaveAttribute("href", "/packages/p1");
+    });
+  });
 });
