@@ -155,6 +155,32 @@ describe("RunProgressCard", () => {
       rerender(<RunProgressCard {...base} runId="r9" kind="chat" status="cancelled" state={liveState()} onTakeOver={() => {}} />);
       expect(screen.queryByRole("link", { name: "Edit and draft again" })).not.toBeInTheDocument();
     });
+    it("a terminal run shows the agent's final output as plain pre-wrapped text", () => {
+      render(<RunProgressCard {...base} status="completed" state={{ ...liveState(), status: "completed", output: "Line one\nLine two" }} onTakeOver={() => {}} />);
+      const out = screen.getByText(/Line one/);
+      expect(out.textContent).toBe("Line one\nLine two");
+      expect(out).toHaveClass("whitespace-pre-wrap");
+    });
+    it("falls back to the reply when output is empty", () => {
+      render(<RunProgressCard {...base} status="failed" state={{ ...liveState(), status: "failed", output: "", reply: "Partial reply" }} onTakeOver={() => {}} />);
+      expect(screen.getByText("Partial reply")).toBeInTheDocument();
+    });
+    it("HTML in the output is shown literally, never rendered", () => {
+      const html = "<b>bold</b><img src=x onerror=alert(1)>";
+      const { container } = render(<RunProgressCard {...base} status="completed" state={{ ...liveState(), status: "completed", output: html }} onTakeOver={() => {}} />);
+      expect(screen.getByText(html)).toBeInTheDocument();
+      expect(container.querySelector("b, img")).toBeNull();
+    });
+    it("a running run does not show output yet", () => {
+      render(<RunProgressCard {...base} status="running" state={{ ...liveState(), reply: "streaming words" }} onTakeOver={() => {}} />);
+      expect(screen.queryByText("streaming words")).not.toBeInTheDocument();
+    });
+    it("a completed draft-package run with no package says so and links back to Tracklist", () => {
+      render(<RunProgressCard {...base} runId="r9" kind="draft-package" status="completed" state={{ ...liveState(), status: "completed" }} onTakeOver={() => {}} />);
+      expect(screen.getByText("No package was created.")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Edit and draft again" })).toHaveAttribute("href", "/tracklist?from=r9");
+      expect(screen.queryByRole("link", { name: "Review package" })).not.toBeInTheDocument();
+    });
     it("Review package link", () => {
       render(<RunProgressCard {...base} packageId="p1" status="completed" state={liveState()} onTakeOver={() => {}} />);
       expect(screen.getByRole("link", { name: "Review package" })).toHaveAttribute("href", "/packages/p1");

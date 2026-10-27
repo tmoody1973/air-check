@@ -105,6 +105,9 @@ export function RunProgressCard({
   const trackMode = upcoming.length > 0;
   const skipped = totals.closingSkipped;
   const canStop = status === "queued" || status === "running" || status === "stopping";
+  // The agent's final words, once the run is over. Plain text only: React escapes it, never HTML.
+  const finalText = canStop ? "" : (state.output || state.reply || "").trim();
+  const noPackage = kind === "draft-package" && status === "completed" && !packageId;
 
   async function takeOver() {
     setPending(true);
@@ -142,6 +145,7 @@ export function RunProgressCard({
           </Row>
         ))}
       </ul>
+      {finalText && <p className="whitespace-pre-wrap break-words border-t border-line px-5 py-3.5 text-sm text-ink">{finalText}</p>}
       <div className="flex flex-wrap items-center gap-3 border-t border-line px-5 py-3.5">
         {canStop ? (
           <>
@@ -159,9 +163,11 @@ export function RunProgressCard({
           <p className="text-sm font-semibold">Stopped. You have it from here.</p>
         ) : status === "failed" ? (
           <p className="text-sm font-semibold text-problem-text">The run stopped with an error.</p>
+        ) : noPackage ? (
+          <p className="text-sm font-semibold">No package was created.</p>
         ) : null}
         {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
-        {cancelled && kind === "draft-package" && runId && (
+        {(cancelled || noPackage) && kind === "draft-package" && runId && (
           <Link href={`/tracklist?from=${encodeURIComponent(runId)}`} className={linkClass}>Edit and draft again</Link>
         )}
         {packageId && <Link href={`/packages/${encodeURIComponent(packageId)}`} className={linkClass}>Review package</Link>}
