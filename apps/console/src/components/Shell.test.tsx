@@ -42,3 +42,11 @@ describe("Shell nav targets", () => {
     expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Tracklist" })).toHaveAttribute("href", "/tracklist");
   });
 });
+
+describe("Shell chat links", () => {
+  it("Chat and New conversation both open /chat", () => {
+    render(<Shell title="Chat" workspace="real" active="chat">x</Shell>);
+    expect(screen.getByRole("link", { name: "Chat" })).toHaveAttribute("href", "/chat");
+    expect(screen.getByRole("link", { name: /New conversation/ })).toHaveAttribute("href", "/chat");
+  });
+});

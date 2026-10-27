@@ -63,7 +63,7 @@ export type RunRowStatus = "queued" | "running" | "stopping" | "completed" | "ca
 
 const linkClass = "inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-2";
 
-function LiveTag() {
+export function LiveTag() {
   return (
     <span className="inline-block rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] leading-none tracking-[0.1em] text-muted uppercase">
       Live · Nemotron

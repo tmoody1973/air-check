@@ -61,7 +61,7 @@ export function Shell({
         </div>
         <div id="sidebar-body" className={`${open ? "flex" : "hidden"} flex-1 flex-col gap-5 min-[900px]:flex`}>
           <Link
-            href="/soon/chat"
+            href="/chat"
             className="flex min-h-11 items-center gap-2 rounded-control border border-line-strong bg-surface px-3.5 text-sm font-medium"
           >
             <span aria-hidden="true">+</span> New conversation

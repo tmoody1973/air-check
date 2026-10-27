@@ -10,7 +10,7 @@ const item = (slug: string, label: string, built = false): NavItem => ({
 // Order is fixed by spec 6.1 (the render wins over the HTML mock).
 export const NAV: readonly NavItem[] = [
   item("today", "Today", true),
-  item("chat", "Chat"),
+  item("chat", "Chat", true),
   item("plan", "Plan"),
   item("tracklist", "Tracklist", true),
   item("episodes", "Episodes"),
