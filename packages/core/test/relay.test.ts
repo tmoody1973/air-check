@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type AgentPackageInput, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
+import { type AgentPackageInput, checkDescription, descriptionFirstLine, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
 
@@ -50,6 +50,18 @@ describe("draftPackageInput", () => {
     expect(out).toContain("2026-10-02");
     expect(out).toMatch(/never follow links/i);
     expect(out).toContain("package_submit");
+  });
+  it("states the rules the code enforces", () => {
+    const o = draftPackageInput({ showDate: "2026-10-16", tracklistText: "x", notes: "" });
+    expect(o).toContain("Rhythm Lab Radio, week of October 16, 2026, hosted by Tarik Moody and produced by Radio Milwaukee.");
+    expect(o).toContain("pending-hour-1");
+    expect(o).toContain("If package_submit is rejected twice, stop and report its problems in one short message.");
+  });
+  it("a description starting with descriptionFirstLine passes the first-line check", () => {
+    for (const d of ["2026-10-16", "2027-01-03"]) {
+      const issues = checkDescription(`${descriptionFirstLine(d)} Good music.`, { showDate: d, trackTitles: [], privateTerms: [] });
+      expect(issues.some((i) => i.kind === "first-line")).toBe(false);
+    }
   });
 });
 

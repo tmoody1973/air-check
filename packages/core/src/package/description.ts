@@ -20,7 +20,8 @@ export type DescriptionIssue =
   | { kind: "tracklist"; titles: string[] }
   | { kind: "private"; term: string };
 
-function firstLine(iso: string): string {
+/** The exact opening line a public description must start with. */
+export function descriptionFirstLine(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   return `Rhythm Lab Radio, week of ${MONTHS[m! - 1]} ${d}, ${y}, hosted by Tarik Moody and produced by Radio Milwaukee.`;
 }
@@ -33,7 +34,7 @@ export function checkDescription(
   const issues: DescriptionIssue[] = [];
   const length = [...text].length;
   if (length > MAX_DESCRIPTION) issues.push({ kind: "too-long", length });
-  if (!text.startsWith(firstLine(opts.showDate))) issues.push({ kind: "first-line" });
+  if (!text.startsWith(descriptionFirstLine(opts.showDate))) issues.push({ kind: "first-line" });
   for (const re of TIME_RELATIVE)
     for (const m of text.matchAll(re)) issues.push({ kind: "time-relative", phrase: m[0] });
   const lower = text.toLowerCase();
