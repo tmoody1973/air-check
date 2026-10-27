@@ -14,10 +14,13 @@ const cert = join(dir, "tls.crt");
 const key = join(dir, "tls.key");
 const crateToken = "c".repeat(40);
 const aircheckToken = "a".repeat(40);
+const demoToken = "d".repeat(40);
 const fakeCrate = fileURLToPath(new URL("./fixtures/fake-crate.mjs", import.meta.url));
 
 let server: Server;
 let port: number;
+let bareServer: Server; // same config minus the demo pair
+let barePort: number;
 let convexStub: HttpServer;
 const convexHits: { auth?: string; body: string }[] = [];
 
@@ -36,7 +39,7 @@ beforeAll(async () => {
     "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
     "-keyout", key, "-out", cert,
   ], { stdio: "ignore" });
-  server = await startServer({
+  const base = {
     host: "127.0.0.1",
     port: 0,
     tlsCert: cert,
@@ -46,20 +49,24 @@ beforeAll(async () => {
     aircheckMcpToken: aircheckToken,
     convexSiteUrl: `http://127.0.0.1:${(convexStub.address() as AddressInfo).port}`, // local stub
     agentSubmitToken: "s".repeat(40),
-  });
+  };
+  server = await startServer({ ...base, demoMcpToken: demoToken, demoSubmitToken: "m".repeat(40) });
   port = (server.address() as AddressInfo).port;
+  bareServer = await startServer(base);
+  barePort = (bareServer.address() as AddressInfo).port;
 });
 afterAll(async () => {
+  await new Promise<void>((r) => bareServer.close(() => r()));
   await new Promise<void>((r) => server.close(() => r()));
   await new Promise<void>((r) => convexStub.close(() => r()));
 });
 
-function send(path: string, opts: { method?: string; token?: string; body?: unknown } = {}) {
+function send(path: string, opts: { method?: string; token?: string; body?: unknown; port?: number } = {}) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = request(
       {
         host: "127.0.0.1",
-        port,
+        port: opts.port ?? port,
         path,
         method: opts.method ?? "GET",
         ca: readFileSync(cert),
@@ -170,5 +177,34 @@ describe("bridge HTTPS server", () => {
     expect(convexHits).toHaveLength(1);
     expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
     expect(JSON.parse(convexHits[0]!.body)).not.toHaveProperty("extra");
+  });
+
+  it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
+    const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit"]);
+    convexHits.length = 0;
+    const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
+    const r = await send("/aircheck-demo/mcp", {
+      method: "POST",
+      token: demoToken,
+      body: rpc("tools/call", { name: "package_submit", arguments: args }),
+    });
+    expect(JSON.parse(r.body).result.isError).toBe(false);
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"m".repeat(40)}`);
+  });
+
+  it("keeps the real and demo MCP tokens apart", async () => {
+    const onDemo = await send("/aircheck-demo/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
+    expect(onDemo.status).toBe(401);
+    const onReal = await send("/aircheck/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
+    expect(onReal.status).toBe(401);
+  });
+
+  it("has no /aircheck-demo/mcp route when the demo pair is unset", async () => {
+    const demo = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list"), port: barePort });
+    expect(demo.status).toBe(404);
+    const real = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list"), port: barePort });
+    expect(real.status).toBe(200);
   });
 });

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import Link from "next/link";
 import type { RunState, RunStep } from "@aircheck/core";
 import { SampleTag } from "./SampleTag";
 import { Pill } from "./Pill";
@@ -5,7 +7,8 @@ import { Pill } from "./Pill";
 export interface UpcomingRow { label: string; text: string; status: "next" | "skipped" }
 export interface RunTotals { tracks: number; closingSkipped: number }
 
-const COPY = "Stops after this track and opens the draft for you to edit. The agent won't overwrite anything you change.";
+const COPY = "Stops the agent at its next step.";
+const DRAFT_COPY = `${COPY} You can then edit the inputs and draft again.`;
 const VERIFY = "[verify]";
 const chipBase = "rounded-md border px-1.5 py-1 font-mono text-[11px] leading-none";
 const neutral = "border-line bg-surface text-ink-soft";
@@ -57,38 +60,84 @@ function StepRow({ step, index }: { step: RunStep; index: number }) {
   );
 }
 
+export type RunRowStatus = "queued" | "running" | "stopping" | "completed" | "cancelled" | "failed";
+
+const linkClass = "inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-2";
+
+export function LiveTag() {
+  return (
+    <span className="inline-block rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] leading-none tracking-[0.1em] text-muted uppercase">
+      Live · Nemotron
+    </span>
+  );
+}
+
+const ERROR_COPY: Record<string, string> = { NOT_FOUND: "That run no longer exists." };
+const GENERIC_ERROR = "Could not stop the run. Please try again.";
+
+// Server detail (request ids, stack text) goes to the console only, never to the page.
+function errorText(e: unknown): string {
+  console.error("requestStop failed", e);
+  const code = (e as { data?: { code?: string } })?.data?.code;
+  return (code && ERROR_COPY[code]) || GENERIC_ERROR;
+}
+
+/** `status` is the run row's status. The track line and percent bar appear only when there are upcoming rows. */
 export function RunProgressCard({
-  title, state, totals, upcoming = [], sample = false, onTakeOver,
+  title, state, totals, upcoming = [], onTakeOver, status, source, runId, kind, packageId,
 }: {
   title: string;
   state: RunState;
   totals: RunTotals;
   upcoming?: UpcomingRow[];
-  sample?: boolean;
-  onTakeOver: () => void;
+  onTakeOver: () => unknown;
+  status: RunRowStatus;
+  source: "live" | "scripted";
+  runId?: string;
+  kind?: "chat" | "draft-package";
+  packageId?: string;
 }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const done = state.steps.filter((s) => s.status === "done").length;
   const pct = totals.tracks > 0 ? Math.min(100, Math.round((done / totals.tracks) * 100)) : 0;
-  const stopping = state.status === "stopping";
-  const cancelled = state.status === "cancelled";
+  const stopping = status === "stopping";
+  const cancelled = status === "cancelled";
+  const trackMode = upcoming.length > 0;
   const skipped = totals.closingSkipped;
+  const canStop = status === "queued" || status === "running" || status === "stopping";
+  // The agent's final words, once the run is over. Plain text only: React escapes it, never HTML.
+  const finalText = canStop ? "" : (state.output || state.reply || "").trim();
+  const noPackage = kind === "draft-package" && status === "completed" && !packageId;
+
+  async function takeOver() {
+    setPending(true);
+    setError(null);
+    try { await onTakeOver(); } catch (e) { setError(errorText(e)); } finally { setPending(false); }
+  }
 
   return (
     <section className="overflow-hidden rounded-card border border-line bg-surface">
       <style>{`.run-pulse{animation:run-pulse 1.4s ease-in-out infinite}@keyframes run-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.run-pulse{animation:none}}`}</style>
       <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
         <h2 className="font-serif text-[22px] leading-tight">{title}</h2>
-        {sample && <SampleTag />}
+        {source === "live" ? <LiveTag /> : <SampleTag>Sample · scripted</SampleTag>}
       </div>
-      <div
-        role="progressbar" aria-label="Tracks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
-        className="relative mx-5 h-1 rounded-sm bg-surface-quiet"
-      >
-        <i className="absolute inset-y-0 left-0 rounded-sm bg-signal" style={{ width: `${pct}%` }} />
-      </div>
-      <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">
-        {done} of {totals.tracks} tracks · {skipped} closing {skipped === 1 ? "track" : "tracks"} skipped
-      </p>
+      {trackMode ? (
+        <>
+          <div
+            role="progressbar" aria-label="Tracks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
+            className="relative mx-5 h-1 rounded-sm bg-surface-quiet"
+          >
+            <i className="absolute inset-y-0 left-0 rounded-sm bg-signal" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">
+            {done} of {totals.tracks} tracks · {skipped} closing {skipped === 1 ? "track" : "tracks"} skipped
+          </p>
+        </>
+      ) : (
+        <p className="px-5 pb-1.5 pt-2.5 text-[13px] text-muted">{done} {done === 1 ? "step" : "steps"} done</p>
+      )}
       <ul>
         {state.steps.map((s, i) => <StepRow key={s.id} step={s} index={i} />)}
         {upcoming.map((u) => (
@@ -97,23 +146,37 @@ export function RunProgressCard({
           </Row>
         ))}
       </ul>
+      {finalText && <p className="whitespace-pre-wrap break-words border-t border-line px-5 py-3.5 text-sm text-ink">{finalText}</p>}
       <div className="flex flex-wrap items-center gap-3 border-t border-line px-5 py-3.5">
-        {cancelled ? (
-          <p className="text-sm font-semibold">Stopped. Your draft is open.</p>
-        ) : (
+        {canStop ? (
           <>
             <button
-              type="button" onClick={onTakeOver} disabled={stopping}
+              type="button" onClick={takeOver} disabled={stopping || pending}
               className="inline-flex min-h-11 items-center whitespace-nowrap rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold disabled:text-muted"
             >
-              {stopping ? "Stopping after this track…" : "Take over"}
+              {stopping ? "Stopping at the next step…" : "Take over"}
             </button>
-            <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">{COPY}</span>
+            <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
+              {status === "queued" ? "Waiting for the agent…" : kind === "draft-package" ? DRAFT_COPY : COPY}
+            </span>
           </>
+        ) : cancelled ? (
+          <p className="text-sm font-semibold">Stopped. You have it from here.</p>
+        ) : status === "failed" ? (
+          <p className="text-sm font-semibold text-problem-text">The run stopped with an error.</p>
+        ) : noPackage ? (
+          <p className="text-sm font-semibold">No package was created.</p>
+        ) : null}
+        {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
+        {(cancelled || noPackage) && kind === "draft-package" && runId && (
+          <Link href={`/tracklist?from=${encodeURIComponent(runId)}`} className={linkClass}>Edit and draft again</Link>
         )}
+        {packageId && <Link href={`/packages/${encodeURIComponent(packageId)}`} className={linkClass}>Review package</Link>}
       </div>
       <p className="border-t border-line px-5 pb-3.5 pt-2.5 font-mono text-[11px] leading-snug text-muted">
-        Live from the agent&apos;s run · steps stream in as they happen
+        {source === "scripted"
+          ? "Sample run · replayed from a recorded session"
+          : canStop ? "Live from the agent's run · steps stream in as they happen" : "Recorded from the agent's run"}
       </p>
     </section>
   );

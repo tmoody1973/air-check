@@ -117,4 +117,18 @@ describe("deploy files", () => {
     expect(c).toContain('header Strict-Transport-Security "max-age=31536000"');
     expect(c).not.toMatch(/includeSubDomains|preload/);
   });
+
+  it("the demo sandbox boots from its own unit, after the real one, and the real unit is airc only", () => {
+    const realUnit = read("hermes/aircheck-hermes.service");
+    const demoUnit = read("hermes/aircheck-hermes-demo.service");
+    expect(realUnit.replace(/^#.*$/gm, "")).not.toContain("aircdemo"); // comments may point at the demo unit
+    expect(demoUnit).toMatch(/^After=.*aircheck-hermes\.service/m);
+    expect(demoUnit).toMatch(/^Wants=.*aircheck-hermes\.service/m);
+    expect(demoUnit).toMatch(/^TimeoutStartSec=900$/m);
+    expect(demoUnit).toMatch(/^ExecStopPost=-\S+openshell sandbox stop aircdemo$/m);
+    const execs = demoUnit.split("\n").filter((l) => /^Exec\w+=/.test(l));
+    expect(execs.length).toBeGreaterThanOrEqual(3);
+    for (const l of execs) expect(l).toMatch(/^Exec\w+=-/);
+    expect(execs.join("\n")).not.toMatch(/\bairc\b(?!demo)/);
+  });
 });

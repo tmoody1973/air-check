@@ -49,4 +49,39 @@ describe("loadConfig", () => {
   it("rejects a non-https Convex URL", () => {
     expect(() => loadConfig({ ...env, CONVEX_SITE_URL: "http://x.convex.site" })).toThrow("CONVEX_SITE_URL");
   });
+
+  describe("demo sandbox tokens", () => {
+    const demo = { AIRCHECK_DEMO_MCP_TOKEN: "d".repeat(32), DEMO_AGENT_SUBMIT_TOKEN: "m".repeat(32) };
+
+    it("are absent by default", () => {
+      const c = loadConfig(env);
+      expect(c.demoMcpToken).toBeUndefined();
+      expect(c.demoSubmitToken).toBeUndefined();
+    });
+
+    it("load as a pair", () => {
+      const c = loadConfig({ ...env, ...demo });
+      expect(c.demoMcpToken).toBe(demo.AIRCHECK_DEMO_MCP_TOKEN);
+      expect(c.demoSubmitToken).toBe(demo.DEMO_AGENT_SUBMIT_TOKEN);
+    });
+
+    it.each(Object.keys(demo))("throw when only %s is set", (name) => {
+      expect(() => loadConfig({ ...env, [name]: demo[name as keyof typeof demo] })).toThrow(name);
+    });
+
+    it.each(Object.keys(demo))("reject a short %s", (name) => {
+      expect(() => loadConfig({ ...env, ...demo, [name]: "x".repeat(31) })).toThrow(name);
+    });
+
+    it.each(["CRATE_MCP_TOKEN", "AIRCHECK_MCP_TOKEN", "AGENT_SUBMIT_TOKEN"])("reject a demo token equal to %s", (name) => {
+      const same = env[name as keyof typeof env];
+      expect(() => loadConfig({ ...env, ...demo, AIRCHECK_DEMO_MCP_TOKEN: same })).toThrow(/must differ/);
+      expect(() => loadConfig({ ...env, ...demo, DEMO_AGENT_SUBMIT_TOKEN: same })).toThrow(/must differ/);
+    });
+
+    it("reject the two demo tokens equal to each other", () => {
+      const same = "q".repeat(40);
+      expect(() => loadConfig({ ...env, AIRCHECK_DEMO_MCP_TOKEN: same, DEMO_AGENT_SUBMIT_TOKEN: same })).toThrow(/must differ/);
+    });
+  });
 });

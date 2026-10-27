@@ -89,6 +89,19 @@ importers:
         specifier: 4.3.3
         version: 4.3.3
 
+  apps/relay:
+    dependencies:
+      convex:
+        specifier: 1.48.0
+        version: 1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
+    devDependencies:
+      '@aircheck/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
+
   packages/core: {}
 
 packages:

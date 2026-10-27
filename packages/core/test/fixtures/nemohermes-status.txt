@@ -1,0 +1,457 @@
+
+  Sandbox-scoped status for 'airc':
+  Sandbox: airc
+    Model:    nvidia/nemotron-3-super-120b-a12b
+    Provider: compatible-endpoint
+    Reasoning effort: endpoint-default
+    Inference: healthy (https://api.tokenfactory.nebius.com/v1/chat/completions)
+    Inference (upstream): not probed (Endpoint URL is not known; skipping reachability check.)
+    Serving process (hermes agent gateway): not checked
+    Host GPU: no
+    Sandbox GPU: disabled (auto)
+    OpenShell: 0.0.116 (docker)
+    Policies: pypi, tavily, telegram
+    Harness:  Hermes Agent (gateway)
+    SSH sessions: none
+    Agent:    Hermes Agent v0.21.3
+
+Sandbox:
+
+  Id: <uuid>
+  Name: airc
+  Phase: Ready
+  Resource version: 657
+  Labels: 
+    ai.nvidia.nemoclaw.create-attempt: <redacted>
+  Policy source: sandbox
+  Revision: 8
+
+Policy:
+
+  version: 1
+  filesystem_policy:
+    include_workdir: true
+    read_only:
+      - /usr
+      - /lib
+      - /opt/hermes
+      - /proc
+      - /dev/urandom
+      - /app
+      - /run/nemoclaw/managed-gateway-expected-exit
+      - /etc
+      - /var/log
+      - /var/lib/dpkg
+    read_write:
+      - /sandbox
+      - /tmp
+      - /dev/null
+      - /dev/pts
+      - /sandbox/.hermes
+  landlock:
+    compatibility: best_effort
+  process:
+    run_as_user: sandbox
+    run_as_group: sandbox
+  network_policies:
+    _provider_airc_mcp_aircheck:
+      name: _provider_airc_mcp_aircheck
+    _provider_airc_mcp_crate:
+      name: _provider_airc_mcp_crate
+    _provider_airc_tavily_search:
+      name: _provider_airc_tavily_search
+      endpoints:
+        - host: api.tavily.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: POST
+                path: /search
+            - allow:
+                method: POST
+                path: /extract
+          request_body_credential_rewrite: true
+      binaries:
+        - path: /opt/hermes/.venv/bin/python
+        - path: /usr/local/bin/curl
+        - path: /usr/bin/curl
+    _provider_airc_telegram_bridge:
+      name: _provider_airc_telegram_bridge
+    <redacted>:
+      name: <redacted>
+      endpoints:
+        - host: api.tokenfactory.nebius.com
+          port: 443
+          protocol: rest
+          tls: terminate
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /v1/models
+            - allow:
+                method: POST
+                path: /v1/chat/completions
+          allowed_ips:
+            - 213.239.161.19
+      binaries:
+        - path: /usr/local/bin/node
+        - path: /usr/bin/node
+        - path: /opt/hermes/.venv/bin/python
+        - path: /opt/hermes/.venv/bin/python3
+        - path: /opt/venv/bin/python3
+        - path: /usr/local/bin/curl
+        - path: /usr/bin/curl
+    managed_inference:
+      name: managed_inference
+      endpoints:
+        - host: inference.local
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: POST
+                path: /v1/chat/completions
+            - allow:
+                method: POST
+                path: /v1/messages
+            - allow:
+                method: POST
+                path: /v1/responses
+            - allow:
+                method: POST
+                path: /v1/completions
+            - allow:
+                method: POST
+                path: /v1/embeddings
+            - allow:
+                method: GET
+                path: /v1/models
+            - allow:
+                method: GET
+                path: /v1/models/**
+      binaries:
+        - path: /usr/local/bin/hermes
+        - path: /usr/bin/python3.11
+        - path: /opt/hermes/.venv/bin/python
+    mcp_bridge_aircheck:
+      name: mcp_bridge_aircheck
+      endpoints:
+        - host: 10.104.0.41
+          path: /aircheck/mcp
+          port: 8443
+          protocol: mcp
+          enforcement: enforce
+          rules:
+            - allow:
+                method: initialize
+            - allow:
+                method: notifications/initialized
+            - allow:
+                method: ping
+            - allow:
+                method: tools/list
+            - allow:
+                method: tools/call
+            - allow:
+                method: resources/list
+            - allow:
+                method: resources/read
+            - allow:
+                method: resources/templates/list
+            - allow:
+                method: resources/subscribe
+            - allow:
+                method: resources/unsubscribe
+            - allow:
+                method: prompts/list
+            - allow:
+                method: prompts/get
+            - allow:
+                method: tasks/list
+            - allow:
+                method: tasks/get
+            - allow:
+                method: tasks/update
+            - allow:
+                method: tasks/result
+            - allow:
+                method: tasks/cancel
+            - allow:
+                method: completion/complete
+            - allow:
+                method: logging/setLevel
+            - allow:
+                method: server/discover
+            - allow:
+                method: messages/listen
+            - allow:
+                method: notifications/cancelled
+            - allow:
+                method: notifications/progress
+            - allow:
+                method: notifications/roots/list_changed
+            - allow:
+                method: notifications/elicitation/complete
+          allowed_ips:
+            - 10.104.0.41
+          credential_binding:
+            provider: airc-mcp-aircheck
+          mcp:
+            max_body_bytes: 131072
+            strict_tool_names: true
+            allow_all_known_mcp_methods: false
+      binaries:
+        - path: /usr/local/bin/hermes
+        - path: /usr/bin/python3*
+        - path: /opt/hermes/.venv/bin/python*
+    mcp_bridge_crate:
+      name: mcp_bridge_crate
+      endpoints:
+        - host: 10.104.0.41
+          path: /crate/mcp
+          port: 8443
+          protocol: mcp
+          enforcement: enforce
+          rules:
+            - allow:
+                method: initialize
+            - allow:
+                method: notifications/initialized
+            - allow:
+                method: ping
+            - allow:
+                method: tools/list
+            - allow:
+                method: tools/call
+            - allow:
+                method: resources/list
+            - allow:
+                method: resources/read
+            - allow:
+                method: resources/templates/list
+            - allow:
+                method: resources/subscribe
+            - allow:
+                method: resources/unsubscribe
+            - allow:
+                method: prompts/list
+            - allow:
+                method: prompts/get
+            - allow:
+                method: tasks/list
+            - allow:
+                method: tasks/get
+            - allow:
+                method: tasks/update
+            - allow:
+                method: tasks/result
+            - allow:
+                method: tasks/cancel
+            - allow:
+                method: completion/complete
+            - allow:
+                method: logging/setLevel
+            - allow:
+                method: server/discover
+            - allow:
+                method: messages/listen
+            - allow:
+                method: notifications/cancelled
+            - allow:
+                method: notifications/progress
+            - allow:
+                method: notifications/roots/list_changed
+            - allow:
+                method: notifications/elicitation/complete
+          allowed_ips:
+            - 10.104.0.41
+          deny_rules:
+            - method: tools/call
+              tool: bandcamp_get_album
+            - method: tools/call
+              tool: bandcamp_get_artist_page
+            - method: tools/call
+              tool: bandcamp_get_artist_tracks
+            - method: tools/call
+              tool: bandcamp_get_bandcamp_editorial
+            - method: tools/call
+              tool: bandcamp_get_fan_collection
+            - method: tools/call
+              tool: browser_*
+            - method: tools/call
+              tool: telegraph_*
+            - method: tools/call
+              tool: tumblr_*
+            - method: tools/call
+              tool: whosampled_*
+          credential_binding:
+            provider: airc-mcp-crate
+          mcp:
+            max_body_bytes: 131072
+            strict_tool_names: true
+            allow_all_known_mcp_methods: false
+      binaries:
+        - path: /usr/local/bin/hermes
+        - path: /usr/bin/python3*
+        - path: /opt/hermes/.venv/bin/python*
+    native_hosted_inference:
+      name: native_hosted_inference
+      endpoints:
+        - host: api.tokenfactory.nebius.com
+          port: 443
+          protocol: rest
+          tls: terminate
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /v1/models
+            - allow:
+                method: POST
+                path: /v1/chat/completions
+          allowed_ips:
+            - 213.239.161.19
+      binaries:
+        - path: /usr/local/bin/node
+        - path: /usr/bin/node
+        - path: /opt/hermes/.venv/bin/python
+        - path: /opt/hermes/.venv/bin/python3
+        - path: /opt/venv/bin/python3
+        - path: /usr/local/bin/curl
+        - path: /usr/bin/curl
+    nous_research:
+      name: nous_research
+      endpoints:
+        - host: nousresearch.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /**
+            - allow:
+                method: POST
+                path: /**
+        - host: hermes-agent.nousresearch.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /**
+            - allow:
+                method: POST
+                path: /**
+      binaries:
+        - path: /usr/local/bin/hermes
+        - path: /usr/bin/python3*
+        - path: /opt/hermes/.venv/bin/python
+    nvidia:
+      name: nvidia
+      endpoints:
+        - host: integrate.api.nvidia.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: POST
+                path: /v1/chat/completions
+            - allow:
+                method: POST
+                path: /v1/completions
+            - allow:
+                method: POST
+                path: /v1/embeddings
+            - allow:
+                method: GET
+                path: /v1/models
+            - allow:
+                method: GET
+                path: /v1/models/**
+      binaries:
+        - path: /usr/local/bin/hermes
+        - path: /usr/bin/python3*
+        - path: /opt/hermes/.venv/bin/python
+    pypi:
+      name: pypi
+      endpoints:
+        - host: pypi.org
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /**
+        - host: files.pythonhosted.org
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /**
+      binaries:
+        - path: /usr/bin/curl
+        - path: /usr/local/bin/pip3
+        - path: /usr/local/bin/curl
+        - path: /usr/bin/python3*
+        - path: /opt/hermes/.venv/bin/python
+    tavily:
+      name: tavily
+      endpoints:
+        - host: api.tavily.com
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: POST
+                path: /search
+            - allow:
+                method: POST
+                path: /extract
+          request_body_credential_rewrite: true
+      binaries:
+        - path: /opt/venv/bin/python3*
+        - path: /opt/hermes/.venv/bin/python
+        - path: /usr/local/bin/node
+        - path: /usr/bin/node
+        - path: /usr/local/bin/curl
+        - path: /usr/bin/curl
+    telegram:
+      name: telegram
+      endpoints:
+        - host: api.telegram.org
+          port: 443
+          protocol: rest
+          enforcement: enforce
+          rules:
+            - allow:
+                method: GET
+                path: /bot*/**
+            - allow:
+                method: POST
+                path: /bot*/**
+            - allow:
+                method: GET
+                path: /file/bot*/**
+          credential_binding:
+            provider: airc-telegram-bridge
+      binaries:
+        - path: /usr/local/bin/node
+        - path: /usr/bin/python3*
+        - path: /usr/bin/python3.13
+        - path: /opt/hermes/.venv/bin/python3
+        - path: /opt/hermes/.venv/bin/python
+
+    Hermes Agent: running
+      Remote access: run `nemohermes 'airc' dashboard-url` for SSH port forward instructions.
+

@@ -7,6 +7,8 @@ export interface RunState {
   status: "running" | "stopping" | "completed" | "cancelled" | "failed" | "interrupted";
   steps: RunStep[];
   interim?: string;
+  /** Assistant chat reply, built from message.delta chunks in order. */
+  reply?: string;
   output?: string;
 }
 
@@ -38,6 +40,8 @@ export function applyRunEvent(state: RunState, event: string, data: Record<strin
     }
     case "message.interim":
       return { ...state, interim: str(data.text) || str(data.message) };
+    case "message.delta":
+      return { ...state, reply: (state.reply ?? "") + str(data.delta) };
     case "run.completed":
       return { ...state, status: "completed", output: str(data.output) };
     case "run.cancelled":

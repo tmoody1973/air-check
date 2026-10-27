@@ -37,6 +37,18 @@ describe("buildPackageDraft", () => {
     expect(d.audio).toEqual({ hour1Id: "box-h1", hour2Id: "box-h2" });
   });
 
+  test("a demo-workspace draft gets a demo- id so it can never collide with a real pkg- id", () => {
+    const r = buildPackageDraft(input({ tracklistText: reconciledText() }), { ...opts, workspace: "demo" });
+    expect(r.ok && [r.draft.id, r.draft.workspace]).toEqual(["demo-10-2-26", "demo"]);
+  });
+
+  test("idSuffix makes a demo id unique per draft; a real id ignores it", () => {
+    const demo = buildPackageDraft(input({ tracklistText: reconciledText() }), { ...opts, workspace: "demo", idSuffix: "a1b2c" });
+    expect(demo.ok && demo.draft.id).toBe("demo-10-2-26-a1b2c");
+    const real = buildPackageDraft(input({ tracklistText: reconciledText() }), { ...opts, idSuffix: "a1b2c" });
+    expect(real.ok && real.draft.id).toBe("pkg-10-2-26");
+  });
+
   test("raw Drive text parses without bad lines", () => {
     const r = buildPackageDraft(input(), opts);
     expect(r.ok).toBe(true);

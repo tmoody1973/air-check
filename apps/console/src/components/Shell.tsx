@@ -1,11 +1,11 @@
 "use client";
 
+import { SignOutButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { NAV } from "../lib/nav";
-import { ALLOWED_DESTINATIONS } from "../lib/sandbox";
-import { Pill } from "./Pill";
+import { SandboxChip } from "./SandboxChip";
 
 import type { Workspace } from "../../convex/gate";
 export type { Workspace };
@@ -14,6 +14,10 @@ export type { Workspace };
 const WorkspaceContext = createContext<Workspace>("real");
 export const WorkspaceProvider = WorkspaceContext.Provider;
 export const useWorkspace = () => useContext(WorkspaceContext);
+
+// The (console) layout supplies the live chip (it needs Convex); without a provider (tests) the honest default is "unknown".
+const SandboxChipContext = createContext<ReactNode>(<SandboxChip row={null} now={0} />);
+export const SandboxChipProvider = SandboxChipContext.Provider;
 
 function Logo() {
   return (
@@ -40,6 +44,7 @@ export function Shell({
 }) {
   const pathname = usePathname();
   const ctx = useContext(WorkspaceContext);
+  const chip = useContext(SandboxChipContext);
   const ws = workspace ?? ctx;
   const [open, setOpen] = useState(false);
   const current = active ?? NAV.find((n) => pathname === n.href || pathname?.startsWith(`${n.href}/`))?.slug;
@@ -61,7 +66,7 @@ export function Shell({
         </div>
         <div id="sidebar-body" className={`${open ? "flex" : "hidden"} flex-1 flex-col gap-5 min-[900px]:flex`}>
           <Link
-            href="/soon/chat"
+            href="/chat"
             className="flex min-h-11 items-center gap-2 rounded-control border border-line-strong bg-surface px-3.5 text-sm font-medium"
           >
             <span aria-hidden="true">+</span> New conversation
@@ -87,21 +92,23 @@ export function Shell({
           {ws === "demo" && (
             <div className="mt-auto flex flex-col gap-1.5 rounded-control bg-caution-bg p-3 text-[13px] leading-snug text-caution-text">
               <strong className="font-semibold">Demo workspace</strong>
-              Sample data. Publishing to Mixcloud is switched off.
+              Sample data. Publishing to Mixcloud is switched off. Chats here are visible to other visitors.
             </div>
           )}
+          <SignOutButton redirectUrl="/sign-in">
+            <button
+              type="button"
+              className={`${ws === "demo" ? "" : "mt-auto "}flex min-h-11 items-center gap-3 rounded-control px-3 text-left text-sm text-ink-soft hover:bg-chip`}
+            >
+              Sign out
+            </button>
+          </SignOutButton>
         </div>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 min-[900px]:px-8">
           <h1 className="font-serif text-[28px] font-normal leading-tight">{title}</h1>
-          <div className="flex flex-wrap gap-2">
-            <Pill tone="neutral">
-              <span aria-hidden="true" className="size-2 rounded-full bg-signal" />
-              Sandbox on
-            </Pill>
-            <Pill tone="neutral">{`${ALLOWED_DESTINATIONS.length} destinations allowed`}</Pill>
-          </div>
+          <div className="flex flex-wrap gap-2">{chip}</div>
         </header>
         <div className="px-4 py-6 min-[900px]:px-8">{children}</div>
       </main>

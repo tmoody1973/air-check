@@ -15,3 +15,12 @@
 **How we'll know if this was right:** `nemohermes airc mcp status crate` reports ready, with `trustedPrivateTarget.state: match`. A Hermes run calls a `musicbrainz_*` tool. A port scan from outside shows the bridge port closed.
 
 **What actually happened:**
+
+
+## Addendum 2026-10-27: Tavily page-reading gap
+
+Hermes's `web_extract` tool asks Tavily (`api.tavily.com`, which is allowed) to fetch any URL on Tavily's side. The sandbox never sees that page, so the agent can read arbitrary pages. That undercuts Hard Rule 5 once email reaches the agent (Plan 5).
+
+We tried a custom search-only preset that drops `POST /extract`. It did not close the gap. NemoClaw's Tavily credential provider (profile `tavily-hermes-v1`) carries its own gateway-level rule, `_provider_airc_tavily_search`, which allows both `/search` and `/extract`, and `policy exclude` does not reach it ("Unknown baseline entry"). We went back to the stock `tavily` preset.
+
+Options for Plan 5: remove the Tavily credential (which also loses search), find a provider-level rule change, or use a newer NemoClaw. Decision: revisit at the start of Plan 5 (Tarik's call).

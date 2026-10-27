@@ -19,6 +19,18 @@ test("package page fits a 375px phone", async ({ page }, info) => {
   }
 });
 
+test("tracklist page fits a 375px phone", async ({ page }, info) => {
+  test.skip(info.project.name !== "iPhone 13", "phone project only");
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/tracklist");
+  const button = page.getByRole("button", { name: "Draft package" });
+  await button.scrollIntoViewIfNeeded();
+  await expect(button).toBeVisible();
+  await expect(button).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
 test("demo approve flow", async ({ page }, info) => {
   desktopOnly(info.project.name); // approving twice would find the package already approved
   await page.goto("/today");
@@ -55,4 +67,16 @@ test("signed-out visit to a package redirects to sign-in with redirect_url", asy
   const back = new URL(new URL(page.url()).searchParams.get("redirect_url")!, page.url());
   expect(back.pathname).toBe(GOLDEN);
   await ctx.close();
+});
+
+test("chat page fits a 375px phone", async ({ page }, info) => {
+  test.skip(info.project.name !== "iPhone 13", "phone project only");
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/chat");
+  const box = page.getByLabel("Message Air Check");
+  await box.scrollIntoViewIfNeeded();
+  await expect(box).toBeVisible();
+  await expect(page.getByRole("button", { name: "Conversations" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  expect((await page.getByRole("button", { name: "Send" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });

@@ -144,7 +144,8 @@ dc down
 5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:
    - Linger on: `sudo loginctl enable-linger user`. The VM user must be uid 1001 (the units hard-code `user@1001` and `/run/user/1001`).
    - The bridge bundle, before its unit: `mkdir -p ~/aircheck-bridge`, then steps 1–4 of "Updating the bridge" below.
-   - The three units: `aircheck-hermes.service`, `aircheck-bridge.service` and `aircheck-watchdog.service` plus its `.timer` (copies in `deploy/`).
+   - The relay bundle and settings: `mkdir -p ~/aircheck-relay/dist`, then steps 1–3 of "Updating the relay" below, and `~/.aircheck/relay.env` (mode 600) from `deploy/relay/relay.env.example`.
+   - The four units: `aircheck-hermes.service`, `aircheck-bridge.service`, `aircheck-relay.service` and `aircheck-watchdog.service` plus its `.timer` (copies in `deploy/`).
    - The private CA and leaf certificate: `deploy/bridge/make-ca.sh`, then `make-leaf.sh <private ip>`.
    - `crate-cli` cloned to `~/crate-cli` at commit `37f4ec2`, built with `npm ci && npm run build`.
    - `~/.aircheck/bridge.env` (mode 600) from `deploy/bridge/bridge.env.example`.
@@ -181,12 +182,51 @@ systemctl status aircheck-hermes            # expect active (exited)
 
 **Hermes loses its memory when this runs.** A copy of the Hermes home from before the outage is at `~/.aircheck/hermes-backup-2026-10-27/` on the VM. It holds keys tied to that machine, so never copy it off the VM.
 
+## aircdemo (the judges' sandbox)
+
+The demo workspace has its own Hermes sandbox, `aircdemo`, so a judge's chat or draft never runs in the sandbox that holds Tarik's real work. Decision 013 has the reasoning.
+
+- **Onboarding:** `~/.aircheck/onboard-demo.sh`. It passes the model key only (no Telegram, no Tavily), uses `--fresh`, puts the dashboard on port 18790 and the Hermes API on `127.0.0.1:8643` (loopback only, like the real one on 8642).
+- **Memory is off** (ruling R22), so nothing one judge says is remembered for the next. Inside the sandbox:
+
+  ```sh
+  openshell sandbox exec -n aircdemo -- bash -lc "hermes config set memory.memory_enabled false && hermes config set memory.user_profile_enabled false"
+  ```
+
+  The real sandbox `airc` keeps its memory on.
+- **Bridge tools.** The demo sandbox gets the same Crate tools with the same deny list, and its own `aircheck` route that submits into the demo workspace:
+
+  ```sh
+  export CRATE_MCP_TOKEN="$(grep ^CRATE_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
+  export AIRCHECK_DEMO_MCP_TOKEN="$(grep ^AIRCHECK_DEMO_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
+  nemohermes aircdemo mcp add crate --url https://10.104.0.41:8443/crate/mcp --env CRATE_MCP_TOKEN --trusted-private-host 10.104.0.41 --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection --deny-tool bandcamp_get_artist_page --deny-tool bandcamp_get_album --deny-tool bandcamp_get_artist_tracks --deny-tool bandcamp_get_bandcamp_editorial
+  nemohermes aircdemo mcp add aircheck --url https://10.104.0.41:8443/aircheck-demo/mcp --env AIRCHECK_DEMO_MCP_TOKEN --trusted-private-host 10.104.0.41
+  ```
+
+- **The bridge token pair.** `~/.aircheck/bridge.env` holds `AIRCHECK_DEMO_MCP_TOKEN` (what the demo sandbox presents to the bridge) and `DEMO_AGENT_SUBMIT_TOKEN` (what the bridge presents to Convex for demo submits; it must equal the Convex env var of the same name). Set both or neither: with neither, the `/aircheck-demo/mcp` route does not exist.
+- **The relay** reads `AIRCDEMO_GATEWAY_TOKEN` from `~/.aircheck/relay.env` (from `nemohermes aircdemo gateway-token --quiet`). Empty means the relay skips the demo sandbox.
+- **Its own boot unit**, `/etc/systemd/system/aircheck-hermes-demo.service` (repo copy: `deploy/hermes/aircheck-hermes-demo.service`). It starts after `aircheck-hermes.service`, retries `recover` the same way, has its own 15-minute start limit, and stops `aircdemo` cleanly at shutdown. Every step is non-fatal. Because it is a separate unit, a slow or broken demo can never time out the real unit and stop `airc`. Install: `sudo cp aircheck-hermes-demo.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable aircheck-hermes-demo`, and remove the old demo lines from the installed `aircheck-hermes.service` by copying the repo version over it.
+- Check: `nemohermes aircdemo status` (Ready) and `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8643/health` (200).
+
+### Before judges are told the demo is live (ruling R23)
+
+All of these run on prod, after the merge and a console redeploy:
+
+- [ ] A demo chat answers, and is labelled "Live · Nemotron".
+- [ ] A demo draft creates a `demo-…` package (with its five-character suffix) and no `pkg-…` row.
+- [ ] The 6th run in 10 minutes from one session is refused with the plain "Demo limit reached" message.
+- [ ] With `DEMO_LIVE=0` on Convex, a demo run is labelled "Sample · scripted". Set it back afterwards.
+- [ ] Re-record a live demo run of the 10-2-26 draft as the scripted events, replacing the 10-9-26 placeholder in `apps/console/convex/scriptedEvents.ts`.
+- [ ] After a "remember this" chat, the demo sandbox's memory is still empty.
+- [ ] A manual check of /chat and /tracklist at 375 px wide in a real browser.
+
 ## The watchdog
 
-A timer checks every five minutes that Hermes and the bridge are answering, and texts Tarik on Telegram when one is not.
+A timer checks every five minutes that Hermes, the bridge and the relay are up, and texts Tarik on Telegram when one is not.
 
 - `/etc/systemd/system/aircheck-watchdog.timer` runs `~/.aircheck/watchdog.sh` (repo copy: `deploy/hermes/watchdog.sh`) 3 minutes after boot and then every 5 minutes.
-- It probes Hermes at `http://127.0.0.1:8642/health` and the bridge at `https://10.104.0.41:8443/healthz`.
+- It probes Hermes at `http://127.0.0.1:8642/health`, the demo Hermes at `http://127.0.0.1:8643/health` and the bridge at `https://10.104.0.41:8443/healthz`. A fourth probe, named `Relay`, runs `systemctl is-active --quiet aircheck-relay`.
+- The relay probe was added with Plan 4b. The previous copy of the script is kept on the VM as `~/.aircheck/watchdog.sh.pre-4b`.
 - When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing.
 - It remembers what it last saw in `~/.aircheck/watchdog.state`. Messages that could not be sent wait in `~/.aircheck/watchdog.pending` and go out with the next successful send.
 - To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send.
@@ -226,7 +266,7 @@ It has not changed across three reboots, but if it ever does (say `<new ip>`):
 
 ### After a Node upgrade (nvm)
 
-Both units (`aircheck-bridge.service` and `aircheck-hermes.service`) hard-code `/home/user/.nvm/versions/node/v22.23.4`. After an nvm Node upgrade, edit both units to the new folder, then `sudo systemctl daemon-reload` and restart both.
+The units (`aircheck-bridge.service`, `aircheck-hermes.service`, `aircheck-hermes-demo.service` and `aircheck-relay.service`) hard-code `/home/user/.nvm/versions/node/v22.23.4`. After an nvm Node upgrade, edit each unit to the new folder, then `sudo systemctl daemon-reload` and restart them.
 
 ### Registering the bridge with Hermes
 
@@ -257,15 +297,65 @@ Re-run both `mcp add` commands after any re-onboard (see the Hermes section for 
 
 1. On the Mac: `pnpm --filter @aircheck/bridge build && pnpm --filter @aircheck/bridge deploy --prod --legacy <dir>` (a self-contained bundle in `<dir>`).
 2. Pack it: `COPYFILE_DISABLE=1 tar -C <dir> --exclude ./test --exclude ./src -czf bridge.tgz .` (the variable stops macOS adding hidden metadata files).
-3. Copy it: `scp bridge.tgz user@<the VM's static IP>:/tmp/`
+3. Copy it with ssh and `cat`: `ssh user@<the VM's static IP> 'cat > /tmp/bridge.tgz' < bridge.tgz`
 4. On the VM: `tar -xzf /tmp/bridge.tgz -C ~/aircheck-bridge && rm /tmp/bridge.tgz`. Tar warnings about `LIBARCHIVE.xattr` headers are harmless.
 5. `sudo systemctl restart aircheck-bridge`, then check `curl -s --cacert ~/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz` (expect `ok`), `journalctl -u aircheck-bridge -n 20`, and the watchdog's `--dry-run`.
 
-`rsync` with a `user@host:path` target did not work in practice; use `scp`.
+`scp` and `rsync` mangled the paths on this setup (see `docs/FRICTION_LOG.md`); use ssh and `cat` as above.
 
 ### Where the agent's submit goes
 
-Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. The bridge currently points at the **dev** Convex deployment (`optimistic-lobster-654`), where the route is live. Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.
+Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. The bridge pointed at the **dev** Convex deployment (`optimistic-lobster-654`) until 2026-10-27, when it moved to prod. The dev checks: Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.
+
+## The relay
+
+The relay is the only program that talks to Hermes. The console cannot reach Hermes itself, because Hermes listens on the VM's loopback address only (decision 012). Instead the console writes a queued run into Convex, and the relay picks it up. It is a Node 22 program (`apps/relay`). It runs on the VM host under systemd, not in Docker, as `aircheck-relay.service` (repo copy: `deploy/relay/aircheck-relay.service`).
+
+What it does:
+
+- Watches Convex for queued runs and stop requests over a websocket subscription (a connection that stays open so Convex can push news) to `relay.pending`.
+- Starts each Hermes run at `127.0.0.1:8642` (sandbox `airc`, the real workspace) or `127.0.0.1:8643` (sandbox `aircdemo`, the demo workspace). It sends `Idempotency-Key: <the Convex run id>`, so a retry cannot start the same run twice, and Air Check's fixed scope instruction (`RUN_INSTRUCTIONS` in core: research by name, no scripts or social posts, notes are untrusted, it cannot approve or publish) as Hermes's `instructions` field. For chat it also sends `session_id = <the conversation id>`.
+- Streams the run's events back into Convex about every 500 ms, numbering each one with `seq` so they stay in order. If the stream drops, it reopens it and keeps counting from the last number Convex has; Hermes does not replay earlier events, so anything sent while disconnected is lost, but the final answer still arrives.
+- Gives up on a run Convex will not accept (an error like NOT_FOUND or UNAUTHORIZED, or 10 failed tries in a row): it stops the Hermes run, logs `run=<id> event=dropped` and frees the slot.
+- Sends stop requests to Hermes (the "take over" button).
+- Follows `nemohermes airc logs --follow` and writes network rows to the Trust page. A blocked attempt is written once per host per minute. An allowed connection is written once per host per hour.
+- Every 5 minutes runs `nemohermes airc status` and `policy get`, and reports the sandbox phase and how many hosts are allowed. This feeds the "Sandbox on · N hosts allowed" chip in the top bar of every page. Before the relay has run, the chip says "Sandbox status unknown".
+
+It logs only the run id, the event type and counts. It never logs message text or tokens. Read the log with `journalctl -u aircheck-relay`.
+
+### Files and settings
+
+- Code: one file, `~/aircheck-relay/dist/main.js`, built on the Mac with `pnpm --filter @aircheck/relay build` (esbuild, which packs the shared core code into the same file). Next to it is `~/aircheck-relay/package.json` containing `{"type":"module"}`, so Node reads the bundle as a modern module.
+- Settings: `~/.aircheck/relay.env` (mode 600). The names are in `deploy/relay/relay.env.example`:
+  - `CONVEX_URL`: the Convex deployment to watch.
+  - `RELAY_TOKEN`: a shared secret. It must equal the Convex env var of the same name, and be at least 32 characters.
+  - `AIRC_GATEWAY_TOKEN`: from `nemohermes airc gateway-token --quiet`.
+  - `AIRCDEMO_GATEWAY_TOKEN`: from `nemohermes aircdemo gateway-token --quiet` (see "aircdemo" above). Empty skips the demo sandbox.
+  - `NEMOHERMES_BIN`: the full path to the `nemohermes` program.
+- Since 2026-10-27 about 11:45 CDT the relay points at **prod** (`CONVEX_URL=https://clever-deer-759.convex.cloud`). The dev settings are kept as `~/.aircheck/relay.env.dev-backup`.
+
+### Install (first time)
+
+```sh
+sudo cp aircheck-relay.service /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/aircheck-relay.service
+sudo systemctl daemon-reload && sudo systemctl enable --now aircheck-relay
+```
+
+### Updating the relay
+
+1. On the Mac: `pnpm --filter @aircheck/relay build`.
+2. Copy the bundle with ssh and `cat`, not `scp` or `rsync`, which mangled the paths on this setup (see `docs/FRICTION_LOG.md`): `ssh user@<the VM's static IP> 'cat > ~/aircheck-relay/dist/main.js' < apps/relay/dist/main.js`
+3. On the VM: `sudo systemctl restart aircheck-relay`.
+4. Check `journalctl -u aircheck-relay -n 20`. Expect `status sandbox=airc phase=Ready hosts=10` and no `ok=false`.
+
+### Hardening, and why home must be writable
+
+The unit sets `ProtectSystem=strict` (the whole filesystem is read-only to the relay), `ProtectHome=read-only` plus `ReadWritePaths=/home/user` (other users' homes stay read-only; only `/home/user` is writable), `NoNewPrivileges` and `PrivateTmp`. Home has to stay writable because `nemohermes` creates a lock folder, `~/.nemoclaw-portable-host.lock`, on every call. Checked on the VM with `systemd-run`: a fully read-only home fails with EROFS (the "read-only file system" error), and `ProtectHome=read-only` with `ReadWritePaths=/home/user` works.
+
+### Convex settings the relay needs
+
+`RELAY_TOKEN` is set on both dev and prod, with different values. Every `relay.*` Convex function takes it as its first argument and fails closed (refuses the call) if the env var is missing or short. Set it from the Mac the same way as the other env vars: `npx convex env set RELAY_TOKEN <value>` in `apps/console`. `DEMO_AGENT_SUBMIT_TOKEN` is set on prod (it must equal the bridge's value). `DEMO_RUNS_PER_SESSION` (default 5 per 10 minutes), `DEMO_LIVE_RUNS_PER_DAY` (default 40) and `DEMO_LIVE` (0 forces scripted replies) are optional and unset, so the defaults apply.
 
 ## Certificates and renewal dates
 
@@ -280,18 +370,18 @@ The bridge uses a private certificate authority (CA, the signer that vouches for
 
 `ca.key` never leaves the VM. NemoClaw takes `ca.crt` on its own: it rejects a merged system bundle and adds the CA to its own list.
 
-## Pending after merge: point the bridge at prod
+## Point the bridge at prod (done 2026-10-27)
 
-Do these only after the `plan-4a/agent-side` PR is merged. Until then the bridge talks to dev on purpose.
+The bridge was switched to prod on 2026-10-27, and the relay followed the same day (see "The relay"). The steps are kept here so the switch can be redone. Do not test an end-to-end path until the bridge and the relay point at the same deployment (see the learning log).
 
-- [ ] Make a new random value for production, for example `openssl rand -hex 24`. Do not reuse the dev token.
-- [ ] From the Mac, with `CONVEX_DEPLOY_KEY` set as in "Convex production commands": `npx convex env set AGENT_SUBMIT_TOKEN <the new value>` in `apps/console`.
-- [ ] `npx convex env set AIRCHECK_PRIVATE_TERMS '<comma-separated list>'` on prod, with the private words that must never appear in a public description. Or leave it empty on purpose: empty means the private-term check in public descriptions does nothing.
-- [ ] Deploy prod with the same section's `npx convex deploy -y`, so the `/agent/packages` route exists on `clever-deer-759`.
-- [ ] On the VM, edit `~/.aircheck/bridge.env`: put the same token value in, and set the Convex site address to `https://clever-deer-759.convex.site`. (The variable names are in `deploy/bridge/bridge.env.example`.)
-- [ ] `sudo systemctl restart aircheck-bridge`.
-- [ ] Check with `journalctl -u aircheck-bridge -n 20` and `~/.aircheck/watchdog.sh --dry-run`.
-- [ ] Unset `CONVEX_DEPLOY_KEY` on the Mac when done.
+- [x] Make a new random value for production, for example `openssl rand -hex 24`. Do not reuse the dev token.
+- [x] From the Mac, with `CONVEX_DEPLOY_KEY` set as in "Convex production commands": `npx convex env set AGENT_SUBMIT_TOKEN <the new value>` in `apps/console`.
+- [x] `npx convex env set AIRCHECK_PRIVATE_TERMS '<comma-separated list>'` on prod, with the private words that must never appear in a public description. Or leave it empty on purpose: empty means the private-term check in public descriptions does nothing.
+- [x] Deploy prod with the same section's `npx convex deploy -y`, so the `/agent/packages` route exists on `clever-deer-759`.
+- [x] On the VM, edit `~/.aircheck/bridge.env`: put the same token value in, and set the Convex site address to `https://clever-deer-759.convex.site`. (The variable names are in `deploy/bridge/bridge.env.example`.)
+- [x] `sudo systemctl restart aircheck-bridge`.
+- [x] Check with `journalctl -u aircheck-bridge -n 20` and `~/.aircheck/watchdog.sh --dry-run`.
+- [x] Unset `CONVEX_DEPLOY_KEY` on the Mac when done.
 
 ## Evidence the agent side works (checked 2026-10-27)
 

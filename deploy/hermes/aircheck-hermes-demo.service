@@ -1,0 +1,30 @@
+# Starts the judges' demo Hermes sandbox (aircdemo, Hermes API on 127.0.0.1:8643) at boot,
+# after the real one. Its own unit, so a slow or broken demo can never time out
+# aircheck-hermes.service and stop the real sandbox (airc).
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable aircheck-hermes-demo
+[Unit]
+Description=Air Check: start the demo Hermes sandbox (aircdemo)
+After=aircheck-hermes.service docker.service network-online.target user@1001.service
+Wants=aircheck-hermes.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=user
+Environment=PATH=/home/user/.local/bin:/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+# Same shape as aircheck-hermes.service: `start`, then `recover` every 15 s for up to 5 minutes
+# to restore the :8643 port forward. Every Exec line keeps the leading `-` so a give-up is
+# non-fatal and ExecStopPost still runs; the watchdog alerts if the demo Hermes is really down.
+ExecStart=-/home/user/.local/bin/nemohermes aircdemo start
+ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes aircdemo recover && exit 0; sleep 15; done; echo "aircheck-hermes-demo: Demo Hermes not healthy after 5 min; watchdog will alert"; exit 1'
+# At shutdown, stop the sandbox through OpenShell while the gateway and Docker are still up,
+# or it lands in phase Error (docs/FRICTION_LOG.md, 2026-10-27). ExecStopPost runs even when
+# a shutdown interrupts the start loop or the start times out.
+ExecStopPost=-/home/user/.local/bin/openshell sandbox stop aircdemo
+TimeoutStartSec=900
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

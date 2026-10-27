@@ -5,7 +5,8 @@ import { expect, test } from "vitest";
 import { findBoundaryViolations, type SourceFile } from "../packages/core/src/index";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SKIP_DIRS = new Set(["node_modules", ".git", ".superpowers", "dist"]);
+// Build output (dist, Next's .next) bundles third-party code and is not ours to police.
+const SKIP_DIRS = new Set(["node_modules", ".git", ".superpowers", "dist", ".next"]);
 const SCAN = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|ya?ml|py|sh|toml)$|\.env\.example$/;
 
 function walk(dir: string): SourceFile[] {
@@ -20,5 +21,9 @@ function walk(dir: string): SourceFile[] {
 test("the repo has no boundary violations", () => {
   const files = walk(ROOT);
   expect(files.length).toBeGreaterThan(10);
+  // Skipping build output must not skip the source the rules are about.
+  for (const dir of ["apps/console/src/", "apps/console/convex/", "apps/relay/src/", "apps/bridge/", "packages/core/src/"]) {
+    expect(files.some((f) => f.path.startsWith(dir)), dir).toBe(true);
+  }
   expect(findBoundaryViolations(files)).toEqual([]);
 });

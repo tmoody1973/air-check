@@ -196,7 +196,7 @@ export function PackageDecision({
               {pending === "approve" ? "Approving…" : "Approve"}
             </button>
             <Link
-              href="/soon/chat"
+              href="/chat"
               aria-disabled={busy}
               className={`${BTN} border-line-strong bg-surface text-ink ${busy ? "pointer-events-none opacity-60" : ""}`}
             >
