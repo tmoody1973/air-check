@@ -25,13 +25,13 @@ importers:
         version: link:../../packages/core
       '@clerk/nextjs':
         specifier: 7.9.21
-        version: 7.9.21(next@16.4.3(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 7.9.21(next@16.4.3(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       convex:
         specifier: 1.48.0
         version: 1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
       next:
         specifier: 16.4.3
-        version: 16.4.3(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 16.4.3(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -39,9 +39,15 @@ importers:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
+      '@clerk/testing':
+        specifier: 2.2.0
+        version: 2.2.0(@playwright/test@1.64.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@edge-runtime/vm':
         specifier: 5.0.0
         version: 5.0.0
+      '@playwright/test':
+        specifier: 1.64.0
+        version: 1.64.0
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3
@@ -125,6 +131,18 @@ packages:
       react:
         optional: true
       react-dom:
+        optional: true
+
+  '@clerk/testing@2.2.0':
+    resolution: {integrity: sha512-33MibPgx8mRm1JQyraQ/fRNAurOhGSHPGByLDN5Q79de4U93PSx7ncFDDQQS05Ac2E3p3sZrBZvF4KBCDCOe8Q==}
+    engines: {node: '>=20.9.0'}
+    peerDependencies:
+      '@playwright/test': ^1
+      cypress: ^13 || ^14 || ^15
+    peerDependenciesMeta:
+      '@playwright/test':
+        optional: true
+      cypress:
         optional: true
 
   '@csstools/color-helpers@5.1.0':
@@ -537,6 +555,11 @@ packages:
 
   '@oxc-project/types@0.155.0':
     resolution: {integrity: sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q==}
+
+  '@playwright/test@1.64.0':
+    resolution: {integrity: sha512-oTN9FNYuN6bqQMwiho6jJKLCG2/QOYCixGXuCjRmzOq23eODeukuY2XiAVoVpAECbuezMt1MHQjAiQxK8F+Y+g==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@rolldown/binding-android-arm-eabi@1.2.15':
     resolution: {integrity: sha512-aLcgK9gIJ3YRvrrtfSBbRa27F5WrpiTaPulnFpsHPxpUHgFlSgnU4854MHwoRGEBhfRJDWCS2WQ7lIjskE9Olw==}
@@ -1029,6 +1052,10 @@ packages:
   dom-accessibility-api@0.6.3:
     resolution: {integrity: sha512-7ZgogeTnjuHbo+ct10G9Ffp0mif17idi0IyWNVA/wcwcm7NPOD/WEHVP3n7n3MhXqxoIYm8d6MuZohYWIZ4T3w==}
 
+  dotenv@17.2.2:
+    resolution: {integrity: sha512-Sf2LSQP+bOlhKWWyhFsn0UsfdK/kCWRv1iuA2gXAwt3dyNabr6QSj00I2V10pidqz69soatm9ZwZvpQMTIOd5Q==}
+    engines: {node: '>=12'}
+
   enhanced-resolve@5.26.0:
     resolution: {integrity: sha512-9vhedylFonb2YGogzUKX6+Ja72gOJbN1QHAqdrvqLwhdl/QWbKopzoUC9EbQNVsAns/bx/4uyqalrQAoy1IByw==}
     engines: {node: '>=10.13.0'}
@@ -1326,6 +1353,16 @@ packages:
   picomatch@4.0.7:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
+
+  playwright-core@1.64.0:
+    resolution: {integrity: sha512-T9r+MZkTECl2+oUcZ26YgZzTrYidTsIhYYkJix+6iDOymOb1FB2RLLSOxRGnZGv5DStt+aduIVbt+E8WygXYpg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.64.0:
+    resolution: {integrity: sha512-kVzTnYFYEyQ9RGzBjNCd2+yEqWmVbxl3AHPynv3qQ6JTjv4a+kwRcnqQwIpuP3NnrnIrE/Q6wWAIAvMfIE2/Yg==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   postcss@8.5.23:
     resolution: {integrity: sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg==}
@@ -1640,12 +1677,12 @@ snapshots:
       - react
       - react-dom
 
-  '@clerk/nextjs@7.9.21(next@16.4.3(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/nextjs@7.9.21(next@16.4.3(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@clerk/backend': 3.26.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@clerk/react': 6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@clerk/shared': 4.42.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      next: 16.4.3(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      next: 16.4.3(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
       server-only: 0.0.1
@@ -1667,6 +1704,17 @@ snapshots:
     optionalDependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
+
+  '@clerk/testing@2.2.0(@playwright/test@1.64.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      '@clerk/backend': 3.26.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.42.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      dotenv: 17.2.2
+    optionalDependencies:
+      '@playwright/test': 1.64.0
+    transitivePeerDependencies:
+      - react
+      - react-dom
 
   '@csstools/color-helpers@5.1.0': {}
 
@@ -1930,6 +1978,10 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.155.0': {}
+
+  '@playwright/test@1.64.0':
+    dependencies:
+      playwright: 1.64.0
 
   '@rolldown/binding-android-arm-eabi@1.2.15':
     optional: true
@@ -2266,6 +2318,8 @@ snapshots:
 
   dom-accessibility-api@0.6.3: {}
 
+  dotenv@17.2.2: {}
+
   enhanced-resolve@5.26.0:
     dependencies:
       graceful-fs: 4.2.11
@@ -2502,7 +2556,7 @@ snapshots:
 
   nanoid@3.3.20: {}
 
-  next@16.4.3(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  next@16.4.3(@playwright/test@1.64.0)(@types/node@26.6.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       '@next/env': 16.4.3
       '@swc/helpers': 0.5.23
@@ -2521,6 +2575,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.4.3
       '@next/swc-win32-arm64-msvc': 16.4.3
       '@next/swc-win32-x64-msvc': 16.4.3
+      '@playwright/test': 1.64.0
       sharp: 0.35.5(@types/node@26.6.5)
     transitivePeerDependencies:
       - '@babel/core'
@@ -2538,6 +2593,12 @@ snapshots:
   picocolors@1.1.1: {}
 
   picomatch@4.0.7: {}
+
+  playwright-core@1.64.0: {}
+
+  playwright@1.64.0:
+    dependencies:
+      playwright-core: 1.64.0
 
   postcss@8.5.23:
     dependencies:
