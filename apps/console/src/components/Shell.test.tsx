@@ -2,7 +2,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it } from "vitest";
-import { Shell } from "./Shell";
+import { SandboxChip } from "./SandboxChip";
+import { SandboxChipProvider, Shell } from "./Shell";
 
 afterEach(cleanup);
 
@@ -29,10 +30,22 @@ describe("Shell", () => {
     expect(screen.queryByText(/Publishing to Mixcloud/)).not.toBeInTheDocument();
   });
 
-  it("header shows sandbox pills", () => {
+  it("header shows exactly one sandbox chip, from the provider, and no static claim", () => {
+    render(
+      <SandboxChipProvider value={<SandboxChip row={{ phase: "Ready", allowedHosts: 10, at: 1 }} now={1} />}>
+        <Shell title="Today" workspace="real" active="today">x</Shell>
+      </SandboxChipProvider>,
+    );
+    expect(screen.getAllByText(/^Sandbox /)).toHaveLength(1);
+    expect(screen.getByText("Sandbox on · 10 hosts allowed")).toBeInTheDocument();
+    expect(screen.queryByText("Sandbox on")).not.toBeInTheDocument();
+    expect(screen.queryByText(/destinations allowed/)).not.toBeInTheDocument();
+  });
+
+  it("without a provider the chip says unknown, never on", () => {
     render(<Shell title="Today" workspace="real" active="today">x</Shell>);
-    expect(screen.getByText("Sandbox on")).toBeInTheDocument();
-    expect(screen.getByText("4 destinations allowed")).toBeInTheDocument();
+    expect(screen.getByText("Sandbox status unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/destinations allowed/)).not.toBeInTheDocument();
   });
 });
 

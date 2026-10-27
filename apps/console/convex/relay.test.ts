@@ -205,6 +205,13 @@ describe("relay.status and sandbox.get", () => {
     expect(typeof mine!.at).toBe("number");
     expect(await t.query(api.sandbox.get, {})).toBeNull();
   });
+  test("a demo caller sees only the demo row and a real caller only the real row", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.relay.status, { token: RELAY, workspace: "real", phase: "Ready", allowedHosts: 10 });
+    await t.mutation(api.relay.status, { token: RELAY, workspace: "demo", phase: "Ready", allowedHosts: 2 });
+    expect(await t.withIdentity(human).query(api.sandbox.get, {})).toMatchObject({ workspace: "real", allowedHosts: 10 });
+    expect(await t.withIdentity({ ...human, role: "demo" }).query(api.sandbox.get, {})).toMatchObject({ workspace: "demo", allowedHosts: 2 });
+  });
   test("returns null when no status has been sent", async () => {
     expect(await convexTest(schema, modules).withIdentity(human).query(api.sandbox.get, {})).toBeNull();
   });

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { api } from "../../convex/_generated/api";
 import { ChatThread } from "./ChatThread";
 import { ConversationList } from "./ConversationList";
-import { SandboxChipLive } from "./SandboxChipLive";
 import { Shell } from "./Shell";
 
 const useRun = (runId: string) => useQuery(api.runs.get, runId ? { runId } : "skip");
@@ -36,7 +35,6 @@ export function ChatScreen({ conversationId }: { conversationId?: string }) {
           send={send}
           useRun={useRun}
           usePackage={usePackage}
-          headerSlot={<SandboxChipLive />}
         />
       </div>
     </Shell>

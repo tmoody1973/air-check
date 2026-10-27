@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { NAV } from "../lib/nav";
-import { ALLOWED_DESTINATIONS } from "../lib/sandbox";
-import { Pill } from "./Pill";
+import { SandboxChip } from "./SandboxChip";
 
 import type { Workspace } from "../../convex/gate";
 export type { Workspace };
@@ -14,6 +13,10 @@ export type { Workspace };
 const WorkspaceContext = createContext<Workspace>("real");
 export const WorkspaceProvider = WorkspaceContext.Provider;
 export const useWorkspace = () => useContext(WorkspaceContext);
+
+// The (console) layout supplies the live chip (it needs Convex); without a provider (tests) the honest default is "unknown".
+const SandboxChipContext = createContext<ReactNode>(<SandboxChip row={null} now={0} />);
+export const SandboxChipProvider = SandboxChipContext.Provider;
 
 function Logo() {
   return (
@@ -40,6 +43,7 @@ export function Shell({
 }) {
   const pathname = usePathname();
   const ctx = useContext(WorkspaceContext);
+  const chip = useContext(SandboxChipContext);
   const ws = workspace ?? ctx;
   const [open, setOpen] = useState(false);
   const current = active ?? NAV.find((n) => pathname === n.href || pathname?.startsWith(`${n.href}/`))?.slug;
@@ -95,13 +99,7 @@ export function Shell({
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 min-[900px]:px-8">
           <h1 className="font-serif text-[28px] font-normal leading-tight">{title}</h1>
-          <div className="flex flex-wrap gap-2">
-            <Pill tone="neutral">
-              <span aria-hidden="true" className="size-2 rounded-full bg-signal" />
-              Sandbox on
-            </Pill>
-            <Pill tone="neutral">{`${ALLOWED_DESTINATIONS.length} destinations allowed`}</Pill>
-          </div>
+          <div className="flex flex-wrap gap-2">{chip}</div>
         </header>
         <div className="px-4 py-6 min-[900px]:px-8">{children}</div>
       </main>
