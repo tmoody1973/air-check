@@ -143,6 +143,7 @@ dc down
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
 5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:
    - Linger on: `sudo loginctl enable-linger user`. The VM user must be uid 1001 (the units hard-code `user@1001` and `/run/user/1001`).
+   - The bridge bundle, before its unit: `mkdir -p ~/aircheck-bridge`, then steps 1–4 of "Updating the bridge" below.
    - The three units: `aircheck-hermes.service`, `aircheck-bridge.service` and `aircheck-watchdog.service` plus its `.timer` (copies in `deploy/`).
    - The private CA and leaf certificate: `deploy/bridge/make-ca.sh`, then `make-leaf.sh <private ip>`.
    - `crate-cli` cloned to `~/crate-cli` at commit `37f4ec2`, built with `npm ci && npm run build`.
@@ -158,7 +159,7 @@ Hermes is the AI agent that drafts show material. It runs inside a NemoClaw sand
 
 - **Linger is on.** The gateway is a systemd *user* service (systemd is Ubuntu's service manager), `nemoclaw-openshell-gateway.service`. Ubuntu only runs user services while someone is logged in over SSH, unless "linger" is on. It was off, so after a VM stop and start nothing launched the gateway and the sandbox went to phase `Error`. The fix, already applied: `sudo loginctl enable-linger user`. Do not undo it (`disable-linger` would bring the outage back).
 - **A boot unit.** `/etc/systemd/system/aircheck-hermes.service` (a copy lives in the repo at `deploy/hermes/aircheck-hermes.service`) runs `nemohermes airc start` at boot. Then it retries `nemohermes airc recover` every 15 seconds for up to 5 minutes. Both are needed: `start` does not bring back the forwarded port 8642 that the console talks to, and `recover` does, but only once the sandbox is up.
-- **A clean shutdown.** When the VM stops, the unit runs `openshell sandbox stop airc` before Docker and the gateway stop. Without it, Docker kills the container first, the gateway records an unexpected exit, and the sandbox lands in `Error` instead of `Stopped`.
+- **A clean shutdown.** When the VM stops, the unit runs `openshell sandbox stop airc` before Docker and the gateway stop. It is an `ExecStopPost` step, so it also runs when a shutdown interrupts the boot retries or the start times out (systemd skips a plain `ExecStop` in both cases). Without it, Docker kills the container first, the gateway records an unexpected exit, and the sandbox lands in `Error` instead of `Stopped`.
 
 Check it:
 
@@ -187,7 +188,7 @@ A timer checks every five minutes that Hermes and the bridge are answering, and 
 - `/etc/systemd/system/aircheck-watchdog.timer` runs `~/.aircheck/watchdog.sh` (repo copy: `deploy/hermes/watchdog.sh`) 3 minutes after boot and then every 5 minutes.
 - It probes Hermes at `http://127.0.0.1:8642/health` and the bridge at `https://10.104.0.41:8443/healthz`.
 - When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing.
-- It remembers what it last reported in `~/.aircheck/watchdog.state`.
+- It remembers what it last saw in `~/.aircheck/watchdog.state`. Messages that could not be sent wait in `~/.aircheck/watchdog.pending` and go out with the next successful send.
 - To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send.
 
 ## The bridge
@@ -206,10 +207,11 @@ The bridge is a small program that sits between Hermes and two things Hermes may
 **Firewall.** Only the sandbox network may reach the bridge:
 
 ```sh
-sudo ufw allow from 172.18.0.0/16 to 10.104.0.41 port 8443 proto tcp
+SUBNET=$(docker network inspect openshell-docker -f '{{(index .IPAM.Config 0).Subnet}}')
+sudo ufw allow from "$SUBNET" to 10.104.0.41 port 8443 proto tcp
 ```
 
-`172.18.0.0/16` is the `openshell-docker` network. The private address is translated (NAT) from the public IP, so this rule is the only thing keeping the bridge off the internet. Checked from the Mac: port 8443 times out, while port 443 connects as a control.
+`openshell-docker` is the sandbox's Docker network. Docker picks its subnet when the network is created, so look it up rather than typing it (on the current VM it is `172.18.0.0/16`). The private address is translated (NAT) from the public IP, so this rule is the only thing keeping the bridge off the internet. Checked from the Mac: port 8443 times out, while port 443 connects as a control.
 
 ### If the private address changes
 
@@ -218,7 +220,7 @@ It has not changed across three reboots, but if it ever does (say `<new ip>`):
 1. Make a new leaf certificate: `deploy/bridge/make-leaf.sh <new ip>`.
 2. Edit `BRIDGE_HOST` in `~/.aircheck/bridge.env`.
 3. Edit the probe IP in `~/.aircheck/watchdog.sh`.
-4. Replace the ufw rule: delete the old `sudo ufw allow from 172.18.0.0/16 to 10.104.0.41 port 8443 proto tcp` and add it with the new address.
+4. Replace the ufw rule: `sudo ufw status numbered`, delete the old 8443 rule by number, and add it again as under "Firewall" with the new address.
 5. `sudo systemctl restart aircheck-bridge`.
 6. `nemohermes airc mcp remove crate` and `mcp remove aircheck`, then both `mcp add` commands below with the new URL and `--trusted-private-host <new ip>`.
 

@@ -75,4 +75,25 @@ describe("buildPackageDraft", () => {
     expect(buildPackageDraft(input({ hour1Id: "" }), opts).ok).toBe(false);
     expect(buildPackageDraft(input({ hour2Id: "  " }), opts).ok).toBe(false);
   });
+
+  test("rejects a tracklist with no hour-2 tracks", () => {
+    const hour1Only = reconciledText().split("HOUR 2")[0]!;
+    const r = buildPackageDraft(input({ tracklistText: hour1Only }), opts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problems).toContain("hour 2 has no tracks");
+  });
+
+  test("rejects a blank lead artist", () => {
+    const leads = [...input().leads];
+    leads[1] = " ";
+    const r = buildPackageDraft(input({ leads }), opts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problems).toContain("title artist 2 is blank");
+  });
+
+  test("rejects a calendar date that does not exist", () => {
+    const r = buildPackageDraft(input({ showDate: "2026-02-30" }), opts);
+    expect(r).toEqual({ ok: false, problems: ["showDate is not a real date: 2026-02-30"] });
+    expect(buildPackageDraft(input({ showDate: "2026-13-01" }), opts).ok).toBe(false);
+  });
 });

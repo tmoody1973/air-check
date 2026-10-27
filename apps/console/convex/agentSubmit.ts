@@ -17,6 +17,29 @@ export function tokenMatches(header: string | null, expected: string | undefined
   return sameBytes(header.slice("Bearer ".length), expected);
 }
 
+export const MAX_BODY_BYTES = 131_072; // same cap as the bridge
+
+/** Reads the body as text, giving up (null) as soon as it passes the cap, before any JSON parsing. */
+export async function readCapped(req: Request, max = MAX_BODY_BYTES): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > max) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 const STRINGS = ["showDate", "tracklistText", "description", "hour1Id", "hour2Id"] as const;
 const LISTS = ["leads", "tags"] as const;
 

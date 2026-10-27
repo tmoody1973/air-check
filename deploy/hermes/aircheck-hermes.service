@@ -27,7 +27,10 @@ ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemoherm
 # and Docker are still up. If Docker kills the container first, the gateway
 # records an unexpected exit and the sandbox lands in phase Error, which
 # neither `start` nor `rebuild` can leave (docs/FRICTION_LOG.md, 2026-10-27).
-ExecStop=/home/user/.local/bin/openshell sandbox stop airc
+# ExecStopPost, not ExecStop: systemd skips ExecStop when a shutdown interrupts the
+# start loop above or the start times out; ExecStopPost runs in every case. The `-`
+# makes it harmless when the sandbox is already stopped.
+ExecStopPost=-/home/user/.local/bin/openshell sandbox stop airc
 TimeoutStartSec=900
 TimeoutStopSec=120
 
