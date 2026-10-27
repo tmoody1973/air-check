@@ -17,3 +17,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      # Hard Rule 8: telemetry off. No secrets in CI; the build must not need any.
+      - run: NEXT_TELEMETRY_DISABLED=1 CLERK_TELEMETRY_DISABLED=1 pnpm build
