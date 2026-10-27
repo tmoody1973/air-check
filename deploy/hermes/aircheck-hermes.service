@@ -16,9 +16,17 @@ Environment=PATH=/home/user/.local/bin:/home/user/.nvm/versions/node/v22.23.4/bi
 Environment=XDG_RUNTIME_DIR=/run/user/1001
 # `start` brings the sandbox to Ready but (OpenShell 0.0.116) does not restore the
 # host port forward for :8642, so `recover` runs next; it is a no-op when healthy.
+# Hermes inside the sandbox needs a while after a cold boot, so retry recover
+# every 15 s for up to 5 minutes.
 ExecStart=-/home/user/.local/bin/nemohermes airc start
-ExecStart=/home/user/.local/bin/nemohermes airc recover
+ExecStart=/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes airc recover && exit 0; sleep 15; done; exit 1'
+# At shutdown, stop the sandbox through OpenShell while the gateway (user@1001)
+# and Docker are still up. If Docker kills the container first, the gateway
+# records an unexpected exit and the sandbox lands in phase Error, which
+# neither `start` nor `rebuild` can leave (docs/FRICTION_LOG.md, 2026-10-27).
+ExecStop=/home/user/.local/bin/openshell sandbox stop airc
 TimeoutStartSec=600
+TimeoutStopSec=120
 
 [Install]
 WantedBy=multi-user.target
