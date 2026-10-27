@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { ConvexError } from "convex/values";
 import { HermesClient } from "../src/hermes.js";
 import { createRunner, type Runner } from "../src/runner.js";
 import { FakeConvex, FakeHermes, fixture, row, sse, waitFor } from "./helpers.js";
@@ -269,5 +270,66 @@ describe("logging (Hard Rule 8)", () => {
     const all = logs.join("\n");
     expect(all).toMatch(/run=r1 event=\S+ n=\d+/);
     for (const secret of [TOKEN, DEMO_TOKEN, "SECRET-INPUT", "PRIVATE-REPLY-TEXT"]) expect(all).not.toContain(secret);
+  });
+});
+
+describe("permanent errors and lost runs (R26)", () => {
+  const notFound = () => new ConvexError({ code: "NOT_FOUND" });
+
+  test("relay.events rejects NOT_FOUND -> Hermes stop sent, event=dropped logged, slot freed for the next run", async () => {
+    const one = createRunner({
+      convex, log: (l) => logs.push(l), flushMs: 10, backoffMs: () => 1, maxLive: 1,
+      sandboxes: [{ name: "airc", workspace: "real", hermes: new HermesClient(`http://127.0.0.1:${real.port}`, TOKEN) }],
+    });
+    const orig = convex.events.bind(convex);
+    let r1Calls = 0;
+    convex.events = async (id, ev) => { if (id === "r1") { r1Calls++; throw notFound(); } return orig(id, ev); };
+    one.onPending([row({ runId: "r1" }), row({ runId: "r2" })]);
+    await waitFor(() => convex.finishedCalls.some((f) => f.runId === "r2"), "r2 runs once r1 is dropped");
+    expect(r1Calls).toBe(1); // permanent: never retried
+    expect(real.stops).toEqual([convex.startedCalls.find((c) => c.runId === "r1")!.hermesRunId]);
+    expect(logs).toContain("run=r1 event=dropped n=1");
+    expect(convex.finishedCalls.map((f) => f.runId)).toEqual(["r2"]);
+    one.stop();
+  });
+
+  test("an argument-validation error is permanent too", async () => {
+    convex.events = async () => { throw new Error("[CONVEX M(relay:events)] Server Error\nArgumentValidationError: Object is missing the required field `seq`."); };
+    runner.onPending([row({ runId: "r1" })]);
+    await waitFor(() => logs.includes("run=r1 event=dropped n=1"), "dropped");
+    expect(real.stops).toHaveLength(1);
+  });
+
+  test("10 transient relay.events failures -> dropped", async () => {
+    let calls = 0;
+    convex.events = async () => { calls++; throw new Error("socket hang up"); };
+    runner.onPending([row({ runId: "r1" })]);
+    await waitFor(() => logs.includes("run=r1 event=dropped n=1"), "dropped");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toBe(10);
+    expect(logs.filter((l) => l.startsWith("run=r1 event=events_retry"))).toHaveLength(9);
+    expect(real.stops).toHaveLength(1);
+    expect(convex.finishedCalls).toEqual([]);
+  });
+
+  test("a 404 from the events endpoint means the run is lost: one synthetic run.failed, finished failed", async () => {
+    const original = real.server.listeners("request")[0] as (...a: unknown[]) => void;
+    real.server.removeAllListeners("request");
+    real.server.on("request", (req, res) => (req.url === "/v1/runs/h-gone/events" ? res.writeHead(404).end() : original(req, res)));
+    real.info["h-gone"] = { status: "running" };
+    runner.onPending([row({ runId: "r1", status: "running", hermesRunId: "h-gone", lastSeq: 3 })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(convex.eventCalls).toEqual([{ runId: "r1", events: [expect.objectContaining({ event: "run.failed", seq: 4 })] }]);
+    expect(convex.finishedCalls).toEqual([{ runId: "r1", status: "failed" }]);
+  });
+
+  test("relay.started throws after Hermes started the run -> the Hermes run is stopped", async () => {
+    convex.started = async (runId, hermesRunId) => { convex.startedCalls.push({ runId, hermesRunId }); throw new ConvexError({ code: "UNAUTHORIZED" }); };
+    runner.onPending([row({ runId: "r1" })]);
+    await waitFor(() => real.stops.length === 1, "stop");
+    expect(real.stops).toEqual([convex.startedCalls[0]!.hermesRunId]);
+    expect(logs).toContain("run=r1 event=dropped n=1");
+    expect(real.opens).toEqual({});
   });
 });

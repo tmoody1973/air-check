@@ -1,4 +1,4 @@
-import type { PendingRun, RelayConvex, RunEvent, Terminal } from "./convex.js";
+import { isPermanent, type PendingRun, type RelayConvex, type RunEvent, type Terminal } from "./convex.js";
 import { HermesError, type HermesClient, type RunInfo } from "./hermes.js";
 
 export interface Sandbox { name: string; workspace: "real" | "demo"; hermes: Pick<HermesClient, "start" | "stop" | "get" | "events"> }
@@ -24,6 +24,10 @@ const HERMES_DONE: Record<string, { event: string; status: Terminal }> = {
   interrupted: { event: "run.interrupted", status: "failed" },
 };
 const defaultBackoff = (n: number) => Math.min(30_000, 1000 * 2 ** n);
+/** Attempts per relay.* call before a transient error is treated as permanent. */
+export const MAX_CALL_ATTEMPTS = 10;
+/** A relay.* call gave up (permanent error, or MAX_CALL_ATTEMPTS transient ones): the run is dropped. */
+class Dropped extends Error {}
 
 export function createRunner(o: RunnerOptions): Runner {
   const flushMs = o.flushMs ?? DELTA_FLUSH_MS;
@@ -77,51 +81,82 @@ export function createRunner(o: RunnerOptions): Runner {
     retry = setTimeout(() => { retry = undefined; onPending(latest); }, ms);
   }
 
-  async function begin(sb: Sandbox, r: PendingRun): Promise<void> {
-    try {
-      // Idempotent by runId: a repeat start (after a crash between POST and `started`) returns the same Hermes run.
-      const hermesRunId = await sb.hermes.start(r.input, r.runId, r.kind === "chat" ? r.conversationId : undefined);
-      const { started } = await o.convex.started(r.runId, hermesRunId);
-      if (!started) { // cancelled while queued
-        done.add(r.runId);
-        await sb.hermes.stop(hermesRunId).catch(() => o.log(`run=${r.runId} event=stop_failed n=1`));
-        o.log(`run=${r.runId} event=dropped n=1`);
-        return;
+  /** Calls Convex for one run, retrying transient errors with backoff. Throws Dropped when it gives up. */
+  async function relayCall<T>(runId: string, name: string, fn: () => Promise<T>): Promise<T> {
+    for (let n = 0; ; n++) {
+      try { return await fn(); } catch (err) {
+        if (stopped) throw err; // shutting down: leave the run for the next relay process
+        if (isPermanent(err) || n + 1 >= MAX_CALL_ATTEMPTS) throw new Dropped();
+        o.log(`run=${runId} event=${name}_retry n=${n + 1}`);
+        await sleep(backoff(n));
       }
-      o.log(`run=${r.runId} event=started n=1`);
-      failures.delete(r.runId);
-      await follow(sb, r, hermesRunId, false);
-    } catch {
-      o.log(`run=${r.runId} event=start_failed n=${failures.set(r.runId, (failures.get(r.runId) ?? 0) + 1).get(r.runId)}`);
-      if (!stopped) await sleep(backoff((failures.get(r.runId) ?? 1) - 1));
     }
   }
 
-  /** Streams one Hermes run to Convex until it is terminal. Never throws; stream errors back off and retry. */
+  /** Gives up on a run Convex will not accept: stop it in Hermes (best effort) and stop following it. */
+  async function drop(sb: Sandbox, runId: string, hermesRunId: string): Promise<void> {
+    done.add(runId);
+    await sb.hermes.stop(hermesRunId).catch(() => o.log(`run=${runId} event=stop_failed n=1`));
+    o.log(`run=${runId} event=dropped n=1`);
+  }
+
+  async function begin(sb: Sandbox, r: PendingRun): Promise<void> {
+    let hermesRunId: string;
+    try {
+      // Idempotent by runId: a repeat start (after a crash between POST and `started`) returns the same Hermes run.
+      hermesRunId = await sb.hermes.start(r.input, r.runId, r.kind === "chat" ? r.conversationId : undefined);
+    } catch {
+      o.log(`run=${r.runId} event=start_failed n=${failures.set(r.runId, (failures.get(r.runId) ?? 0) + 1).get(r.runId)}`);
+      if (!stopped) await sleep(backoff((failures.get(r.runId) ?? 1) - 1));
+      return;
+    }
+    let started: boolean;
+    try {
+      ({ started } = await relayCall(r.runId, "started", () => o.convex.started(r.runId, hermesRunId)));
+    } catch (err) {
+      if (err instanceof Dropped) await drop(sb, r.runId, hermesRunId); // Hermes is running it: stop it, nothing will record it
+      return;
+    }
+    if (!started) { // cancelled while queued
+      done.add(r.runId);
+      await sb.hermes.stop(hermesRunId).catch(() => o.log(`run=${r.runId} event=stop_failed n=1`));
+      o.log(`run=${r.runId} event=dropped n=1`);
+      return;
+    }
+    o.log(`run=${r.runId} event=started n=1`);
+    failures.delete(r.runId);
+    await follow(sb, r, hermesRunId, false);
+  }
+
+  /**
+   * Streams one Hermes run to Convex until it is terminal. Never throws: stream errors back off and retry,
+   * a 404 from Hermes (GET or events) fails the run once, and a call Convex will not take drops the run.
+   */
   async function follow(sb: Sandbox, r: PendingRun, hermesRunId: string, reconcileFirst: boolean): Promise<void> {
     let known = r.lastSeq ?? 0; // highest seq Convex may have applied
     let attempt = 0;
     let check = reconcileFirst;
+    const synthetic = (event: string, data: Record<string, unknown>): RunEvent => ({ event, data, t: Date.now() / 1000, seq: known + 1 });
     while (!stopped) {
       try {
         if (check) {
-          let info: RunInfo;
-          try {
-            info = await sb.hermes.get(hermesRunId);
-          } catch (err) {
-            if (err instanceof HermesError && err.status === 404) { // Hermes lost the run: fail it once, no more retries
-              return await finish(r.runId, { event: "run.failed", data: {}, t: Date.now() / 1000, seq: known + 1 }, "failed");
-            }
-            throw err;
-          }
+          const info: RunInfo = await sb.hermes.get(hermesRunId);
           const fin = terminalOf(info);
-          if (fin) return await finish(r.runId, { event: fin.event, data: info.output !== undefined ? { output: info.output } : {}, t: Date.now() / 1000, seq: known + 1 }, fin.status);
+          if (fin) return await finish(r.runId, synthetic(fin.event, info.output !== undefined ? { output: info.output } : {}), fin.status);
         }
         check = true; // any later pass follows a dropped stream
         const result = await stream(sb, r.runId, hermesRunId, (seq) => { known = Math.max(known, seq); });
         if (result) return await finish(r.runId, undefined, result);
         attempt = 0;
-      } catch {
+      } catch (err) {
+        try {
+          if (err instanceof Dropped) return await drop(sb, r.runId, hermesRunId);
+          // Hermes lost the run (GET or events 404): fail it once, no more retries.
+          if (err instanceof HermesError && err.status === 404) return await finish(r.runId, synthetic("run.failed", {}), "failed");
+        } catch (inner) {
+          if (inner instanceof Dropped) return await drop(sb, r.runId, hermesRunId);
+          return; // the relay is stopping
+        }
         o.log(`run=${r.runId} event=stream_error n=${attempt + 1}`);
       }
       await sleep(backoff(attempt++));
@@ -138,27 +173,24 @@ export function createRunner(o: RunnerOptions): Runner {
     let buffer: RunEvent[] = [];
     let timer: NodeJS.Timeout | undefined;
     let chain: Promise<void> = Promise.resolve();
+    let lost: unknown; // a batch failed for good: stop reading
     const flush = () => {
       if (timer) { clearTimeout(timer); timer = undefined; }
       const batch = buffer;
       buffer = [];
       if (batch.length === 0) return chain;
       chain = chain.then(async () => {
-        // Never drop a batch: retry with backoff until it lands (or the relay is stopping).
-        for (let n = 0; ; n++) {
-          try { await o.convex.events(runId, batch); break; } catch (err) {
-            if (stopped) throw err;
-            o.log(`run=${runId} event=events_retry n=${n + 1}`);
-            await sleep(backoff(n));
-          }
-        }
+        // Retry transient failures with backoff; a permanent one (or the 10th) drops the run.
+        await relayCall(runId, "events", () => o.convex.events(runId, batch));
         sawSeq(batch[batch.length - 1]!.seq);
         for (const [event, n] of count(batch)) o.log(`run=${runId} event=${event} n=${n}`);
       });
+      chain.catch((err: unknown) => { lost ??= err; }); // observe only: later batches must not land after a lost one
       return chain;
     };
     try {
       for await (const e of sb.hermes.events(hermesRunId)) {
+        if (lost) throw lost;
         buffer.push({ event: e.event, data: e.data, t: Date.now() / 1000, seq: ++seq });
         const terminal = TERMINAL_EVENTS[e.event];
         if (terminal) { await flush(); return terminal; }
@@ -175,10 +207,10 @@ export function createRunner(o: RunnerOptions): Runner {
 
   async function finish(runId: string, synthetic: RunEvent | undefined, status: Terminal): Promise<void> {
     if (synthetic) {
-      await o.convex.events(runId, [synthetic]);
+      await relayCall(runId, "events", () => o.convex.events(runId, [synthetic]));
       o.log(`run=${runId} event=${synthetic.event} n=1`);
     }
-    await o.convex.finished(runId, status);
+    await relayCall(runId, "finished", () => o.convex.finished(runId, status));
     done.add(runId);
     o.log(`run=${runId} event=finished n=1 status=${status}`);
   }

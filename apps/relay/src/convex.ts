@@ -1,5 +1,6 @@
 import { ConvexClient } from "convex/browser";
-import { anyApi, type FunctionReference } from "convex/server"; // untyped on purpose: apps/console's generated api would pull the console's whole tsconfig into this host program
+import { anyApi, type FunctionReference } from "convex/server";
+import { ConvexError } from "convex/values"; // untyped on purpose: apps/console's generated api would pull the console's whole tsconfig into this host program
 
 export interface PendingRun {
   runId: string;
@@ -15,6 +16,14 @@ export interface PendingRun {
 export interface RunEvent { event: string; data: Record<string, unknown>; t: number; seq: number }
 export interface ActivityEvent { key: string; at: number; decision: "allowed" | "blocked"; host: string; port: number; binary?: string; reason?: string }
 export type Terminal = "completed" | "cancelled" | "failed";
+
+/**
+ * A relay.* rejection that retrying cannot fix: a ConvexError (NOT_FOUND, UNAUTHORIZED, any code) or an
+ * argument-validation error. Everything else (network, 5xx, timeouts) is transient.
+ */
+export function isPermanent(err: unknown): boolean {
+  return err instanceof ConvexError || (err instanceof Error && err.message.includes("ArgumentValidationError"));
+}
 
 /** Everything the relay needs from Convex. The token lives inside the real implementation, so callers never hold it. */
 export interface RelayConvex {
