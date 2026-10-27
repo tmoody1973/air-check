@@ -109,7 +109,7 @@ The demo stays open to judges until Dec 15. After that:
 
 1. Stop the VM from the Nebius console (or with the CLI). Stopping ends the compute charge. A reserved static IP may still be billed, so release it too if the site is going away for good.
 2. To take the site down but keep the data, nothing else is needed. To remove it completely, delete the DNS records and the Clerk and Convex production projects.
-3. The hourly re-seed cron lives in Convex, so pause it by deleting `crons.ts`'s entry and redeploying if the Convex project stays up.
+3. The hourly re-seed cron lives in Convex. If the Convex project stays up, remove its entry in `apps/console/convex/crons.ts` and run `npx convex deploy -y` to stop it.
 
 ## Evidence it works (checked 2026-10-26)
 
@@ -123,6 +123,6 @@ The demo stays open to judges until Dec 15. After that:
 
 ## Known gaps
 
-- **NemoClaw and Hermes did not restart with the VM.** After the restart for the static-IP change, ports 8642 and 18789 were not listening. The console does not depend on them yet. Plan 4 (agent wiring) must add a way to bring them back on boot and check them.
+- **Hermes is currently down.** After the VM was stopped and started, the NemoClaw sandbox stayed in an Error state, and `start` and `recover` cannot clear it (details in `docs/FRICTION_LOG.md`). The expected fix is a `rebuild` at the start of Plan 4. It needs Tarik's OK first, and Telegram and Tavily setup may need to be redone. The `~/.local` permission problem that blocked `start` was already fixed on the VM. The console does not depend on Hermes yet.
 - Google sign-in is not on in production (needs a Google OAuth client).
 - CI does not run the browser tests (decision 009), so run `pnpm --filter console e2e` before merging.
