@@ -23,10 +23,8 @@ Environment=XDG_RUNTIME_DIR=/run/user/1001
 # lands in phase Error. The watchdog alerts if Hermes is really down.
 ExecStart=-/home/user/.local/bin/nemohermes airc start
 ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes airc recover && exit 0; sleep 15; done; echo "aircheck-hermes: Hermes not healthy after 5 min; watchdog will alert"; exit 1'
-# The judges' demo sandbox (aircdemo, Hermes on :8643) boots the same way, after the real one.
-# Every demo line keeps the leading `-` so a demo failure never blocks or fails the real sandbox.
-ExecStart=-/home/user/.local/bin/nemohermes aircdemo start
-ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes aircdemo recover && exit 0; sleep 15; done; echo "aircheck-hermes: Demo Hermes not healthy after 5 min; watchdog will alert"; exit 1'
+# The judges' demo sandbox (aircdemo) has its own unit, aircheck-hermes-demo.service, so a slow
+# or broken demo can never time this unit out and stop the real sandbox.
 # At shutdown, stop the sandbox through OpenShell while the gateway (user@1001)
 # and Docker are still up. If Docker kills the container first, the gateway
 # records an unexpected exit and the sandbox lands in phase Error, which
@@ -35,7 +33,6 @@ ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemoherm
 # start loop above or the start times out; ExecStopPost runs in every case. The `-`
 # makes it harmless when the sandbox is already stopped.
 ExecStopPost=-/home/user/.local/bin/openshell sandbox stop airc
-ExecStopPost=-/home/user/.local/bin/openshell sandbox stop aircdemo
 TimeoutStartSec=900
 TimeoutStopSec=120
 
