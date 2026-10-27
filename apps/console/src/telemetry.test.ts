@@ -17,6 +17,8 @@ describe("telemetry stays off (Hard Rule 8)", () => {
   for (const [label, path] of [
     [".env.example", join(consoleDir, ".env.example")],
     ["ci.yml", join(repoRoot, ".github/workflows/ci.yml")],
+    ["deploy/Dockerfile", join(repoRoot, "deploy/Dockerfile")],
+    ["deploy/console.env.example", join(repoRoot, "deploy/console.env.example")],
   ] as const) {
     it(`${label} disables Next and Clerk telemetry`, () => {
       const text = readFileSync(path, "utf8");

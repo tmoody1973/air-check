@@ -6,7 +6,7 @@ export default defineConfig({
       {
         test: {
           name: "core",
-          include: ["packages/*/test/**/*.test.ts", "tests/**/*.test.ts"],
+          include: ["packages/*/test/**/*.test.ts", "tests/**/*.test.ts", "deploy/*.test.ts"],
         },
       },
       "apps/console",
