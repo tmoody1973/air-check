@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SandboxChip } from "./SandboxChip";
 import { SandboxChipProvider, Shell } from "./Shell";
+
+vi.mock("@clerk/nextjs", () => ({
+  SignOutButton: ({ children, redirectUrl }: { children: React.ReactElement; redirectUrl?: string }) => <span data-redirect={redirectUrl}>{children}</span>,
+}));
 
 afterEach(cleanup);
 
@@ -23,9 +27,17 @@ describe("Shell", () => {
     expect(nav.getAllByRole("link").filter((l) => l.hasAttribute("aria-current"))).toHaveLength(1);
   });
 
+  it("sidebar has a Sign out control that returns to /sign-in", () => {
+    render(<Shell title="Today" workspace="real" active="today">x</Shell>);
+    const b = screen.getByRole("button", { name: "Sign out" });
+    expect(b).toHaveClass("min-h-11");
+    expect(b.parentElement).toHaveAttribute("data-redirect", "/sign-in");
+  });
+
   it("demo footer shows only in demo workspace", () => {
     const { rerender } = render(<Shell title="Today" workspace="demo" active="today">x</Shell>);
     expect(screen.getByText(/Publishing to Mixcloud is switched off/)).toBeInTheDocument();
+    expect(screen.getByText(/Chats here are visible to other visitors\./)).toBeInTheDocument();
     rerender(<Shell title="Today" workspace="real" active="today">x</Shell>);
     expect(screen.queryByText(/Publishing to Mixcloud/)).not.toBeInTheDocument();
   });

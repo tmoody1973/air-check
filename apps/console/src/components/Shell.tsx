@@ -1,5 +1,6 @@
 "use client";
 
+import { SignOutButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useState, type ReactNode } from "react";
@@ -91,9 +92,17 @@ export function Shell({
           {ws === "demo" && (
             <div className="mt-auto flex flex-col gap-1.5 rounded-control bg-caution-bg p-3 text-[13px] leading-snug text-caution-text">
               <strong className="font-semibold">Demo workspace</strong>
-              Sample data. Publishing to Mixcloud is switched off.
+              Sample data. Publishing to Mixcloud is switched off. Chats here are visible to other visitors.
             </div>
           )}
+          <SignOutButton redirectUrl="/sign-in">
+            <button
+              type="button"
+              className={`${ws === "demo" ? "" : "mt-auto "}flex min-h-11 items-center gap-3 rounded-control px-3 text-left text-sm text-ink-soft hover:bg-chip`}
+            >
+              Sign out
+            </button>
+          </SignOutButton>
         </div>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
