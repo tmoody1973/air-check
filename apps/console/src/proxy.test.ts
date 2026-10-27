@@ -18,7 +18,6 @@ describe("proxy", () => {
   beforeAll(() => {
     vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", FAKE_PK);
     vi.stubEnv("CLERK_SECRET_KEY", "sk_live_fake_not_a_real_key");
-    vi.stubEnv("NEXT_PUBLIC_CLERK_SIGN_IN_URL", "/sign-in");
     vi.stubEnv("CLERK_TELEMETRY_DISABLED", "1");
   });
 

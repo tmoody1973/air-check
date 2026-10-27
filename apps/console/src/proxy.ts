@@ -4,7 +4,7 @@ const isPublic = createRouteMatcher(["/sign-in(.*)", "/demo"]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();
-});
+}, { signInUrl: "/sign-in" });
 
 export const config = {
   matcher: [
