@@ -22,6 +22,7 @@ import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as relay from "../relay.js";
 import type * as runs from "../runs.js";
+import type * as sandbox from "../sandbox.js";
 import type * as scripted from "../scripted.js";
 import type * as scriptedEvents from "../scriptedEvents.js";
 import type * as seed from "../seed.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   packages: typeof packages;
   relay: typeof relay;
   runs: typeof runs;
+  sandbox: typeof sandbox;
   scripted: typeof scripted;
   scriptedEvents: typeof scriptedEvents;
   seed: typeof seed;

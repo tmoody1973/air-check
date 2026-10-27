@@ -11,7 +11,7 @@ const RELAY = "r".repeat(40);
 beforeEach(() => vi.stubEnv("RELAY_TOKEN", RELAY));
 afterEach(() => vi.unstubAllEnvs());
 
-const tables = ["runs", "messages", "conversations", "activity", "packages"] as const;
+const tables = ["runs", "messages", "conversations", "activity", "packages", "sandboxStatus"] as const;
 const snapshot = (t: ReturnType<typeof convexTest>) => t.run(async (ctx) => Promise.all(tables.map((n) => ctx.db.query(n).collect())));
 const started = async () => {
   const t = convexTest(schema, modules);
@@ -35,6 +35,7 @@ describe("fail closed", () => {
     await expect(t.mutation(api.relay.events, { token: tk, runId, events: [ev("message.delta", { delta: "x" })] })).rejects.toThrow();
     await expect(t.mutation(api.relay.finished, { token: tk, runId, status: "failed" })).rejects.toThrow();
     await expect(t.mutation(api.relay.activity, { token: tk, workspace: "real", events: [{ key: "k", at: 1, decision: "blocked", host: "h", port: 1 }] })).rejects.toThrow();
+    await expect(t.mutation(api.relay.status, { token: tk, workspace: "real", phase: "Ready", allowedHosts: 3 })).rejects.toThrow();
     expect(await snapshot(t)).toEqual(before);
   });
 
@@ -49,6 +50,7 @@ describe("fail closed", () => {
     await expect(t.mutation(api.relay.events, { token: tk, runId, events: [ev("message.delta", { delta: "x" })] })).rejects.toThrow();
     await expect(t.mutation(api.relay.finished, { token: tk, runId, status: "failed" })).rejects.toThrow();
     await expect(t.mutation(api.relay.activity, { token: tk, workspace: "real", events: [{ key: "k", at: 1, decision: "blocked", host: "h", port: 1 }] })).rejects.toThrow();
+    await expect(t.mutation(api.relay.status, { token: tk, workspace: "real", phase: "Ready", allowedHosts: 3 })).rejects.toThrow();
     expect(await snapshot(t)).toEqual(before);
   });
 });
@@ -188,5 +190,29 @@ describe("relay.activity", () => {
     await t.mutation(api.relay.activity, { token: RELAY, workspace: "real", events: [e, e] });
     await t.mutation(api.relay.activity, { token: RELAY, workspace: "demo", events: [e] });
     expect(await t.run((ctx) => ctx.db.query("activity").collect())).toHaveLength(2);
+  });
+});
+
+describe("relay.status and sandbox.get", () => {
+  test("upserts one row per workspace; sandbox.get returns only the caller's workspace row", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.relay.status, { token: RELAY, workspace: "real", phase: "Ready", allowedHosts: 10 });
+    await t.mutation(api.relay.status, { token: RELAY, workspace: "real", phase: "Ready", allowedHosts: 11 });
+    await t.mutation(api.relay.status, { token: RELAY, workspace: "demo", phase: null, allowedHosts: 0 });
+    expect(await t.run((ctx) => ctx.db.query("sandboxStatus").collect())).toHaveLength(2);
+    const mine = await t.withIdentity(human).query(api.sandbox.get, {});
+    expect(mine).toMatchObject({ workspace: "real", phase: "Ready", allowedHosts: 11 });
+    expect(typeof mine!.at).toBe("number");
+    expect(await t.query(api.sandbox.get, {})).toBeNull();
+  });
+  test("returns null when no status has been sent", async () => {
+    expect(await convexTest(schema, modules).withIdentity(human).query(api.sandbox.get, {})).toBeNull();
+  });
+  test("a blocked network row from the relay is listed for Trust with its host and port", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.relay.activity, { token: RELAY, workspace: "real", events: [{ key: "blocked|evil.example:443|1", at: 1000, decision: "blocked", host: "evil.example", port: 443, reason: "no policy" }] });
+    const rows = await t.withIdentity(human).query(api.activity.list, { kind: "blocked" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "network", result: "blocked", destination: "evil.example:443" });
   });
 });

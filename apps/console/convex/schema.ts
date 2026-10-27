@@ -38,6 +38,13 @@ export default defineSchema({
   })
     .index("by_workspace_at", ["workspace", "at"])
     .index("by_workspace_key", ["workspace", "key"]),
+  // One row per workspace, upserted by the relay every few minutes (relay.status).
+  sandboxStatus: defineTable({
+    workspace: workspaceV,
+    phase: v.union(v.string(), v.null()),
+    allowedHosts: v.number(),
+    at: v.number(),
+  }).index("by_workspace", ["workspace"]),
   verifications: defineTable({
     workspace: workspaceV,
     claim: v.string(),

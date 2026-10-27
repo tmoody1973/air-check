@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { api } from "../../../../convex/_generated/api";
+import { SandboxChipLive } from "@/components/SandboxChipLive";
 import { SampleTag } from "@/components/SampleTag";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { Timeline, parseFilter, type TrustFilter } from "@/components/Timeline";
@@ -18,11 +19,10 @@ function TrustBody() {
   if (rows === undefined) return <p className="text-ink-soft">Loading…</p>;
   return (
     <>
-      {demo ? (
-        <p className="mb-3">
-          <SampleTag />
-        </p>
-      ) : null}
+      <p className="mb-3 flex flex-wrap items-center gap-2">
+        {demo ? <SampleTag /> : null}
+        <SandboxChipLive />
+      </p>
       <Timeline rows={rows} filter={filter} onFilterChange={pick} />
     </>
   );

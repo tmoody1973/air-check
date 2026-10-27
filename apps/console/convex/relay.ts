@@ -114,3 +114,15 @@ export const activity = mutation({
     }
   },
 });
+
+/** Sandbox phase and allowed-host count, sent by the relay every few minutes. One row per workspace (upsert). */
+export const status = mutation({
+  args: { token: v.string(), workspace: workspaceV, phase: v.union(v.string(), v.null()), allowedHosts: v.number() },
+  handler: async (ctx, { token, workspace, phase, allowedHosts }) => {
+    requireRelay(token);
+    const row = { workspace, phase, allowedHosts, at: Date.now() };
+    const existing = await ctx.db.query("sandboxStatus").withIndex("by_workspace", (q) => q.eq("workspace", workspace)).first();
+    if (existing) await ctx.db.replace(existing._id, row);
+    else await ctx.db.insert("sandboxStatus", row);
+  },
+});
