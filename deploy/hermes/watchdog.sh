@@ -6,6 +6,9 @@
 set -uo pipefail
 
 STATE="${HOME}/.aircheck/watchdog.state"
+# Messages not yet delivered. A transition is queued here the moment it is seen, so an
+# outage still gets reported if Telegram was down and the service recovered meanwhile.
+PENDING="${HOME}/.aircheck/watchdog.pending"
 SECRETS="${HOME}/.airc/secrets.env"
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
@@ -27,29 +30,37 @@ now="ok"
 (( ${#down[@]} > 0 )) && now="down:$(IFS=,; echo "${down[*]}")"
 before="$(cat "${STATE}" 2>/dev/null || echo ok)"
 
-[[ "${now}" == "${before}" ]] && exit 0
+if [[ "${now}" != "${before}" ]]; then
+  # Split "down:A,B" into lists to tell a partial recovery from a new outage.
+  IFS=',' read -ra was <<< "${before#down:}"
+  recovered=()
+  if [[ "${before}" != "ok" ]]; then
+    for n in "${was[@]}"; do
+      [[ ",${now#down:}," == *",${n},"* ]] || recovered+=("${n}")
+    done
+  fi
 
-# Split "down:A,B" into lists to tell a partial recovery from a new outage.
-IFS=',' read -ra was <<< "${before#down:}"
-recovered=()
-if [[ "${before}" != "ok" ]]; then
-  for n in "${was[@]}"; do
-    [[ ",${now#down:}," == *",${n},"* ]] || recovered+=("${n}")
-  done
-fi
+  if [[ "${now}" == "ok" ]]; then
+    msg="Air Check: everything is back up at $(date +%H:%M) (was ${before#down:} down)."
+  elif (( ${#recovered[@]} > 0 )); then
+    msg="Air Check: $(IFS=,; echo "${recovered[*]}") recovered at $(date +%H:%M); ${now#down:} still down."
+  else
+    msg="Air Check: ${now#down:} is down since $(date +%H:%M). Console unaffected."
+  fi
 
-if [[ "${now}" == "ok" ]]; then
-  msg="Air Check: everything is back up at $(date +%H:%M) (was ${before#down:} down)."
-elif (( ${#recovered[@]} > 0 )); then
-  msg="Air Check: $(IFS=,; echo "${recovered[*]}") recovered at $(date +%H:%M); ${now#down:} still down."
-else
-  msg="Air Check: ${now#down:} is down since $(date +%H:%M). Console unaffected."
+  if (( DRY_RUN )); then
+    echo "${msg}"
+    exit 0
+  fi
+  echo "${now}" > "${STATE}"
+  echo "${msg}" >> "${PENDING}"
 fi
 
 if (( DRY_RUN )); then
-  echo "${msg}"
+  [[ -s "${PENDING}" ]] && echo "(queued) $(cat "${PENDING}")"
   exit 0
 fi
+[[ -s "${PENDING}" ]] || exit 0
 
 # Read only the two values needed (not the whole secrets file).
 TELEGRAM_BOT_TOKEN="$(grep '^TELEGRAM_BOT_TOKEN=' "${SECRETS}" | cut -d= -f2-)"
@@ -58,10 +69,10 @@ chat="${TELEGRAM_ALLOWED_IDS%%,*}"
 # The URL (which holds the bot token) goes in via stdin config so it never shows in `ps`.
 if printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "${TELEGRAM_BOT_TOKEN}" |
      curl -sf -m 10 -o /dev/null -K - \
-       --data-urlencode "chat_id=${chat}" --data-urlencode "text=${msg}"; then
-  echo "${now}" > "${STATE}"
+       --data-urlencode "chat_id=${chat}" --data-urlencode "text=$(cat "${PENDING}")"; then
+  rm -f "${PENDING}"
 else
-  # Leave the state unchanged so the next tick retries the message.
+  # Keep the queue so the next tick retries the message.
   echo "watchdog: Telegram send failed" >&2
   exit 1
 fi
