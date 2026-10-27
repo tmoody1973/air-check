@@ -6,6 +6,10 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI Track.
 
 **Status: in development.** What exists today is `packages/core`, the deterministic rules engine: tracklist parsing, closing-track marking, source reconciliation, Box episode assembly, title, tag and description checks, Mixcloud field mapping and the approval gate.
 
+## Try it
+
+The hosted demo is at https://aircheck.rhythmlabradio.com. Go to https://aircheck.rhythmlabradio.com/demo to enter the sample workspace with no account. It uses sample data only and cannot publish anything. Deploy steps are in `docs/DEPLOY.md`.
+
 ## Where it runs
 
 Models run on Nebius Token Factory (NVIDIA Nemotron). Compute runs on Nebius AI Cloud. The agent is Hermes Agent in an OpenShell sandbox, installed with NVIDIA NemoClaw. Audio joining runs as a Nebius Serverless Job. Sign-in (Clerk) and the app database (Convex) are hosted services.
@@ -25,6 +29,7 @@ pnpm test
 - `docs/superpowers/specs/2026-10-26-air-check-design.md`: the approved design
 - `docs/HANDOFF.md`: the original handoff brief
 - `docs/PRD.md`, `docs/ARCHITECTURE.md`: requirements and architecture
+- `docs/DEPLOY.md`: how the console is deployed, updated, rolled back and shut down
 - `docs/decisions/`: decision log
 - `skills/`: the station skills the agent loads
 
