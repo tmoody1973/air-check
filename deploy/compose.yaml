@@ -30,6 +30,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks: [internal]
 
   caddy:
@@ -44,7 +49,17 @@ services:
       - caddy_config:/config
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
+    # Left running as root on purpose: switching to a non-root user would need a file
+    # capability to bind ports 80 and 443, and no-new-privileges blocks that. Every
+    # capability except NET_BIND_SERVICE is dropped instead.
     security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       console:
         condition: service_healthy

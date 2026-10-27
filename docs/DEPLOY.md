@@ -8,7 +8,7 @@ This page has no addresses or keys on purpose, because the repo is public. The V
 
 - **Docker Compose** (a tool that starts several containers from one file): `deploy/compose.yaml` starts two containers.
 - **`console`**: the website, a Next.js app (a React web framework), built by `deploy/Dockerfile`. It has no published port, so nothing outside can reach it directly.
-- **`caddy`**: a web server that takes ports 80 and 443, gets a free HTTPS certificate from Let's Encrypt by itself, and passes traffic to `console`. Config is `deploy/Caddyfile`. It writes no access log on purpose, because a sign-in link can carry a one-time token.
+- **`caddy`**: a web server that takes ports 80 and 443, gets a free HTTPS certificate from Let's Encrypt by itself, and passes traffic to `console`. Config is `deploy/Caddyfile`. It writes no access log on purpose, because a sign-in link can carry a one-time token. Caddy still logs its own startup and certificate messages. Failed hand-offs to `console` (called proxy errors) are a separate kind of entry that can include the page address, so `deploy/Caddyfile` switches those off too. It also turns off HTTP/3 (the newest web protocol, which needs a UDP port we do not open).
 - **Convex production** (deployment `clever-deer-759`): the database and the hourly scheduled job (a cron) in `apps/console/convex/crons.ts` that re-seeds the demo workspace.
 
 ## One-time setup (already done)
@@ -41,7 +41,7 @@ Clerk production instance on domain `aircheck.rhythmlabradio.com` (see decision 
 
 ### Convex production commands
 
-Run from `apps/console` on the Mac. The Convex deploy key (a `prod:...` key) comes from `apps/console/.env.production.local`, which is gitignored. It must never be copied to the VM.
+Run from the repo root on the Mac (the first line moves into `apps/console`). The Convex deploy key (a `prod:...` key) comes from `apps/console/.env.production.local`, which is gitignored. It must never be copied to the VM.
 
 ```sh
 cd apps/console
@@ -76,6 +76,8 @@ cd ~/air-check
 alias dc='docker compose --env-file ${HOME}/.aircheck/console.env -f deploy/compose.yaml'
 ```
 
+The `dc` alias lasts only for the current SSH session, so paste it again after reconnecting.
+
 Look at the state and the logs:
 
 ```sh
@@ -92,18 +94,57 @@ dc restart
 
 ### Getting new code onto the VM
 
-The first copy was sent from the Mac with `git archive` (a snapshot of the files with no history). Once the `deploy/console` branch is merged, use git instead:
+The first copy was sent from the Mac with `git archive` (a snapshot of the files with no history), so `~/air-check` already exists and `git clone` into it would fail. Once the `deploy/console` branch is merged, move the copy aside and clone instead:
 
 ```sh
-git clone https://github.com/tmoody1973/air-check ~/air-check   # first time only, replaces the copied folder
+mv ~/air-check ~/air-check.archive                              # first time only
+git clone https://github.com/tmoody1973/air-check ~/air-check   # first time only
 cd ~/air-check && git pull                                      # every update after that
 ```
 
-Then run the start/update command above. If Convex functions changed, also run `npx convex deploy -y` from the Mac.
+The Compose project name stays `deploy` (Compose names it after the folder that holds the compose file, `deploy/`), not after `~/air-check`. So the new clone reuses the `deploy_caddy_data` volume (Docker's saved storage for Caddy) and the HTTPS certificate survives. Then run the start/update command above. If Convex functions changed, also run `npx convex deploy -y` from the Mac.
+
+Clean up old build leftovers after an update, so the disk does not fill before Dec 15:
+
+```sh
+docker image prune -f      # removes unused old images
+docker builder prune -f    # removes the build cache
+```
+
+Both containers also keep at most three 10 MB log files each.
+
+### After a reboot
+
+Both containers have `restart: unless-stopped`, and `docker` and `containerd` (the engine underneath Docker) are enabled at boot, so the site should come back by itself. A full VM reboot has not yet been tested with the stack running; that test is planned as the first task of Plan 4. Until then, after any reboot:
+
+```sh
+dc ps     # console should say "healthy" and caddy should be "Up"
+```
+
+If console is not healthy or caddy is not up, run the start command from the top of this section. Then check the site:
+
+```sh
+curl -sI https://aircheck.rhythmlabradio.com/sign-in    # expect HTTP/2 200
+```
+
+### Stop the site but keep the VM
+
+```sh
+dc down
+```
+
+**Never add `-v` to this command.** It deletes the `caddy_data` volume, which holds the HTTPS certificate. Asking Let's Encrypt for new certificates over and over can hit its rate limits (it refuses to issue more for a while). `dc up -d` brings the site back.
+
+### Redo from scratch on a new VM
+
+1. Set up Docker and the firewall as in `docs/NEBIUS_SETUP.md`.
+2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above.
+3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
+4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
 
 ## Rolling back
 
-This needs the git clone from the section above. The current VM copy came from `git archive` and has no history, so there is nothing to check out until the clone is done.
+This needs the git clone from the section above (the `mv` then `git clone` steps). The archive copy has no history, so there is nothing to check out until the clone is done. The clone keeps the same Compose project name, so rolling back keeps the certificate.
 
 ```sh
 cd ~/air-check
@@ -118,7 +159,7 @@ When fixed, `git checkout main && git pull` to get back on the latest. A bad Con
 
 The demo stays open to judges until Dec 15. After that:
 
-1. Stop the VM from the Nebius console (or with the CLI). I expect stopping to end the compute charge and a reserved static IP to keep billing, but neither is verified. Check the Nebius billing page, and release the IP too if the site is going away for good.
+1. Stop the VM from the Nebius console (or with the CLI). Unverified: stopping the VM should end the compute charge, and a reserved static IP should keep billing. Check the Nebius billing page, and release the IP too if the site is going away for good.
 2. To take the site down but keep the data, nothing else is needed. To remove it completely, delete the DNS records and the Clerk and Convex production projects.
 3. The hourly re-seed cron lives in Convex. If the Convex project stays up, remove its entry in `apps/console/convex/crons.ts` and run `npx convex deploy -y` to stop it.
 
@@ -134,6 +175,6 @@ The demo stays open to judges until Dec 15. After that:
 
 ## Known gaps
 
-- **Hermes is currently down.** After the VM was stopped and started, the NemoClaw sandbox stayed in an Error state, and `start` and `recover` cannot clear it (details in `docs/FRICTION_LOG.md`). The expected fix is a `rebuild` at the start of Plan 4. It needs Tarik's OK first, and Telegram and Tavily setup may need to be redone. The `~/.local` permission problem that blocked `start` was already fixed on the VM. The console does not depend on Hermes yet.
+- **Hermes (the AI agent that will draft show material) is currently down.** After the VM was stopped and started, the NemoClaw sandbox (the locked-down box Hermes runs in) stayed in an Error state, and `start` and `recover` cannot clear it (details in `docs/FRICTION_LOG.md`). The expected fix is a `rebuild` at the start of Plan 4. It needs Tarik's OK first, and Telegram (the chat app used for approval links) and Tavily (a web-search service) setup may need to be redone. The `~/.local` permission problem that blocked `start` was already fixed on the VM. The console does not depend on Hermes yet.
 - Google sign-in is not on in production (needs a Google OAuth client).
 - CI does not run the browser tests (decision 009), so run `pnpm --filter console e2e` before merging.

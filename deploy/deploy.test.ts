@@ -45,7 +45,27 @@ describe("deploy files", () => {
 
   it("caddy writes no access log", () => {
     const noComments = read("Caddyfile").replace(/#.*$/gm, "");
-    expect(noComments).not.toMatch(/^\s*log\b/m);
+    // Only the global `log default { exclude ... }` block is allowed; no per-site log.
+    expect(noComments).not.toMatch(/^\s*log\b(?!\s+default)/m);
+  });
+
+  it("caddy has memory and process limits", () => {
+    expect(caddy.mem_limit).toBeTruthy();
+    expect(caddy.pids_limit).toBeGreaterThan(0);
+  });
+
+  it("both services rotate their logs", () => {
+    for (const s of [web, caddy]) {
+      expect(s.logging.driver).toBe("json-file");
+      expect(s.logging.options["max-size"]).toBe("10m");
+      expect(s.logging.options["max-file"]).toBe("3");
+    }
+  });
+
+  it("caddy excludes proxy error logs and does not advertise HTTP/3", () => {
+    const c = read("Caddyfile").replace(/#.*$/gm, "");
+    expect(c).toMatch(/log default\s*\{\s*exclude http\.log\.error\s*\}/);
+    expect(c).toMatch(/servers\s*\{\s*protocols h1 h2\s*\}/);
   });
 
   it("dockerfile runs standalone as non-root with telemetry off", () => {
