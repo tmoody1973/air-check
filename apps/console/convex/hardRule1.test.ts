@@ -1,5 +1,7 @@
 // @vitest-environment edge-runtime
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import http from "./http";
 
 // Hard Rule 1: the only public mutation (or action) is packages.decide. HTTP actions are public
 // by nature, so any httpAction export counts as an exposed write (none are allowed today). Convex marks
@@ -23,4 +25,17 @@ test("the only public write is packages.decide", async () => {
   expect(internal.sort()).toEqual(
     ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "seed.seedDemo"].sort(),
   );
+});
+
+test("the only HTTP route is POST /agent/packages", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method])).toEqual([["/agent/packages", "POST"]]);
+});
+
+test("the agent route reaches only internal.packages.submit", () => {
+  for (const file of ["./http.ts", "./agentSubmit.ts"]) {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
+    expect([...refs].filter((r) => r !== "internal.packages.submit")).toEqual([]);
+  }
+  expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain("internal.packages.submit");
 });
