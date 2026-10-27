@@ -5,6 +5,11 @@ export const workspaceV = v.union(v.literal("real"), v.literal("demo"));
 export const resultV = v.union(v.literal("needs_you"), v.literal("done"), v.literal("allowed"), v.literal("blocked"));
 export const kindV = v.union(v.literal("waiting"), v.literal("action"), v.literal("network"));
 
+export const runStatusV = v.union(
+  v.literal("queued"), v.literal("running"), v.literal("stopping"),
+  v.literal("completed"), v.literal("cancelled"), v.literal("failed"),
+);
+
 export default defineSchema({
   packages: defineTable({
     packageId: v.string(),
@@ -28,7 +33,11 @@ export default defineSchema({
     result: resultV,
     reason: v.optional(v.string()),
     packageId: v.optional(v.string()),
-  }).index("by_workspace_at", ["workspace", "at"]),
+    // Audit-log dedupe key (network rows written by the relay).
+    key: v.optional(v.string()),
+  })
+    .index("by_workspace_at", ["workspace", "at"])
+    .index("by_workspace_key", ["workspace", "key"]),
   verifications: defineTable({
     workspace: workspaceV,
     claim: v.string(),
@@ -52,5 +61,36 @@ export default defineSchema({
     // Display-only Next/Skipped rows; the seed (Task 13) stores them.
     upcoming: v.optional(v.array(v.object({ label: v.string(), text: v.string(), status: v.union(v.literal("next"), v.literal("skipped")) }))),
     updatedAt: v.number(),
-  }).index("by_runId", ["runId"]),
+    kind: v.union(v.literal("chat"), v.literal("draft-package")),
+    source: v.union(v.literal("live"), v.literal("scripted")),
+    status: runStatusV,
+    input: v.string(), // the Hermes instruction, built at queue time
+    stopRequested: v.boolean(),
+    hermesRunId: v.optional(v.string()),
+    conversationId: v.optional(v.string()), // also Hermes's session_id
+    sessionKey: v.optional(v.string()), // demo rate-limit key
+    packageId: v.optional(v.string()),
+    form: v.optional(v.object({ showDate: v.string(), tracklistText: v.string(), notes: v.string() })),
+    lastSeq: v.optional(v.number()), // highest relay event seq applied
+    createdAt: v.number(),
+  })
+    .index("by_runId", ["runId"])
+    .index("by_status", ["status"])
+    .index("by_session_created", ["sessionKey", "createdAt"])
+    .index("by_workspace_source_created", ["workspace", "source", "createdAt"]),
+  conversations: defineTable({
+    workspace: workspaceV,
+    title: v.string(),
+    createdAt: v.number(),
+  }).index("by_workspace_created", ["workspace", "createdAt"]),
+  messages: defineTable({
+    workspace: workspaceV,
+    conversationId: v.id("conversations"),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    text: v.string(),
+    runId: v.optional(v.string()),
+    at: v.number(),
+  })
+    .index("by_conversation", ["conversationId"]) // creation order
+    .index("by_runId", ["runId"]),
 });

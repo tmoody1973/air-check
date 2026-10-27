@@ -3,7 +3,7 @@ import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { MIN_TOKEN_LENGTH, pickInput, readCapped, tokenMatches } from "./agentSubmit";
+import { MIN_TOKEN_LENGTH, pickInput, readCapped, workspaceForToken } from "./agentSubmit";
 
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -14,9 +14,11 @@ const privateTerms = () =>
 // Hard Rule 1: the draft is rebuilt and validated here, so nothing the agent sends can set status,
 // workspace or fingerprint. The only function this route may call is internal.packages.submit.
 const submitPackage = httpAction(async (ctx, req) => {
-  const expected = process.env.AGENT_SUBMIT_TOKEN;
-  if (!expected || expected.length < MIN_TOKEN_LENGTH) return json(503, {});
-  if (!tokenMatches(req.headers.get("authorization"), expected)) return json(401, {});
+  const tokens = { real: process.env.AGENT_SUBMIT_TOKEN, demo: process.env.DEMO_AGENT_SUBMIT_TOKEN };
+  const usable = (t: string | undefined) => !!t && t.length >= MIN_TOKEN_LENGTH;
+  if (!usable(tokens.real) && !usable(tokens.demo)) return json(503, {});
+  const workspace = workspaceForToken(req.headers.get("authorization"), tokens);
+  if (!workspace) return json(401, {});
   const text = await readCapped(req);
   if (text === null) return json(413, {});
   let body: unknown = null;
@@ -27,7 +29,7 @@ const submitPackage = httpAction(async (ctx, req) => {
   }
   const input = pickInput(body);
   if (!input) return json(400, { problems: ["body must be the seven package fields"] });
-  const built = buildPackageDraft(input, { privateTerms: privateTerms() });
+  const built = buildPackageDraft(input, { privateTerms: privateTerms(), workspace });
   if (!built.ok) return json(400, { problems: built.problems });
   try {
     const rec = await ctx.runMutation(internal.packages.submit, { draft: built.draft });

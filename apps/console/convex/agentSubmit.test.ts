@@ -117,6 +117,30 @@ describe("POST /agent/packages", () => {
     expect(await rows(t)).toHaveLength(0);
   });
 
+  test("DEMO_AGENT_SUBMIT_TOKEN creates a demo package; AGENT_SUBMIT_TOKEN a real one", async () => {
+    const DEMO = "d".repeat(40);
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
+    const t = convexTest(schema, modules);
+    expect((await post(t, body(), `Bearer ${DEMO}`)).status).toBe(201);
+    expect((await rows(t))[0]).toMatchObject({ workspace: "demo", status: "preparing_audio" });
+    expect((await rows(t))[0]!.draft.workspace).toBe("demo");
+    const t2 = convexTest(schema, modules);
+    expect((await post(t2, body())).status).toBe(201);
+    expect((await rows(t2))[0]).toMatchObject({ workspace: "real" });
+    expect((await rows(t2))[0]!.draft.workspace).toBe("real");
+  });
+
+  test("only the demo token set: it works, the real-token header does not, and a short demo token is 503", async () => {
+    const DEMO = "d".repeat(40);
+    vi.stubEnv("AGENT_SUBMIT_TOKEN", "");
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
+    const t = convexTest(schema, modules);
+    expect((await post(t, body(), `Bearer ${TOKEN}`)).status).toBe(401);
+    expect((await post(t, body(), `Bearer ${DEMO}`)).status).toBe(201);
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", "short");
+    expect((await post(t, body(), "Bearer short")).status).toBe(503);
+  });
+
   test("GET is not routed", async () => {
     const t = convexTest(schema, modules);
     const res = await t.fetch("/agent/packages", { method: "GET" });

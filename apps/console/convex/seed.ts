@@ -11,7 +11,7 @@ import {
 } from "./seedData";
 
 const WS = "demo" as const;
-const TABLES = ["packages", "activity", "verifications", "releases", "runs"] as const;
+const TABLES = ["packages", "activity", "verifications", "releases", "runs", "conversations", "messages"] as const;
 
 const goldenDemo: PackageDraft = {
   id: "demo-10-2-26",
@@ -113,6 +113,12 @@ export const seedDemo = internalMutation({
         { label: "H1.15", text: "Channell & 2bfrank – “Just Move” · closing track, no notes", status: "skipped" },
       ],
       updatedAt: now,
+      kind: "draft-package",
+      source: "scripted",
+      status: "completed",
+      input: "",
+      stopRequested: false,
+      createdAt: now,
     });
   },
 });

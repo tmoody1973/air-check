@@ -34,7 +34,7 @@ describe("seedDemo", () => {
       await ctx.db.insert("activity", { workspace: "real", at: 1, kind: "action", result: "done", title: "real" });
       await ctx.db.insert("verifications", { workspace: "real", claim: "real", status: "conflict" });
       await ctx.db.insert("releases", { workspace: "real", artist: "A", title: "T" });
-      await ctx.db.insert("runs", { workspace: "real", runId: "real-run", title: "r", state: {}, updatedAt: 1 });
+      await ctx.db.insert("runs", { workspace: "real", runId: "real-run", title: "r", state: {}, updatedAt: 1, kind: "chat", source: "live", status: "completed", input: "", stopRequested: false, createdAt: 1 });
       return Promise.all(TABLES.map((n) => ctx.db.query(n).collect()));
     });
     await t.mutation(internal.seed.seedDemo, {});

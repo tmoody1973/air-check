@@ -12,9 +12,24 @@ function sameBytes(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Constant-time check of a bare token against a secret that must be set and at least MIN_TOKEN_LENGTH long. */
+export function sameToken(given: string, expected: string | undefined): boolean {
+  if (!expected || expected.length < MIN_TOKEN_LENGTH) return false;
+  return sameBytes(given, expected);
+}
+
 export function tokenMatches(header: string | null, expected: string | undefined): boolean {
-  if (!expected || expected.length < MIN_TOKEN_LENGTH || !header?.startsWith("Bearer ")) return false;
-  return sameBytes(header.slice("Bearer ".length), expected);
+  return !!header?.startsWith("Bearer ") && sameToken(header.slice("Bearer ".length), expected);
+}
+
+/** Which workspace a Bearer header authorises: the real-token wins a tie; null means neither matched. */
+export function workspaceForToken(
+  header: string | null,
+  tokens: { real: string | undefined; demo: string | undefined },
+): "real" | "demo" | null {
+  const real = tokenMatches(header, tokens.real); // both compares always run
+  const demo = tokenMatches(header, tokens.demo);
+  return real ? "real" : demo ? "demo" : null;
 }
 
 export const MAX_BODY_BYTES = 131_072; // same cap as the bridge

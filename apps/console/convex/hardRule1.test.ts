@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import http from "./http";
 
-// Hard Rule 1: the only public mutation (or action) is packages.decide. HTTP actions are public
-// by nature, so any httpAction export counts as an exposed write (the one allowed is the agent route, pinned below). Convex marks
-// registered functions with isPublic / isInternal / isMutation / isAction.
+// Hard Rule 1: no model output reaches publish. Every public write is listed here by name; HTTP actions
+// are public by nature, so any httpAction export counts too (the one allowed is the agent route, pinned below).
+// Convex marks registered functions with isPublic / isInternal / isMutation / isAction.
 type Registered = { isPublic?: boolean; isInternal?: boolean; isMutation?: boolean; isAction?: boolean; isHttp?: boolean };
 
-test("the only public write is packages.decide", async () => {
+test("the public writes are exactly the allowlist", async () => {
   const modules = import.meta.glob(["./**/*.ts", "!./**/*.test.ts", "!./_generated/**"]);
   const exposed: string[] = [];
   const internal: string[] = [];
@@ -21,10 +21,38 @@ test("the only public write is packages.decide", async () => {
       (f.isPublic || f.isHttp ? exposed : internal).push(id);
     }
   }
-  expect(exposed).toEqual(["packages.decide"]);
-  expect(internal.sort()).toEqual(
-    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "seed.seedDemo"].sort(),
+  expect(exposed.sort()).toEqual(
+    ["chat.send", "packages.decide", "relay.activity", "relay.events", "relay.finished", "relay.started", "runs.requestStop", "tracklist.draft"].sort(),
   );
+  expect(internal.sort()).toEqual(
+    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
+  );
+});
+
+// The chat/run/relay code sits next to the publish path, so it must not touch it: no publish or decide
+// function by name, no calls into packages.ts, and the packages table is only ever read (relay.events reads it
+// for the run's packageId). This is a source-text check: it cannot see a call built from a computed string.
+const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "enqueue", "applyEvents"];
+const src = (name: string) => readFileSync(new URL(`./${name}.ts`, import.meta.url), "utf8");
+
+test("run, chat and relay code never reach packages.decide or the publish functions", () => {
+  for (const name of RUN_FILES) {
+    const text = src(name);
+    for (const banned of ["packages.decide", "claimForPublish", "recordResult", "attachAudio", "internal.packages", "api.packages"]) {
+      expect(text, `${name}.ts mentions ${banned}`).not.toContain(banned);
+    }
+    expect(text, `${name}.ts imports packages`).not.toMatch(/from "\.\/packages/);
+  }
+});
+
+test("run, chat and relay code never write the packages table", () => {
+  for (const name of RUN_FILES) {
+    const text = src(name);
+    for (const m of text.matchAll(/"packages"/g)) {
+      expect(text.slice(Math.max(0, m.index! - 15), m.index! + 10), `${name}.ts uses "packages" outside ctx.db.query`).toMatch(/ctx\.db\.query\("packages"/);
+    }
+    expect(text).not.toMatch(/(?:patch|insert|replace|delete)\("packages"/);
+  }
 });
 
 test("the only HTTP route is POST /agent/packages", () => {
