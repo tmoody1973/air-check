@@ -8,7 +8,7 @@ import { RunProgressCard } from "./RunProgressCard";
 
 afterEach(cleanup);
 
-const COPY = "Stops after this track and opens the draft for you to edit. The agent won't overwrite anything you change.";
+const COPY = "Stops the agent at its next step.";
 const replay = (upTo = events.length): RunState =>
   events.slice(0, upTo).reduce((st, e, i) => applyRunEvent(st, e.event, e.data, i * 1000), initialRun("r1"));
 const running = (): RunState => ({
@@ -33,7 +33,8 @@ describe("RunProgressCard", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getByText("Take over")).toBeInTheDocument();
     expect(screen.getByText(COPY)).toBeInTheDocument();
-    expect(screen.getByText("Live from the agent's run · steps stream in as they happen")).toBeInTheDocument();
+    expect(screen.getByText("Sample run · replayed from a recorded session")).toBeInTheDocument();
+    expect(screen.queryByText(/Live from the agent/)).not.toBeInTheDocument();
   });
 
   it("take over calls the handler", () => {
@@ -180,6 +181,19 @@ describe("RunProgressCard", () => {
       expect(screen.getByText("No package was created.")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Edit and draft again" })).toHaveAttribute("href", "/tracklist?from=r9");
       expect(screen.queryByRole("link", { name: "Review package" })).not.toBeInTheDocument();
+    });
+    it("footer: live while the run is going, recorded once it ends", () => {
+      const { rerender } = render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Live from the agent's run · steps stream in as they happen")).toBeInTheDocument();
+      rerender(<RunProgressCard {...base} status="completed" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Recorded from the agent's run")).toBeInTheDocument();
+      expect(screen.queryByText(/Live from the agent/)).not.toBeInTheDocument();
+    });
+    it("Take over copy says what it does; draft runs add the edit-and-redraft step", () => {
+      const { rerender } = render(<RunProgressCard {...base} kind="chat" status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Stops the agent at its next step.")).toBeInTheDocument();
+      rerender(<RunProgressCard {...base} kind="draft-package" status="running" state={liveState()} onTakeOver={() => {}} />);
+      expect(screen.getByText("Stops the agent at its next step. You can then edit the inputs and draft again.")).toBeInTheDocument();
     });
     it("Review package link", () => {
       render(<RunProgressCard {...base} packageId="p1" status="completed" state={liveState()} onTakeOver={() => {}} />);

@@ -25,7 +25,7 @@ export const MAX_MESSAGE_CHARS = 8_000;
 
 const GENERIC = "Couldn't send. Please try again.";
 const MESSAGES: Record<string, string> = {
-  RATE_LIMITED: "Demo limit reached: answers are sample replies until tomorrow.",
+  RATE_LIMITED: "Demo limit reached. Your message wasn't sent; try again in a few minutes.",
   INVALID_INPUT: "Messages can be up to 8,000 characters.",
   NOT_FOUND: "That conversation is gone.",
 };

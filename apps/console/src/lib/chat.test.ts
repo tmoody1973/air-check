@@ -28,7 +28,7 @@ describe("chatErrorText", () => {
   const err = (code: string) => new ConvexError({ code });
   vi.spyOn(console, "error").mockImplementation(() => {});
   it("maps known codes", () => {
-    expect(chatErrorText(err("RATE_LIMITED"))).toBe("Demo limit reached: answers are sample replies until tomorrow.");
+    expect(chatErrorText(err("RATE_LIMITED"))).toBe("Demo limit reached. Your message wasn't sent; try again in a few minutes.");
     expect(chatErrorText(err("INVALID_INPUT"))).toBe("Messages can be up to 8,000 characters.");
     expect(chatErrorText(err("NOT_FOUND"))).toBe("That conversation is gone.");
   });

@@ -77,7 +77,7 @@ describe("ChatThread sending", () => {
     setup({ send: async () => { throw new ConvexError({ code: "RATE_LIMITED" }); } });
     type("hello there");
     enter();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Demo limit reached: answers are sample replies until tomorrow.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Demo limit reached. Your message wasn't sent; try again in a few minutes.");
     expect(box().value).toBe("hello there");
     expect(screen.queryByText("hello there", { selector: "p" })).not.toBeInTheDocument();
     enter();

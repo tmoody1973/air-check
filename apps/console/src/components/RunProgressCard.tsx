@@ -7,7 +7,8 @@ import { Pill } from "./Pill";
 export interface UpcomingRow { label: string; text: string; status: "next" | "skipped" }
 export interface RunTotals { tracks: number; closingSkipped: number }
 
-const COPY = "Stops after this track and opens the draft for you to edit. The agent won't overwrite anything you change.";
+const COPY = "Stops the agent at its next step.";
+const DRAFT_COPY = `${COPY} You can then edit the inputs and draft again.`;
 const VERIFY = "[verify]";
 const chipBase = "rounded-md border px-1.5 py-1 font-mono text-[11px] leading-none";
 const neutral = "border-line bg-surface text-ink-soft";
@@ -156,7 +157,7 @@ export function RunProgressCard({
               {stopping ? "Stopping at the next step…" : "Take over"}
             </button>
             <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
-              {status === "queued" ? "Waiting for the agent…" : COPY}
+              {status === "queued" ? "Waiting for the agent…" : kind === "draft-package" ? DRAFT_COPY : COPY}
             </span>
           </>
         ) : cancelled ? (
@@ -173,7 +174,9 @@ export function RunProgressCard({
         {packageId && <Link href={`/packages/${encodeURIComponent(packageId)}`} className={linkClass}>Review package</Link>}
       </div>
       <p className="border-t border-line px-5 pb-3.5 pt-2.5 font-mono text-[11px] leading-snug text-muted">
-        Live from the agent&apos;s run · steps stream in as they happen
+        {source === "scripted"
+          ? "Sample run · replayed from a recorded session"
+          : canStop ? "Live from the agent's run · steps stream in as they happen" : "Recorded from the agent's run"}
       </p>
     </section>
   );
