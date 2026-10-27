@@ -19,7 +19,10 @@ Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-only
+# nemohermes takes a mkdir lock in $HOME on every call (~/.nemoclaw-portable-host.lock), so home
+# must be writable; the rest of the filesystem stays read-only.
+ProtectHome=no
+ReadWritePaths=/home/user
 PrivateTmp=yes
 
 [Install]
