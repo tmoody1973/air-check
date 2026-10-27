@@ -13,6 +13,7 @@ DRY_RUN=0
 # name|command — each command exits 0 when healthy.
 PROBES=(
   "Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8642/health"
+  "Crate bridge|curl -sf -m 5 -o /dev/null --cacert ${HOME}/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz"
 )
 
 down=()
