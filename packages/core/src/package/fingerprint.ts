@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { type PackageDraft, toSections } from "./mixcloud";
 
 function canonical(value: unknown): unknown {
@@ -14,7 +13,7 @@ function canonical(value: unknown): unknown {
 }
 
 /** Hash of exactly what will be published, including the MP3 file's own hash. */
-export function fingerprint(p: PackageDraft): string {
+export async function fingerprint(p: PackageDraft): Promise<string> {
   if (!p.audio.mp3Sha256) throw new Error("cannot fingerprint a package before its MP3 exists");
   const content = {
     workspace: p.workspace,
@@ -27,5 +26,8 @@ export function fingerprint(p: PackageDraft): string {
     mp3Sha256: p.audio.mp3Sha256,
     picture: p.picture,
   };
-  return createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex");
+  // Web Crypto, not node:crypto: this also runs inside Convex functions
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical(content)));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }

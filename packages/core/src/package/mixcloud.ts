@@ -14,7 +14,7 @@ export interface PackageDraft {
   tags: string[];
   description: string;
   tracks: Track[];
-  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string };
+  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string; hour1DurationSec?: number };
   picture?: string;
 }
 
