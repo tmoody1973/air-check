@@ -52,8 +52,10 @@ if [[ "${now}" != "${before}" ]]; then
     echo "${msg}"
     exit 0
   fi
+  # Queue before recording the new state, so a crash in between re-alerts rather than drops.
+  # Keep the last 20 lines: one Telegram message holds at most 4,096 characters.
+  { cat "${PENDING}" 2>/dev/null; echo "${msg}"; } | tail -n 20 > "${PENDING}.tmp" && mv "${PENDING}.tmp" "${PENDING}"
   echo "${now}" > "${STATE}"
-  echo "${msg}" >> "${PENDING}"
 fi
 
 if (( DRY_RUN )); then
