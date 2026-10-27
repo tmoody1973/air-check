@@ -69,6 +69,30 @@ describe("packages.decide", () => {
     });
   });
 
+  test("real identity cannot decide a demo package", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t, { id: "pkg-demo", workspace: "demo" });
+    const before = (await rows(t)).length;
+    const r = await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    expect(r).toEqual({ ok: false, code: "FORBIDDEN", message: expect.any(String) });
+    const doc = await t.run((ctx) => ctx.db.query("packages").first());
+    expect(doc?.status).toBe("awaiting_review");
+    expect(await rows(t)).toHaveLength(before);
+  });
+
+  test("decide after a different decision returns PACKAGE_CHANGED", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t);
+    const as = t.withIdentity(human);
+    const skip = await as.mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "skip" });
+    expect(skip.ok).toBe(true);
+    const r = await as.mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    expect(r).toMatchObject({ ok: false, code: "PACKAGE_CHANGED" });
+    const again = await as.mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "skip" });
+    expect(again.ok).toBe(true);
+    expect((await rows(t)).filter((a) => a.title.startsWith("Skipped package"))).toHaveLength(1);
+  });
+
   test("demo identity can approve a demo package", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t, { id: "pkg-demo", workspace: "demo" });

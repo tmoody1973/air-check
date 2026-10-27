@@ -2,8 +2,6 @@ import type { PackageRecord, PackageStatus, PackageStore } from "@aircheck/core"
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
-type Workspace = "real" | "demo";
-
 /** Convex rejects `undefined` inside stored values (revise can leave `hour1DurationSec: undefined`). */
 export function stripUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -24,14 +22,13 @@ async function find(ctx: QueryCtx, packageId: string) {
 
 /**
  * PackageStore over Convex. A mutation is one transaction, so the read and patch in
- * compareAndSwap are atomic. When `workspace` is given, other workspaces read as missing.
+ * compareAndSwap are atomic. Workspace checks belong to the callers (packages.decide).
  */
-export function convexPackageStore(ctx: MutationCtx, workspace?: Workspace): PackageStore {
+export function convexPackageStore(ctx: MutationCtx): PackageStore {
   return {
     async get(id) {
       const doc = await find(ctx, id);
-      if (!doc || (workspace && doc.workspace !== workspace)) return null;
-      return toRecord(doc);
+      return doc ? toRecord(doc) : null;
     },
     async put(rec) {
       const clean = stripUndefined(rec);

@@ -40,8 +40,20 @@ export const decide = mutation({
   handler: async (ctx, { packageId, fingerprint, decision }): Promise<DecideResult> => {
     const actor = await actorOf(ctx);
     if (!actor) return { ok: false, code: "FORBIDDEN", message: "Sign in with your Radio Milwaukee account." };
+    const doc = await ctx.db
+      .query("packages")
+      .withIndex("by_packageId", (q) => q.eq("packageId", packageId))
+      .unique();
+    // Hard Rule 9: a real user never decides a demo package, and the demo login never decides a real one.
+    // Same message as the gate's FORBIDDEN so nothing about the package leaks.
+    if (doc && doc.workspace !== workspaceOf(actor))
+      return { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can decide" };
     try {
-      return { ok: true, record: await gateFor(ctx).decide(packageId, fingerprint, decision, actor) };
+      const record = await gateFor(ctx).decide(packageId, fingerprint, decision, actor);
+      // Already decided differently (A skipped, B taps Approve): the gate returns the current record; tell the user.
+      if (record.status !== (decision === "approve" ? "approved" : "skipped"))
+        return { ok: false, code: "PACKAGE_CHANGED", message: "This package changed. Open the latest version." };
+      return { ok: true, record };
     } catch (e) {
       if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
       throw e;
