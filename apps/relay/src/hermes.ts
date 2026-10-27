@@ -6,7 +6,7 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
   const decoder = new TextDecoder();
   let buf = "";
   const frame = (text: string): SseEvent | null => {
-    let event = "message";
+    let event: string | undefined;
     const data: string[] = [];
     for (const line of text.split("\n")) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
@@ -16,9 +16,11 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
     const raw = data.join("\n");
     try {
       const parsed: unknown = JSON.parse(raw);
-      return { event, data: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { value: parsed } };
+      const obj = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { value: parsed };
+      // Hermes payloads carry their own name in data.event; an `event:` line wins when present.
+      return { event: event ?? (typeof obj.event === "string" ? obj.event : "message"), data: obj };
     } catch {
-      return { event, data: { raw } };
+      return { event: event ?? "message", data: { raw } };
     }
   };
   for await (const chunk of body) {
@@ -34,13 +36,23 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
   if (tail) yield tail;
 }
 
+/** A non-2xx answer from Hermes. Carries the status only, never the body. */
+export class HermesError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /** The Hermes Runs API for one sandbox (loopback, bearer token). */
 export class HermesClient {
   constructor(private readonly baseUrl: string, private readonly token: string) {}
 
-  private async call(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
-    const res = await fetch(this.baseUrl + path, { ...init, headers: { authorization: `Bearer ${this.token}`, ...init.headers } });
-    if (!res.ok) throw new Error(`hermes ${init.method ?? "GET"} ${path.replace(/\/[^/]*$/, "/…")} -> ${res.status}`); // status only: never the body
+  /** `timeout: false` is for the events stream, which may be idle for a long time. */
+  private async call(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, timeout = true): Promise<Response> {
+    const res = await fetch(this.baseUrl + path, {
+      ...init, headers: { authorization: `Bearer ${this.token}`, ...init.headers },
+      ...(timeout && { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
+    });
+    if (!res.ok) throw new HermesError(res.status, `hermes ${init.method ?? "GET"} ${path.replace(/\/[^/]*$/, "/…")} -> ${res.status}`); // status only: never the body
     return res;
   }
 
@@ -66,7 +78,7 @@ export class HermesClient {
   }
 
   async *events(runId: string): AsyncGenerator<SseEvent> {
-    const res = await this.call(`/v1/runs/${encodeURIComponent(runId)}/events`, { headers: { accept: "text/event-stream" } });
+    const res = await this.call(`/v1/runs/${encodeURIComponent(runId)}/events`, { headers: { accept: "text/event-stream" } }, false);
     if (!res.body) throw new Error("hermes events had no body");
     yield* parseSse(res.body);
   }

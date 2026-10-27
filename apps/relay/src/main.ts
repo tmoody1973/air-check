@@ -10,7 +10,7 @@ const log = (line: string) => console.log(line);
 
 const spawnLogs: SpawnLogs = (bin, args) => {
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"] });
-  return { stdout: child.stdout, onExit: (cb) => { child.once("close", cb); child.once("error", cb); } };
+  return { stdout: child.stdout, onExit: (cb) => { child.once("close", cb); child.once("error", cb); }, kill: () => void child.kill() };
 };
 
 function main(): void {

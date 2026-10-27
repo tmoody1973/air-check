@@ -14,4 +14,11 @@ describe("parseSse", () => {
   test("ignores comments and handles CRLF; non-JSON data is wrapped, not thrown", async () => {
     expect(await collect([": ping\r\n\r\nevent: x\r\ndata: not json\r\n\r\n"])).toEqual([{ event: "x", data: { raw: "not json" } }]);
   });
+  test("data-only frames take their name from data.event, then fall back to message", async () => {
+    expect(await collect(['data: {"event":"run.completed","output":"x"}\n\ndata: {"a":1}\n\n', 'event: wins\ndata: {"event":"loses"}\n\n'])).toEqual([
+      { event: "run.completed", data: { event: "run.completed", output: "x" } },
+      { event: "message", data: { a: 1 } },
+      { event: "wins", data: { event: "loses" } },
+    ]);
+  });
 });

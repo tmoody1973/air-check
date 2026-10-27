@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import type { RelayConvex } from "./convex.js";
 
-export interface LogChild { stdout: Readable; onExit(cb: () => void): void }
+export interface LogChild { stdout: Readable; onExit(cb: () => void): void; kill(): void }
 export type SpawnLogs = (bin: string, args: string[]) => LogChild;
 
 export interface AuditOptions {
@@ -12,7 +12,7 @@ export interface AuditOptions {
   flushMs?: number; backoffMs?: (attempt: number) => number;
 }
 
-const MAX_BUFFERED = 500;
+const MAX_BUFFERED = 500; // also the most events per relay.activity call
 
 /** Follows `nemohermes <name> logs --follow`, restarting it with backoff, and sends parsed network decisions to Convex. */
 export function followAudit(o: AuditOptions): { stop(): void } {
@@ -22,6 +22,7 @@ export function followAudit(o: AuditOptions): { stop(): void } {
   let parsed = 0, skipped = 0;
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let current: LogChild | undefined;
 
   const flush = async () => {
     timer = undefined;
@@ -31,11 +32,16 @@ export function followAudit(o: AuditOptions): { stop(): void } {
     o.log(`audit sandbox=${o.name} parsed=${parsed} skipped=${skipped}`);
     parsed = 0; skipped = 0;
     if (batch.length === 0) return;
-    try {
-      await o.convex.activity(o.workspace, batch);
-    } catch {
-      o.log(`audit sandbox=${o.name} activity_failed n=${batch.length}`);
-      buffer = [...batch, ...buffer].slice(-MAX_BUFFERED); // keep for the next flush
+    for (let i = 0; i < batch.length; i += MAX_BUFFERED) {
+      const chunk = batch.slice(i, i + MAX_BUFFERED);
+      try {
+        await o.convex.activity(o.workspace, chunk);
+      } catch {
+        o.log(`audit sandbox=${o.name} activity_failed n=${batch.length - i}`);
+        buffer = [...batch.slice(i), ...buffer]; // keep the rest for the next flush
+        if (!stopped) timer ??= setTimeout(() => void flush(), flushMs);
+        return;
+      }
     }
   };
 
@@ -43,7 +49,7 @@ export function followAudit(o: AuditOptions): { stop(): void } {
     for (let attempt = 0; !stopped; attempt++) {
       let child: LogChild | undefined;
       try {
-        child = o.spawn(o.bin, [o.name, "logs", "--follow"]);
+        child = current = o.spawn(o.bin, [o.name, "logs", "--follow"]);
         const exited = new Promise<void>((r) => child!.onExit(r));
         for await (const line of createInterface({ input: child.stdout })) {
           attempt = 0;
@@ -62,5 +68,12 @@ export function followAudit(o: AuditOptions): { stop(): void } {
   };
   void run();
 
-  return { stop() { stopped = true; if (timer) clearTimeout(timer); } };
+  return {
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      current?.kill();
+      void flush();
+    },
+  };
 }

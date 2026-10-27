@@ -198,6 +198,68 @@ describe("dropped streams and restarts", () => {
   });
 });
 
+describe("fix round 1", () => {
+  test("a failed relay.events call is retried: every event lands in order with no gaps", async () => {
+    real.events = (_id, _o, res) => {
+      for (let i = 0; i < 6; i++) sse(res, "message.delta", { delta: `w${i}` });
+      sse(res, "run.completed", { output: "ok" });
+      res.end();
+    };
+    const orig = convex.events.bind(convex);
+    let calls = 0;
+    convex.events = async (id, ev) => { if (++calls === 1) throw new Error("convex down"); return orig(id, ev); };
+    runner.onPending([row({ runId: "r1" })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    expect(convex.seqs("r1")).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(logs.join("\n")).toMatch(/run=r1 event=events_retry n=1/);
+  });
+
+  test("data-only SSE frames complete the run through the stream, not the GET fallback", async () => {
+    real.events = (_id, _o, res) => {
+      res.write(`data: ${JSON.stringify({ event: "message.delta", delta: "hi" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ event: "run.completed", output: "hi" })}\n\n`);
+      res.end();
+    };
+    runner.onPending([row({ runId: "r1" })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    expect(convex.names("r1")).toEqual(["message.delta", "run.completed"]);
+    expect(real.gets).toEqual([]);
+  });
+
+  test("GET 404 (Hermes lost the run) -> one synthetic run.failed at lastSeq+1, finished failed, no retries", async () => {
+    const original = real.server.listeners("request")[0] as (...a: unknown[]) => void;
+    real.server.removeAllListeners("request");
+    real.server.on("request", (req, res) => (req.method === "GET" && /^\/v1\/runs\/h-old$/.test(req.url ?? "") ? res.writeHead(404).end() : original(req, res)));
+    runner.onPending([row({ runId: "r1", status: "running", hermesRunId: "h-old", lastSeq: 9 })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(convex.eventCalls).toEqual([{ runId: "r1", events: [expect.objectContaining({ event: "run.failed", seq: 10 })] }]);
+    expect(convex.finishedCalls).toEqual([{ runId: "r1", status: "failed" }]);
+  });
+
+  test("Hermes status interrupted maps to run.interrupted / failed", async () => {
+    real.info["h-i"] = { status: "interrupted" };
+    runner.onPending([row({ runId: "r1", status: "running", hermesRunId: "h-i", lastSeq: 1 })]);
+    await waitFor(() => convex.finishedCalls.length === 1);
+    expect(convex.eventCalls[0]!.events[0]).toMatchObject({ event: "run.interrupted", seq: 2 });
+    expect(convex.finishedCalls[0]!.status).toBe("failed");
+  });
+
+  test("a 5xx stop is retried; a 4xx stop is not", async () => {
+    const original = real.server.listeners("request")[0] as (...a: unknown[]) => void;
+    let stops = 0;
+    real.server.removeAllListeners("request");
+    real.server.on("request", (req, res) => (req.url?.endsWith("/stop") ? (++stops, res.writeHead(stops === 1 ? 503 : 404).end()) : original(req, res)));
+    const stopping = row({ runId: "r1", status: "stopping", stopRequested: true, hermesRunId: "h-s" });
+    real.info["h-s"] = { status: "running" };
+    real.events = () => {};
+    runner.onPending([stopping]);
+    await waitFor(() => stops === 2, "stop retried after 503");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(stops).toBe(2); // the 404 ended it
+  });
+});
+
 describe("logging (Hard Rule 8)", () => {
   test("logs run/event/n lines and never a token, the input, or message text", async () => {
     real.events = (_id, _o, res) => { sse(res, "message.delta", { delta: "PRIVATE-REPLY-TEXT" }); sse(res, "run.completed", { output: "PRIVATE-REPLY-TEXT" }); res.end(); };

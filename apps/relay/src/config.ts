@@ -8,10 +8,10 @@ const SANDBOXES = [
 
 /** Reads env. Throws (never echoing a value) when required settings are missing. A sandbox with an empty token is skipped. */
 export function loadConfig(env: Record<string, string | undefined>): RelayConfig {
-  const convexUrl = env.CONVEX_URL?.trim();
-  if (!convexUrl) throw new Error("CONVEX_URL is required");
   const relayToken = env.RELAY_TOKEN ?? "";
   if (relayToken.length < 32) throw new Error("RELAY_TOKEN is required and must be at least 32 characters");
+  const convexUrl = env.CONVEX_URL?.trim();
+  if (!convexUrl) throw new Error("CONVEX_URL is required");
   const sandboxes = SANDBOXES.flatMap((s) => {
     const token = env[s.tokenEnv]?.trim();
     return token ? [{ name: s.name, workspace: s.workspace, port: s.port, token }] : [];

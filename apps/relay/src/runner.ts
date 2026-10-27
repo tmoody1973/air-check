@@ -1,5 +1,5 @@
 import type { PendingRun, RelayConvex, RunEvent, Terminal } from "./convex.js";
-import type { HermesClient, RunInfo } from "./hermes.js";
+import { HermesError, type HermesClient, type RunInfo } from "./hermes.js";
 
 export interface Sandbox { name: string; workspace: "real" | "demo"; hermes: Pick<HermesClient, "start" | "stop" | "get" | "events"> }
 export interface RunnerOptions {
@@ -21,6 +21,7 @@ const HERMES_DONE: Record<string, { event: string; status: Terminal }> = {
   completed: { event: "run.completed", status: "completed" },
   failed: { event: "run.failed", status: "failed" },
   cancelled: { event: "run.cancelled", status: "cancelled" },
+  interrupted: { event: "run.interrupted", status: "failed" },
 };
 const defaultBackoff = (n: number) => Math.min(30_000, 1000 * 2 ** n);
 
@@ -33,6 +34,7 @@ export function createRunner(o: RunnerOptions): Runner {
   const stopSent = new Set<string>();
   const done = new Set<string>(); // finished by this process; pending rows lag behind Convex
   const failures = new Map<string, number>();
+  const stopFailures = new Map<string, number>();
   let latest: PendingRun[] = [];
   let stopped = false;
   let retry: NodeJS.Timeout | undefined;
@@ -48,7 +50,14 @@ export function createRunner(o: RunnerOptions): Runner {
       if (!sb || stopped || done.has(r.runId)) continue;
       if (r.stopRequested && r.hermesRunId && !stopSent.has(r.runId)) {
         stopSent.add(r.runId);
-        sb.hermes.stop(r.hermesRunId).catch(() => { stopSent.delete(r.runId); o.log(`run=${r.runId} event=stop_failed n=1`); scheduleRetry(); });
+        sb.hermes.stop(r.hermesRunId).catch((err: unknown) => {
+          if (err instanceof HermesError && err.status >= 400 && err.status < 500) return; // Hermes refused or lost it: nothing to retry
+          const n = (stopFailures.get(r.runId) ?? 0) + 1;
+          stopFailures.set(r.runId, n);
+          stopSent.delete(r.runId);
+          o.log(`run=${r.runId} event=stop_failed n=${n}`);
+          scheduleRetry(backoff(n - 1));
+        });
       }
       if (busy.has(r.runId)) continue;
       if (r.status === "queued") {
@@ -63,9 +72,9 @@ export function createRunner(o: RunnerOptions): Runner {
   }
 
   const settle = (r: PendingRun) => () => { busy.delete(r.runId); onPending(latest); };
-  function scheduleRetry() {
+  function scheduleRetry(ms: number) {
     if (retry || stopped) return;
-    retry = setTimeout(() => { retry = undefined; onPending(latest); }, backoff(0));
+    retry = setTimeout(() => { retry = undefined; onPending(latest); }, ms);
   }
 
   async function begin(sb: Sandbox, r: PendingRun): Promise<void> {
@@ -96,7 +105,15 @@ export function createRunner(o: RunnerOptions): Runner {
     while (!stopped) {
       try {
         if (check) {
-          const info = await sb.hermes.get(hermesRunId);
+          let info: RunInfo;
+          try {
+            info = await sb.hermes.get(hermesRunId);
+          } catch (err) {
+            if (err instanceof HermesError && err.status === 404) { // Hermes lost the run: fail it once, no more retries
+              return await finish(r.runId, { event: "run.failed", data: {}, t: Date.now() / 1000, seq: known + 1 }, "failed");
+            }
+            throw err;
+          }
           const fin = terminalOf(info);
           if (fin) return await finish(r.runId, { event: fin.event, data: info.output !== undefined ? { output: info.output } : {}, t: Date.now() / 1000, seq: known + 1 }, fin.status);
         }
@@ -127,7 +144,14 @@ export function createRunner(o: RunnerOptions): Runner {
       buffer = [];
       if (batch.length === 0) return chain;
       chain = chain.then(async () => {
-        await o.convex.events(runId, batch);
+        // Never drop a batch: retry with backoff until it lands (or the relay is stopping).
+        for (let n = 0; ; n++) {
+          try { await o.convex.events(runId, batch); break; } catch (err) {
+            if (stopped) throw err;
+            o.log(`run=${runId} event=events_retry n=${n + 1}`);
+            await sleep(backoff(n));
+          }
+        }
         sawSeq(batch[batch.length - 1]!.seq);
         for (const [event, n] of count(batch)) o.log(`run=${runId} event=${event} n=${n}`);
       });
