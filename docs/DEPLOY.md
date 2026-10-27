@@ -351,7 +351,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now aircheck-relay
 
 ### Hardening, and why home must be writable
 
-The unit sets `ProtectSystem=strict` (the whole filesystem is read-only to the relay), `ProtectHome=no` plus `ReadWritePaths=/home/user` (so home stays writable while everything else is read-only), `NoNewPrivileges` and `PrivateTmp`. Home has to stay writable because `nemohermes` creates a lock folder, `~/.nemoclaw-portable-host.lock`, on every call. Checked on the VM with `systemd-run`: a fully read-only home fails with EROFS (the "read-only file system" error), and a writable home with everything else read-only works.
+The unit sets `ProtectSystem=strict` (the whole filesystem is read-only to the relay), `ProtectHome=read-only` plus `ReadWritePaths=/home/user` (other users' homes stay read-only; only `/home/user` is writable), `NoNewPrivileges` and `PrivateTmp`. Home has to stay writable because `nemohermes` creates a lock folder, `~/.nemoclaw-portable-host.lock`, on every call. Checked on the VM with `systemd-run`: a fully read-only home fails with EROFS (the "read-only file system" error), and `ProtectHome=read-only` with `ReadWritePaths=/home/user` works.
 
 ### Convex settings the relay needs
 
