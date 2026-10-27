@@ -1,0 +1,26 @@
+# Air Check relay: the only program that talks to Hermes. Watches Convex for work, starts Hermes
+# runs on the VM's loopback API, streams their events back, relays stop requests, and copies the
+# sandbox network audit log into Convex. Runs on the host, like the bridge.
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable --now aircheck-relay
+[Unit]
+Description=Air Check: Convex <-> Hermes relay
+After=network-online.target aircheck-hermes.service
+Wants=network-online.target
+
+[Service]
+User=user
+EnvironmentFile=/home/user/.aircheck/relay.env
+# nemohermes (for logs) needs its own bin dir on PATH and the user's runtime dir.
+Environment=PATH=/home/user/.local/bin:/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+WorkingDirectory=/home/user/aircheck-relay
+ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-relay/dist/main.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

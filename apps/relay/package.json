@@ -1,0 +1,21 @@
+{
+  "name": "@aircheck/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "convex": "1.48.0"
+  },
+  "devDependencies": {
+    "@aircheck/core": "workspace:*"
+  }
+}
