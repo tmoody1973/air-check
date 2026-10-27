@@ -1,0 +1,85 @@
+import { GateError, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
+import { v } from "convex/values";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { actorOf, gateFor, workspaceOf } from "./gate";
+import { toRecord } from "./packageStore";
+
+const asDraft = (d: unknown) => d as PackageDraft;
+
+export const get = query({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<PackageRecord | null> => {
+    const ws = workspaceOf(await actorOf(ctx));
+    if (!ws) return null;
+    const doc = await ctx.db
+      .query("packages")
+      .withIndex("by_packageId", (q) => q.eq("packageId", packageId))
+      .unique();
+    return doc && doc.draft.workspace === ws ? toRecord(doc) : null;
+  },
+});
+
+export const listAwaiting = query({
+  args: {},
+  handler: async (ctx): Promise<PackageRecord[]> => {
+    const ws = workspaceOf(await actorOf(ctx));
+    if (!ws) return [];
+    const docs = await ctx.db
+      .query("packages")
+      .withIndex("by_workspace_status", (q) => q.eq("workspace", ws).eq("status", "awaiting_review"))
+      .collect();
+    return docs.map(toRecord);
+  },
+});
+
+export type DecideResult = { ok: true; record: PackageRecord } | { ok: false; code: GateErrorCode; message: string };
+
+/** The only public mutation on packages (Hard Rule 1). */
+export const decide = mutation({
+  args: { packageId: v.string(), fingerprint: v.string(), decision: v.union(v.literal("approve"), v.literal("skip")) },
+  handler: async (ctx, { packageId, fingerprint, decision }): Promise<DecideResult> => {
+    const actor = await actorOf(ctx);
+    if (!actor) return { ok: false, code: "FORBIDDEN", message: "Sign in with your Radio Milwaukee account." };
+    try {
+      return { ok: true, record: await gateFor(ctx).decide(packageId, fingerprint, decision, actor) };
+    } catch (e) {
+      if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
+      throw e;
+    }
+  },
+});
+
+// Internal: reachable only with the deploy key (Plans 4 and 5).
+export const submit = internalMutation({
+  args: { draft: v.any() },
+  handler: (ctx, { draft }) => gateFor(ctx).submit(asDraft(draft)),
+});
+
+const audioV = v.object({
+  hour1Id: v.string(),
+  hour2Id: v.string(),
+  mp3Sha256: v.string(),
+  hour1DurationSec: v.optional(v.number()),
+});
+
+export const attachAudio = internalMutation({
+  args: { packageId: v.string(), audio: audioV },
+  handler: (ctx, { packageId, audio }) => gateFor(ctx).attachAudio(packageId, audio),
+});
+
+export const claimForPublish = internalMutation({
+  args: { packageId: v.string() },
+  handler: (ctx, { packageId }) => gateFor(ctx).claimForPublish(packageId),
+});
+
+const publishResultV = v.union(
+  v.object({ status: v.literal("succeeded"), url: v.string() }),
+  v.object({ status: v.literal("failed"), error: v.string() }),
+  v.object({ status: v.literal("outcome_unknown") }),
+);
+
+export const recordResult = internalMutation({
+  args: { packageId: v.string(), result: publishResultV },
+  handler: (ctx, { packageId, result }) => gateFor(ctx).recordResult(packageId, result),
+});
+

@@ -16,7 +16,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0))
+        version: 5.0.5(@edge-runtime/vm@5.0.0)(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0))
 
   apps/console:
     dependencies:
@@ -39,6 +39,9 @@ importers:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
     devDependencies:
+      '@edge-runtime/vm':
+        specifier: 5.0.0
+        version: 5.0.0
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3
@@ -48,6 +51,9 @@ importers:
       '@types/react-dom':
         specifier: 19.3.0
         version: 19.3.0(@types/react@19.3.0)
+      convex-test:
+        specifier: 0.0.65
+        version: 0.0.65(convex@1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1))
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -90,6 +96,14 @@ packages:
         optional: true
       react-dom:
         optional: true
+
+  '@edge-runtime/primitives@6.0.0':
+    resolution: {integrity: sha512-FqoxaBT+prPBHBwE1WXS1ocnu/VLTQyZ6NMUBAdbP7N2hsFTTxMC/jMu2D/8GAlMQfxeuppcPuCUk/HO3fpIvA==}
+    engines: {node: '>=18'}
+
+  '@edge-runtime/vm@5.0.0':
+    resolution: {integrity: sha512-NKBGBSIKUG584qrS1tyxVpX/AKJKQw5HgjYEnPLC0QsTw79JrGn+qUr8CXFb955Iy7GUdiiUv1rJ6JBGvaKb6w==}
+    engines: {node: '>=18'}
 
   '@emnapi/runtime@1.11.3':
     resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
@@ -829,6 +843,11 @@ packages:
   client-only@0.0.1:
     resolution: {integrity: sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==}
 
+  convex-test@0.0.65:
+    resolution: {integrity: sha512-2FgHlLGraM2O3tEVpOfvoHSleK0x92J8xjQ/qClWzNJX3NcmgvuNeWBrmma7sLJ8lB3ENPxx6ykJTfvZmWg3BQ==}
+    peerDependencies:
+      convex: ^1.43.0
+
   convex@1.48.0:
     resolution: {integrity: sha512-M9jEgTvCN8ziP/VgQQUH+j0ijM7g+NmQd8tFlvETK8/HMC/aaqHZwcu4hBO30X5DV2VIyYK4mOoLQGIb1766ew==}
     engines: {node: '>=20.0.0', npm: '>=7.0.0'}
@@ -1333,6 +1352,12 @@ snapshots:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
+  '@edge-runtime/primitives@6.0.0': {}
+
+  '@edge-runtime/vm@5.0.0':
+    dependencies:
+      '@edge-runtime/primitives': 6.0.0
+
   '@emnapi/runtime@1.11.3':
     dependencies:
       tslib: 2.8.1
@@ -1796,6 +1821,10 @@ snapshots:
 
   client-only@0.0.1: {}
 
+  convex-test@0.0.65(convex@1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)):
+    dependencies:
+      convex: 1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
+
   convex@1.48.0(@clerk/react@6.18.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1):
     dependencies:
       esbuild: 0.27.0
@@ -2162,7 +2191,7 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest@5.0.5(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)):
+  vitest@5.0.5(@edge-runtime/vm@5.0.0)(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0))
@@ -2179,6 +2208,7 @@ snapshots:
       vite: 8.3.5(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)
       why-is-node-running: 3.2.1
     optionalDependencies:
+      '@edge-runtime/vm': 5.0.0
       '@types/node': 26.6.5
     transitivePeerDependencies:
       - msw
