@@ -27,7 +27,7 @@ const CHIPS: Record<TrustFilter, { label: string; test: (r: ActivityRow) => bool
 const RESULT: Record<ActivityRow["result"], { tone: PillTone; word: string }> = {
   needs_you: { tone: "caution", word: "Needs you" },
   done: { tone: "ready", word: "Done" },
-  allowed: { tone: "neutral", word: "Allowed" },
+  allowed: { tone: "ready", word: "Allowed" },
   blocked: { tone: "problem", word: "Blocked" },
 };
 

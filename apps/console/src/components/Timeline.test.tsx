@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Timeline, chicagoTime, type ActivityRow, type TrustFilter } from "./Timeline";
+import { Timeline, chicagoTime, parseFilter, type ActivityRow, type TrustFilter } from "./Timeline";
 
 afterEach(cleanup);
 
@@ -56,5 +56,18 @@ describe("Timeline", () => {
     expect(screen.getByText("Nothing is waiting for you.")).toBeInTheDocument();
     expect(chicagoTime(Date.UTC(2026, 9, 26, 5, 26, 10))).toBe("00:26:10");
     expect(chicagoTime(Date.UTC(2026, 0, 5, 6, 0, 0))).toBe("00:00:00");
+  });
+
+  it("Allowed and Done pills share the ready tone", () => {
+    view();
+    const done = screen.getByText("Done").className;
+    expect(screen.getByText("Allowed").className).toBe(done);
+    expect(done).toContain("bg-signal-soft");
+  });
+
+  it("parseFilter falls back to all", () => {
+    expect(parseFilter("bogus")).toBe("all");
+    expect(parseFilter(null)).toBe("all");
+    expect(parseFilter("blocked")).toBe("blocked");
   });
 });
