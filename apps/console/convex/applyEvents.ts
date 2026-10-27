@@ -2,7 +2,7 @@ import { applyRunEvent, type RunState } from "@aircheck/core";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 
-export interface IncomingEvent { event: string; data: Record<string, unknown>; t: number; seq?: number }
+export interface IncomingEvent { event: string; data: Record<string, unknown>; t: number; seq?: number } // seq is required at the relay boundary; scripted events carry none
 
 /**
  * Applies events to a run in order and mirrors the reply onto the run's assistant message.

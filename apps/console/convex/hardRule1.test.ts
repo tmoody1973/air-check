@@ -32,16 +32,25 @@ test("the public writes are exactly the allowlist", async () => {
 // The chat/run/relay code sits next to the publish path, so it must not touch it: no publish or decide
 // function by name, no calls into packages.ts, and the packages table is only ever read (relay.events reads it
 // for the run's packageId). This is a source-text check: it cannot see a call built from a computed string.
-const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "enqueue", "applyEvents"];
+const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "enqueue", "applyEvents", "runs"];
 const src = (name: string) => readFileSync(new URL(`./${name}.ts`, import.meta.url), "utf8");
 
 test("run, chat and relay code never reach packages.decide or the publish functions", () => {
   for (const name of RUN_FILES) {
     const text = src(name);
-    for (const banned of ["packages.decide", "claimForPublish", "recordResult", "attachAudio", "internal.packages", "api.packages"]) {
+    for (const banned of ["packages.decide", "claimForPublish", "recordResult", "attachAudio", "internal.packages", "api.packages", "gateFor", "convexPackageStore", "ApprovalGate"]) {
       expect(text, `${name}.ts mentions ${banned}`).not.toContain(banned);
     }
     expect(text, `${name}.ts imports packages`).not.toMatch(/from "\.\/packages/);
+  }
+});
+
+test("run, chat and relay code import only actorOf, workspaceOf and Workspace from gate", () => {
+  for (const name of RUN_FILES) {
+    const names = [...src(name).matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"\.\/gate"/g)]
+      .flatMap((m) => m[1]!.split(",").map((x) => x.trim().replace(/^type\s+/, "")).filter(Boolean));
+    expect(names.filter((n) => !["actorOf", "workspaceOf", "Workspace"].includes(n)), `${name}.ts gate imports`).toEqual([]);
+    expect(src(name), `${name}.ts has a non-braced gate import`).not.toMatch(/from\s+"\.\/gate"[\s\S]*?^import\s+\*/m);
   }
 });
 

@@ -122,12 +122,31 @@ describe("POST /agent/packages", () => {
     vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
     const t = convexTest(schema, modules);
     expect((await post(t, body(), `Bearer ${DEMO}`)).status).toBe(201);
-    expect((await rows(t))[0]).toMatchObject({ workspace: "demo", status: "preparing_audio" });
+    expect((await rows(t))[0]).toMatchObject({ workspace: "demo", status: "preparing_audio", packageId: "demo-10-2-26" });
     expect((await rows(t))[0]!.draft.workspace).toBe("demo");
     const t2 = convexTest(schema, modules);
     expect((await post(t2, body())).status).toBe(201);
     expect((await rows(t2))[0]).toMatchObject({ workspace: "real" });
     expect((await rows(t2))[0]!.draft.workspace).toBe("real");
+  });
+
+  test("a demo submit cannot block the real one for the same date", async () => {
+    const DEMO = "d".repeat(40);
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
+    const t = convexTest(schema, modules);
+    const oct9 = () => body({ showDate: "2026-10-09", description: goldenDescription().replace("October 2, 2026", "October 9, 2026") });
+    expect((await post(t, oct9(), `Bearer ${DEMO}`)).status).toBe(201);
+    expect((await rows(t))[0]!.packageId).toBe("demo-10-9-26");
+    const real = await post(t, oct9());
+    expect(real.status).toBe(201);
+    expect((await rows(t)).map((r) => r.packageId).sort()).toEqual(["demo-10-9-26", "pkg-10-9-26"]);
+  });
+
+  test("the same value for both tokens is a misconfiguration: 503, nothing written", async () => {
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", TOKEN);
+    const t = convexTest(schema, modules);
+    expect((await post(t, body())).status).toBe(503);
+    expect(await rows(t)).toHaveLength(0);
   });
 
   test("only the demo token set: it works, the real-token header does not, and a short demo token is 503", async () => {

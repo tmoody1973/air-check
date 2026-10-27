@@ -20,7 +20,8 @@ const started = async () => {
   return { t, ...sent };
 };
 const run = async (t: ReturnType<typeof convexTest>) => (await t.run((ctx) => ctx.db.query("runs").collect()))[0]!;
-const ev = (event: string, data: Record<string, unknown> = {}, seq?: number) => ({ event, data, t: 1, ...(seq === undefined ? {} : { seq }) });
+let nextSeq = 0; // seq is required; a global counter stays monotonic within every test
+const ev = (event: string, data: Record<string, unknown> = {}, seq: number = ++nextSeq) => ({ event, data, t: 1, seq });
 
 describe("fail closed", () => {
   const bad: [string, string | undefined][] = [["wrong", "w".repeat(40)], ["missing", ""], ["short", "r".repeat(31)]];
@@ -37,14 +38,17 @@ describe("fail closed", () => {
     expect(await snapshot(t)).toEqual(before);
   });
 
-  test.each([["unset", undefined], ["31 chars", "r".repeat(31)]])("RELAY_TOKEN %s rejects even the right-looking token", async (_n, env) => {
+  test.each([["unset", undefined], ["31 chars", "r".repeat(31)]])("RELAY_TOKEN %s: all five relay functions throw and write nothing", async (_n, env) => {
     const t = convexTest(schema, modules);
     const { runId } = await t.withIdentity(human).mutation(api.chat.send, { text: "hi" });
-    if (env === undefined) vi.stubEnv("RELAY_TOKEN", ""); else vi.stubEnv("RELAY_TOKEN", env);
+    vi.stubEnv("RELAY_TOKEN", env ?? "");
     const before = await snapshot(t);
     const tk = env ?? "";
-    await expect(t.mutation(api.relay.started, { token: tk, runId, hermesRunId: "x" })).rejects.toThrow();
     await expect(t.query(api.relay.pending, { token: tk })).rejects.toThrow();
+    await expect(t.mutation(api.relay.started, { token: tk, runId, hermesRunId: "x" })).rejects.toThrow();
+    await expect(t.mutation(api.relay.events, { token: tk, runId, events: [ev("message.delta", { delta: "x" })] })).rejects.toThrow();
+    await expect(t.mutation(api.relay.finished, { token: tk, runId, status: "failed" })).rejects.toThrow();
+    await expect(t.mutation(api.relay.activity, { token: tk, workspace: "real", events: [{ key: "k", at: 1, decision: "blocked", host: "h", port: 1 }] })).rejects.toThrow();
     expect(await snapshot(t)).toEqual(before);
   });
 });
@@ -113,19 +117,33 @@ describe("relay.events", () => {
     expect((await run(t)).state.steps).toHaveLength(0);
   });
 
-  test("sets packageId only when the package exists in the run's workspace", async () => {
+  test("sets packageId only when the package exists in the run's workspace, and never writes packages", async () => {
     const { t, runId } = await started();
-    const finalOutput = ev("run.completed", { output: "Submitted pkg-10-9-26 for review" });
-    await t.mutation(api.relay.events, { token: RELAY, runId, events: [finalOutput] });
-    expect((await run(t)).packageId).toBeUndefined();
-
-    await t.run((ctx) => ctx.db.insert("packages", { packageId: "pkg-10-9-26", workspace: "demo", status: "awaiting_review", draft: {} }));
-    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "see pkg-10-9-26" })] });
+    const pkgs = () => t.run((ctx) => ctx.db.query("packages").collect());
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("run.completed", { output: "Submitted pkg-10-9-26 for review" })] });
     expect((await run(t)).packageId).toBeUndefined();
 
     await t.run((ctx) => ctx.db.insert("packages", { packageId: "pkg-10-9-26", workspace: "real", status: "awaiting_review", draft: {} }));
-    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "!" })] });
+    const before = await pkgs();
+    await t.mutation(api.relay.events, { token: RELAY, runId, events: [ev("message.delta", { delta: "see pkg-10-9-26" })] });
     expect((await run(t)).packageId).toBe("pkg-10-9-26");
+    expect(await pkgs()).toEqual(before);
+  });
+
+  test("a demo run only links demo- packages: a real pkg- id in its output gets nothing", async () => {
+    const t = convexTest(schema, modules);
+    const sent = await t.withIdentity({ ...human, role: "demo" }).mutation(api.chat.send, { text: "hi" });
+    await t.mutation(api.relay.started, { token: RELAY, runId: sent.runId, hermesRunId: "h" });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("packages", { packageId: "pkg-10-9-26", workspace: "real", status: "awaiting_review", draft: {} });
+      await ctx.db.insert("packages", { packageId: "demo-10-9-26", workspace: "demo", status: "awaiting_review", draft: {} });
+    });
+    const before = await t.run((ctx) => ctx.db.query("packages").collect());
+    await t.mutation(api.relay.events, { token: RELAY, runId: sent.runId, events: [ev("message.delta", { delta: "Submitted pkg-10-9-26." })] });
+    expect((await run(t)).packageId).toBeUndefined();
+    await t.mutation(api.relay.events, { token: RELAY, runId: sent.runId, events: [ev("message.delta", { delta: " Also demo-10-9-26." })] });
+    expect((await run(t)).packageId).toBe("demo-10-9-26");
+    expect(await t.run((ctx) => ctx.db.query("packages").collect())).toEqual(before);
   });
 
   test("reads the id from a package_submit tool.completed", async () => {

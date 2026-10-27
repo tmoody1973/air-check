@@ -27,6 +27,7 @@ export function workspaceForToken(
   header: string | null,
   tokens: { real: string | undefined; demo: string | undefined },
 ): "real" | "demo" | null {
+  if (tokens.real && tokens.real === tokens.demo) return null; // same secret for both: ambiguous
   const real = tokenMatches(header, tokens.real); // both compares always run
   const demo = tokenMatches(header, tokens.demo);
   return real ? "real" : demo ? "demo" : null;

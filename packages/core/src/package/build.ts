@@ -68,7 +68,7 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   return {
     ok: true,
     draft: {
-      id: `pkg-${Number(date[2])}-${Number(date[3])}-${date[1]}`,
+      id: `${opts.workspace === "demo" ? "demo" : "pkg"}-${Number(date[2])}-${Number(date[3])}-${date[1]}`,
       workspace: opts.workspace ?? "real",
       showDate: input.showDate,
       title,

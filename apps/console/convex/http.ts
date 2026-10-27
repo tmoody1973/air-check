@@ -16,7 +16,7 @@ const privateTerms = () =>
 const submitPackage = httpAction(async (ctx, req) => {
   const tokens = { real: process.env.AGENT_SUBMIT_TOKEN, demo: process.env.DEMO_AGENT_SUBMIT_TOKEN };
   const usable = (t: string | undefined) => !!t && t.length >= MIN_TOKEN_LENGTH;
-  if (!usable(tokens.real) && !usable(tokens.demo)) return json(503, {});
+  if ((!usable(tokens.real) && !usable(tokens.demo)) || (tokens.real === tokens.demo)) return json(503, {}); // equal = misconfigured
   const workspace = workspaceForToken(req.headers.get("authorization"), tokens);
   if (!workspace) return json(401, {});
   const text = await readCapped(req);

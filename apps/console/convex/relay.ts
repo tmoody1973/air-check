@@ -50,7 +50,7 @@ export const started = mutation({
   },
 });
 
-const ID_IN_TEXT = /\bpkg-\d{1,2}-\d{1,2}-\d{2}\b/g;
+const ID_IN_TEXT = /\b(?:pkg|demo)-\d{1,2}-\d{1,2}-\d{2}\b/g;
 
 /** R2: the first package id the run produced that really exists in the run's own workspace. */
 async function packageIdFor(ctx: MutationCtx, run: Doc<"runs">, state: RunState, batch: readonly { event: string; data: Record<string, unknown> }[]): Promise<string | undefined> {
@@ -64,7 +64,7 @@ async function packageIdFor(ctx: MutationCtx, run: Doc<"runs">, state: RunState,
   return undefined;
 }
 
-const eventV = v.object({ event: v.string(), data: v.record(v.string(), v.any()), t: v.number(), seq: v.optional(v.number()) });
+const eventV = v.object({ event: v.string(), data: v.record(v.string(), v.any()), t: v.number(), seq: v.number() });
 
 export const events = mutation({
   args: { token: v.string(), runId: v.string(), events: v.array(eventV) },
