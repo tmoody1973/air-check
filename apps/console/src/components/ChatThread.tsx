@@ -27,6 +27,8 @@ type Props = {
   headerSlot?: ReactNode;
   /** The conversation id in the URL is not one of ours: show a plain note instead of a fresh chat. */
   missing?: boolean;
+  /** False until Convex has the Clerk token; sending before then fails with UNAUTHENTICATED. */
+  authReady?: boolean;
 };
 
 const NEAR_BOTTOM_PX = 120;
@@ -70,7 +72,7 @@ function AssistantMessage({ m, useRun, usePackage, onGrow }: { m: ChatMessage; o
   );
 }
 
-export function ChatThread({ messages, send, useRun, usePackage, headerSlot, missing = false }: Props) {
+export function ChatThread({ messages, send, useRun, usePackage, headerSlot, missing = false, authReady = true }: Props) {
   // One Hermes run per session at a time: while the latest run is going, the next message waits.
   const latestRunId = messages?.findLast((m) => m.role === "assistant" && m.runId)?.runId ?? "";
   const latestRun = useRun(latestRunId);
@@ -98,7 +100,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
 
   async function submit() {
     const body = text.trim();
-    if (!body || sending.current || agentBusy) return;
+    if (!body || sending.current || agentBusy || !authReady) return;
     if (body.length > MAX_MESSAGE_CHARS) { setError(chatErrorText({ data: { code: "INVALID_INPUT" } })); return; }
     sending.current = true;
     setError(null);
@@ -117,7 +119,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
     }
   }
 
-  const busy = (pending !== null && !pending.sent) || agentBusy;
+  const busy = (pending !== null && !pending.sent) || agentBusy || !authReady;
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {headerSlot}
@@ -150,6 +152,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
         className="sticky bottom-0 mx-auto flex w-full max-w-[760px] flex-col gap-2 bg-paper pt-2 pb-4"
       >
         {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
+        {!authReady && <p role="status" className="text-sm text-muted">Signing you in…</p>}
         {agentBusy && <p role="status" className="text-sm text-muted">The agent is still working…</p>}
         <div className="flex items-end gap-2.5 rounded-[14px] border border-line-strong bg-surface py-2 pr-2 pl-4">
           <label htmlFor="ask" className="sr-only">Message Air Check</label>
@@ -157,6 +160,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
             id="ask"
             rows={1}
             value={text}
+            disabled={!authReady}
             placeholder="Ask Air Check to draft, check or plan a show"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

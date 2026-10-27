@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 import type { RunState } from "@aircheck/core";
 import { api } from "../../../../../convex/_generated/api";
@@ -10,6 +10,7 @@ import { Shell, useWorkspace } from "@/components/Shell";
 export default function RunPage() {
   const { id } = useParams<{ id: string }>();
   const workspace = useWorkspace();
+  const { isLoading, isAuthenticated } = useConvexAuth();
   const run = useQuery(api.runs.get, { runId: id });
   const requestStop = useMutation(api.runs.requestStop);
 
@@ -29,7 +30,7 @@ export default function RunPage() {
       <div className="max-w-2xl">
         <RunProgressCard
           title={run.title} state={state} totals={totals} upcoming={upcoming}
-          status={status} source={source} runId={run.runId} kind={run.kind} packageId={run.packageId}
+          status={status} source={source} runId={run.runId} kind={run.kind} packageId={run.packageId} authReady={!isLoading && isAuthenticated}
           onTakeOver={() => requestStop({ runId: run.runId })}
         />
       </div>

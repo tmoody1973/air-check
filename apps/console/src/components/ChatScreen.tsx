@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "../../convex/_generated/api";
 import { ChatThread } from "./ChatThread";
@@ -13,6 +13,7 @@ const usePackage = (packageId: string | undefined) => useQuery(api.packages.get,
 /** Convex wiring for /chat and /chat/[id]. All behaviour lives in ChatThread. */
 export function ChatScreen({ conversationId }: { conversationId?: string }) {
   const router = useRouter();
+  const { isLoading, isAuthenticated } = useConvexAuth();
   const conversations = useQuery(api.chat.list, {});
   const messages = useQuery(api.chat.messages, conversationId ? { conversationId } : "skip");
   const sendMessage = useMutation(api.chat.send);
@@ -34,6 +35,7 @@ export function ChatScreen({ conversationId }: { conversationId?: string }) {
           key={conversationId ?? "new"}
           messages={conversationId ? messages : []}
           missing={missing}
+          authReady={!isLoading && isAuthenticated}
           send={send}
           useRun={useRun}
           usePackage={usePackage}
