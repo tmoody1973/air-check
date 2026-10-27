@@ -71,6 +71,10 @@ function AssistantMessage({ m, useRun, usePackage, onGrow }: { m: ChatMessage; o
 }
 
 export function ChatThread({ messages, send, useRun, usePackage, headerSlot, missing = false }: Props) {
+  // One Hermes run per session at a time: while the latest run is going, the next message waits.
+  const latestRunId = messages?.findLast((m) => m.role === "assistant" && m.runId)?.runId ?? "";
+  const latestRun = useRun(latestRunId);
+  const agentBusy = !!latestRun && GOING.has(latestRun.status);
   const [text, setText] = useState("");
   const [pending, setPending] = useState<{ text: string; sent: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +98,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
 
   async function submit() {
     const body = text.trim();
-    if (!body || sending.current) return;
+    if (!body || sending.current || agentBusy) return;
     if (body.length > MAX_MESSAGE_CHARS) { setError(chatErrorText({ data: { code: "INVALID_INPUT" } })); return; }
     sending.current = true;
     setError(null);
@@ -113,7 +117,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
     }
   }
 
-  const busy = pending !== null && !pending.sent;
+  const busy = (pending !== null && !pending.sent) || agentBusy;
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {headerSlot}
@@ -146,6 +150,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
         className="sticky bottom-0 mx-auto flex w-full max-w-[760px] flex-col gap-2 bg-paper pt-2 pb-4"
       >
         {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
+        {agentBusy && <p role="status" className="text-sm text-muted">The agent is still working…</p>}
         <div className="flex items-end gap-2.5 rounded-[14px] border border-line-strong bg-surface py-2 pr-2 pl-4">
           <label htmlFor="ask" className="sr-only">Message Air Check</label>
           <textarea

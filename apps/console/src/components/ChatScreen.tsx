@@ -30,6 +30,8 @@ export function ChatScreen({ conversationId }: { conversationId?: string }) {
       <div className="flex flex-col gap-6 min-[900px]:grid min-[900px]:grid-cols-[220px_minmax(0,1fr)] min-[900px]:gap-8">
         <ConversationList conversations={conversations} activeId={conversationId} />
         <ChatThread
+          // A fresh thread per conversation: a draft or in-flight send never carries over to another one.
+          key={conversationId ?? "new"}
           messages={conversationId ? messages : []}
           missing={missing}
           send={send}

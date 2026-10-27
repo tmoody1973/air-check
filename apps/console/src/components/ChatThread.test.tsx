@@ -73,6 +73,28 @@ describe("ChatThread sending", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
+  it("sending waits while the conversation's latest run is still going (one Hermes run per session)", () => {
+    for (const status of ["queued", "running", "stopping"] as const) {
+      const { send } = setup({ messages: [user("q"), bot("partial")], runs: { r1: run({ status }) } });
+      expect(screen.getByText("The agent is still working…")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+      type("next question");
+      enter();
+      expect(send).not.toHaveBeenCalled();
+      expect(box().value).toBe("next question"); // typing is kept for when the run ends
+      cleanup();
+    }
+  });
+  it("only the latest run counts: an old finished run never blocks, a new one does", () => {
+    const { send } = setup({
+      messages: [user("a", "u1"), bot("done", "r-old", "a1"), user("b", "u2"), bot("all done", "r-new", "a2")],
+      runs: { "r-old": run({ status: "running" }), "r-new": run({ status: "completed" }) },
+    });
+    expect(screen.queryByText("The agent is still working…")).not.toBeInTheDocument();
+    type("go");
+    enter();
+    expect(send).toHaveBeenCalledWith("go");
+  });
   it("on failure: plain message, pending message removed, text restored", async () => {
     setup({ send: async () => { throw new ConvexError({ code: "RATE_LIMITED" }); } });
     type("hello there");
