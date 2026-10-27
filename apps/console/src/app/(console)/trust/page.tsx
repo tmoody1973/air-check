@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { api } from "../../../../convex/_generated/api";
+import { SampleTag } from "@/components/SampleTag";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { Timeline, parseFilter, type TrustFilter } from "@/components/Timeline";
 
@@ -19,7 +20,7 @@ function TrustBody() {
     <>
       {demo ? (
         <p className="mb-3">
-          <span className="rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] tracking-[0.1em] text-muted">SAMPLE</span>
+          <SampleTag />
         </p>
       ) : null}
       <Timeline rows={rows} filter={filter} onFilterChange={pick} />

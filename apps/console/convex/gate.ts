@@ -1,5 +1,4 @@
 import { ApprovalGate, type Actor, actorFromIdentity } from "@aircheck/core";
-import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { convexPackageStore } from "./packageStore";
 
@@ -48,5 +47,3 @@ export function gateFor(ctx: MutationCtx) {
     },
   });
 }
-
-export type { Id };

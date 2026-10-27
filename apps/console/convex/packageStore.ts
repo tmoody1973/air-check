@@ -1,4 +1,4 @@
-import type { PackageRecord, PackageStatus, PackageStore } from "@aircheck/core";
+import type { PackageRecord, PackageStore } from "@aircheck/core";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
@@ -46,5 +46,3 @@ export function convexPackageStore(ctx: MutationCtx): PackageStore {
     },
   };
 }
-
-export type { PackageStatus };

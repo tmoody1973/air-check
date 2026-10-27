@@ -69,6 +69,22 @@ describe("packages.decide", () => {
     });
   });
 
+  test("demo identity gets the same FORBIDDEN for a missing package as for a real one", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t);
+    const demo = t.withIdentity({ subject: "d1", role: "demo" });
+    const real = await demo.mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    const missing = await demo.mutation(api.packages.decide, { packageId: "no-such-package", fingerprint: fp, decision: "approve" });
+    expect(missing).toEqual(real);
+    expect(missing).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  });
+
+  test("a human still gets NOT_FOUND for a missing package", async () => {
+    const t = convexTest(schema, modules);
+    const r = await t.withIdentity(human).mutation(api.packages.decide, { packageId: "no-such-package", fingerprint: "x", decision: "approve" });
+    expect(r).toMatchObject({ ok: false, code: "NOT_FOUND" });
+  });
+
   test("real identity cannot decide a demo package", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t, { id: "pkg-demo", workspace: "demo" });

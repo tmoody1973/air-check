@@ -27,7 +27,7 @@ test("demo approve flow", async ({ page }, info) => {
   await page.goto(GOLDEN);
   await expect(page.getByText("Draft · 2 flags")).toBeVisible();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(page.getByText("Approved · queued")).toBeVisible();
+  await expect(page.getByText("Approved · sample, not published")).toBeVisible();
   await page.goto("/trust");
   await expect(page.getByText(/Approved package/).first()).toBeVisible();
 });

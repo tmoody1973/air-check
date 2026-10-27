@@ -1,4 +1,5 @@
 import type { RunState, RunStep } from "@aircheck/core";
+import { SampleTag } from "./SampleTag";
 import { Pill } from "./Pill";
 
 export interface UpcomingRow { label: string; text: string; status: "next" | "skipped" }
@@ -77,7 +78,7 @@ export function RunProgressCard({
       <style>{`.run-pulse{animation:run-pulse 1.4s ease-in-out infinite}@keyframes run-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.run-pulse{animation:none}}`}</style>
       <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
         <h2 className="font-serif text-[22px] leading-tight">{title}</h2>
-        {sample && <Pill tone="neutral">Sample</Pill>}
+        {sample && <SampleTag />}
       </div>
       <div
         role="progressbar" aria-label="Tracks done" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}

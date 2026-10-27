@@ -1,10 +1,12 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { api } from "../../../../convex/_generated/api";
 import { Pill } from "@/components/Pill";
+import { SampleTag } from "@/components/SampleTag";
 import { Shell, useWorkspace } from "@/components/Shell";
 
 const card = "rounded-card border border-line bg-surface p-5";
@@ -31,20 +33,23 @@ const Empty = ({ children }: { children: ReactNode }) => <p className="text-sm t
 export default function TodayPage() {
   const workspace = useWorkspace();
   const s = useQuery(api.today.summary);
+  const { isSignedIn } = useAuth();
 
   return (
     <Shell title="Today">
       {s === undefined ? (
         <p className="text-ink-soft">Loading…</p>
       ) : s === null ? (
-        <p className="text-ink-soft">Sign in to see what is waiting for you.</p>
+        <p className="text-ink-soft">
+          {isSignedIn
+            ? "This account can't use Air Check. Sign in with your Radio Milwaukee account."
+            : "Sign in to see what is waiting for you."}
+        </p>
       ) : (
         <div className="flex flex-col gap-5">
           <p className="flex items-center gap-3 text-sm text-ink-soft">
             Since 6:00 pm yesterday
-            {workspace === "demo" && (
-              <span className="rounded-full border border-line-strong px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wide">Sample</span>
-            )}
+            {workspace === "demo" && <SampleTag />}
           </p>
           <div className="grid items-start gap-5 min-[900px]:grid-cols-2">
             <div className="flex flex-col gap-5">

@@ -9,6 +9,7 @@
  */
 
 import type * as activity from "../activity.js";
+import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as gate from "../gate.js";
 import type * as packageStore from "../packageStore.js";
@@ -26,6 +27,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   activity: typeof activity;
+  crons: typeof crons;
   cutoff: typeof cutoff;
   gate: typeof gate;
   packageStore: typeof packageStore;

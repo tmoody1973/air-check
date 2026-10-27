@@ -17,6 +17,8 @@ export interface PlayerState {
   toggle(): void;
   seek(sec: number): void;
   jumpToHour2(): void;
+  /** A PlayerBar calls this while mounted; Space only works while at least one is. Returns the unregister fn. */
+  register(): () => void;
 }
 
 const PlayerContext = createContext<PlayerState | null>(null);
@@ -36,10 +38,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [track, setTrack] = useState<PlayerTrack | null>(null);
   const [playing, setPlaying] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
+  const bars = useRef(0);
 
   const load = useCallback((t: PlayerTrack) => {
     setTrack((cur) => {
-      if (cur?.src === t.src) return cur;
+      if (cur?.src === t.src) return cur.title === t.title ? cur : { ...cur, title: t.title }; // same audio: keep position
       setPositionSec(0);
       setPlaying(false);
       return t;
@@ -63,10 +66,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (track?.hour2AtSec !== undefined) seek(track.hour2AtSec);
   }, [track, seek]);
 
+  const register = useCallback(() => {
+    bars.current += 1;
+    return () => {
+      bars.current -= 1;
+    };
+  }, []);
+
   // One listener here (not per PlayerBar) so several bars can never double-toggle.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== " " || e.defaultPrevented) return;
+      if (e.key !== " " || e.defaultPrevented || bars.current === 0) return;
       if ((e.target as Element | null)?.closest?.(IGNORED)) return;
       e.preventDefault();
       toggle();
@@ -76,8 +86,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [toggle]);
 
   const value = useMemo(
-    () => ({ track, playing, positionSec, load, toggle, seek, jumpToHour2 }),
-    [track, playing, positionSec, load, toggle, seek, jumpToHour2],
+    () => ({ track, playing, positionSec, load, toggle, seek, jumpToHour2, register }),
+    [track, playing, positionSec, load, toggle, seek, jumpToHour2, register],
   );
 
   return (

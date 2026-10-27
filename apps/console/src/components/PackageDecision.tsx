@@ -7,6 +7,7 @@ import { showDateLabel } from "../lib/date";
 import { trackFor } from "../lib/track";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
+import { SampleTag } from "./SampleTag";
 import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
@@ -14,7 +15,7 @@ export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Pr
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
-function statusPill(rec: PackageRecord): { tone: PillTone; label: string } {
+function statusPill(rec: PackageRecord, workspace: Workspace): { tone: PillTone; label: string } {
   const n = rec.draft.flags?.length ?? 0;
   switch (rec.status) {
     case "awaiting_review":
@@ -22,7 +23,7 @@ function statusPill(rec: PackageRecord): { tone: PillTone; label: string } {
       return { tone: "caution", label: n === 0 ? "Draft" : `Draft · ${n} ${n === 1 ? "flag" : "flags"}` };
     case "approved":
     case "publishing":
-      return { tone: "ready", label: "Approved · queued" };
+      return { tone: "ready", label: workspace === "demo" ? "Approved · sample, not published" : "Approved · queued" };
     case "skipped":
       return { tone: "neutral", label: "Skipped" };
     case "succeeded":
@@ -34,44 +35,44 @@ function statusPill(rec: PackageRecord): { tone: PillTone; label: string } {
   }
 }
 
+const isDeciding = (rec: PackageRecord) => rec.status === "awaiting_review" || rec.status === "preparing_audio";
 const codePoints = (s: string) => [...s].length;
 
 export function PackageDecision({
   record: live,
   workspace,
   decide,
-  onReload,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
   decide: DecideFn;
-  onReload?: () => void;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
   const [open, setOpen] = useState(false);
-  // Pin what the host reviews: the first record seen stays on screen until they choose to reload.
+  // While deciding, pin what the host reviews: the first record seen stays on screen until they
+  // choose to reload. A package that is already decided shows the live record, so it never freezes.
   const [snap, setSnap] = useState<PackageRecord | null>(live);
   const [decided, setDecided] = useState(false);
   if (!snap && live) setSnap(live);
-  const record = (decided ? live : snap) ?? snap ?? live;
-  const changed = !decided && !!snap && !!live && (live.fingerprint !== snap.fingerprint || live.status !== snap.status);
+  const pinned = !decided && !!snap && isDeciding(snap);
+  const record = (pinned ? snap : live) ?? snap ?? live;
+  const changed = pinned && !!live && (live.fingerprint !== snap.fingerprint || live.status !== snap.status);
 
   if (!record)
     return <p className="rounded-card border border-line bg-surface p-5 text-ink-soft">Package not found</p>;
 
   const { draft } = record;
-  const pill = statusPill(record);
+  const pill = statusPill(record, workspace);
   const flags = draft.flags ?? [];
   const closing = draft.tracks.filter((t) => t.closing).length;
-  const deciding = record.status === "awaiting_review" || record.status === "preparing_audio";
+  const deciding = isDeciding(record);
   const ready = record.status === "awaiting_review" && !!record.fingerprint;
   const canApprove = ready && !changed;
   const busy = pending !== null || decided;
   const reload = () => {
     setSnap(live);
     setNotice(null);
-    onReload?.();
   };
 
   async function run(decision: "approve" | "skip") {
@@ -104,7 +105,7 @@ export function PackageDecision({
         ) : (
           <Pill tone={pill.tone}>{pill.label}</Pill>
         )}
-        {workspace === "demo" && <Pill tone="neutral">Sample</Pill>}
+        {workspace === "demo" && <SampleTag />}
       </div>
 
       <section className="min-w-0 rounded-card border border-line bg-surface p-5">
@@ -171,13 +172,14 @@ export function PackageDecision({
 
       <PlayerBar track={trackFor(workspace, draft.title)} />
 
+      {workspace === "demo" ? (
+        <p className="text-[12.5px] text-ink-soft">Demo workspace · Sample data. Publishing to Mixcloud is switched off.</p>
+      ) : (
+        deciding && <p className="text-[12.5px] text-ink-soft">This will be public on Mixcloud</p>
+      )}
+
       {deciding && (
         <>
-          <p className="text-[12.5px] text-ink-soft">
-            {workspace === "demo"
-              ? "Demo workspace · Sample data. Publishing to Mixcloud is switched off."
-              : "This will be public on Mixcloud"}
-          </p>
           {!ready && record.status === "preparing_audio" && (
             <p className="text-[12.5px] text-muted">The audio is still being prepared.</p>
           )}

@@ -7,7 +7,8 @@ import { NAV } from "../lib/nav";
 import { ALLOWED_DESTINATIONS } from "../lib/sandbox";
 import { Pill } from "./Pill";
 
-export type Workspace = "demo" | "real";
+import type { Workspace } from "../../convex/gate";
+export type { Workspace };
 
 // The (console) layout reads the session on the server and supplies this; display only.
 const WorkspaceContext = createContext<Workspace>("real");

@@ -49,3 +49,25 @@ describe("PlayerBar", () => {
     expect(screen.getByText("Audio preview arrives with the media job")).toBeInTheDocument();
   });
 });
+
+describe("PlayerProvider", () => {
+  it("Space does nothing (and is not prevented) when no PlayerBar is mounted", () => {
+    render(<PlayerProvider><p>no bar</p></PlayerProvider>);
+    const ev = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(ev);
+    expect(play).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it("same src with a different title updates the title and keeps position", () => {
+    const a: PlayerTrack = { src: "/same.mp3", title: "Golden", durationSec: 20 };
+    const { container, rerender } = render(<PlayerProvider><PlayerBar track={a} /></PlayerProvider>);
+    const audio = container.ownerDocument.querySelector("audio")!;
+    audio.currentTime = 5;
+    fireEvent.timeUpdate(audio);
+    expect(screen.getByText("Golden")).toBeInTheDocument();
+    rerender(<PlayerProvider><PlayerBar track={{ ...a, title: "Long title" }} /></PlayerProvider>);
+    expect(screen.getByText("Long title")).toBeInTheDocument();
+    expect(screen.getByText("0:00:05 / 0:00:20")).toBeInTheDocument();
+  });
+});

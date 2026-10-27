@@ -83,7 +83,7 @@ describe("PackageDecision", () => {
     const a = record({ fingerprint: "fpA" }, { title: "Title A" });
     const b = record({ fingerprint: "fpB" }, { title: "Title B" });
     const ui = (r: PackageRecord) => (
-      <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} onReload={() => {}} /></PlayerProvider>
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} /></PlayerProvider>
     );
     const { rerender } = render(ui(a));
     rerender(ui(b));
@@ -99,12 +99,10 @@ describe("PackageDecision", () => {
 
   it("stale approve shows reload message", async () => {
     const decide: DecideFn = async () => ({ ok: false, code: "PACKAGE_CHANGED", message: "This package changed. Open the latest version." });
-    const onReload = vi.fn();
-    render(<PlayerProvider><PackageDecision record={record()} workspace="real" decide={decide} onReload={onReload} /></PlayerProvider>);
+    setup(record(), decide);
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("This package changed. Open the latest version.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
-    expect(onReload).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
   });
 
   it("not-ready and other failures show a notice", async () => {
@@ -146,5 +144,30 @@ describe("PackageDecision", () => {
     expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.getByText("Demo workspace · Sample data. Publishing to Mixcloud is switched off.")).toBeInTheDocument();
     expect(screen.queryByText("This will be public on Mixcloud")).not.toBeInTheDocument();
+  });
+
+  it("demo: approved pill says sample, and the demo notice stays after approval", async () => {
+    const notice = "Demo workspace · Sample data. Publishing to Mixcloud is switched off.";
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="demo" decide={ok} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(record({}, { workspace: "demo" })));
+    expect(screen.getByText(notice)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await screen.findByText("Draft · 2 flags"); // let decide resolve
+    rerender(ui(record({ status: "approved" }, { workspace: "demo" })));
+    expect(screen.getByText("Approved · sample, not published")).toBeInTheDocument();
+    expect(screen.getByText(notice)).toBeInTheDocument();
+    expect(screen.queryByText("Approved · queued")).not.toBeInTheDocument();
+  });
+
+  it("a decided record follows the live record instead of freezing", () => {
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(record({ status: "approved" }, { title: "Title A" })));
+    rerender(ui(record({ status: "succeeded", result: { url: "https://mixcloud.com/x" } }, { title: "Title B" })));
+    expect(screen.getByRole("heading", { name: "Title B" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Published" })).toBeInTheDocument();
   });
 });

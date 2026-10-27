@@ -13,14 +13,18 @@ export function formatClock(sec: number): string {
 export function PlayerBar({ track }: { track: PlayerTrack | null }) {
   const p = usePlayer();
   const src = track?.src;
+  const { register } = p;
+  const hasTrack = !!track;
+  useEffect(() => (hasTrack ? register() : undefined), [register, hasTrack]);
+  const title = track?.title;
   useEffect(() => {
     if (track) p.load(track);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load only when the source changes
-  }, [src]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load only when the source or title changes
+  }, [src, title]);
 
   if (!track) {
     return (
-      <div className="flex h-14 items-center rounded-card bg-ink px-4 text-[13px] text-[#b9b2a3]">
+      <div className="flex h-14 items-center rounded-card bg-ink px-4 text-[13px] text-chip">
         Audio preview arrives with the media job
       </div>
     );
@@ -47,19 +51,19 @@ export function PlayerBar({ track }: { track: PlayerTrack | null }) {
       </button>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium">{active.title}</div>
-        <div className="mt-0.5 whitespace-nowrap font-mono text-[11.5px] leading-tight text-[#b9b2a3]">
+        <div className="mt-0.5 whitespace-nowrap font-mono text-[11.5px] leading-tight text-chip">
           {formatClock(p.positionSec)} / {formatClock(dur)}
         </div>
-        <div className="relative mt-1.5 h-[3px] rounded-[2px] bg-[#4a463e]" aria-hidden="true">
+        <div className="relative mt-1.5 h-[3px] rounded-[2px] bg-ink-soft" aria-hidden="true">
           <i className="absolute inset-y-0 left-0 rounded-[2px] bg-signal-on-dark" style={{ width: `${pct}%` }} />
-          {tick !== null && <span className="absolute -top-[3px] h-[9px] w-px bg-[#9a9486]" style={{ left: `${tick}%` }} />}
+          {tick !== null && <span className="absolute -top-[3px] h-[9px] w-px bg-muted" style={{ left: `${tick}%` }} />}
         </div>
       </div>
       <button
         type="button"
         onClick={p.jumpToHour2}
         disabled={active.hour2AtSec === undefined}
-        className="min-h-11 whitespace-nowrap rounded-control border border-[#4a463e] px-2.5 text-[12.5px] font-medium text-paper disabled:opacity-50"
+        className="min-h-11 whitespace-nowrap rounded-control border border-ink-soft px-2.5 text-[12.5px] font-medium text-paper disabled:opacity-50"
       >
         Jump to hour 2
       </button>

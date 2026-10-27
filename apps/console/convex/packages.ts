@@ -46,7 +46,8 @@ export const decide = mutation({
       .unique();
     // Hard Rule 9: a real user never decides a demo package, and the demo login never decides a real one.
     // Same message as the gate's FORBIDDEN so nothing about the package leaks.
-    if (doc && doc.workspace !== workspaceOf(actor))
+    // A demo caller also gets FORBIDDEN for a missing package, so it cannot probe for real package ids.
+    if (doc ? doc.workspace !== workspaceOf(actor) : actor.kind === "demo")
       return { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can decide" };
     try {
       const record = await gateFor(ctx).decide(packageId, fingerprint, decision, actor);

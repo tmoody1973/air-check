@@ -42,17 +42,16 @@ const longTitleDemo: PackageDraft = {
 };
 
 // The nine rows of the Trust mock, newest first: [seconds before the newest, row].
-const T = (s: number) => s;
 const ACTIVITY = [
-  [T(0), { kind: "waiting", result: "needs_you", title: "RLR 10.2.26 ready for your approval · 2 flags", packageId: "demo-10-2-26" }],
-  [T(15), { kind: "network", result: "blocked", title: "Agent ran curl", destination: "example.com", reason: "Not on the allow-list" }],
-  [T(29), { kind: "action", result: "done", title: "Drafted the Mixcloud package (title, 5 tags, description)" }],
-  [T(59), { kind: "network", result: "allowed", title: "Model call (Nemotron 3 Super)", destination: "Nebius Token Factory" }],
-  [T(77), { kind: "network", result: "blocked", title: "Hermes contacted its maker", destination: "portal.nousresearch.com", reason: "Not on the allow-list" }],
-  [T(90), { kind: "action", result: "done", title: "Updated skill: title style (you shortened a title)" }],
-  [T(128), { kind: "network", result: "allowed", title: "Web search for release dates", destination: "api.tavily.com" }],
-  [T(150), { kind: "network", result: "allowed", title: "Checked for new Telegram messages", destination: "api.telegram.org" }],
-  [T(298), { kind: "action", result: "done", title: "Fact-checked 31 tracks (2 open claims)" }],
+  [0, { kind: "waiting", result: "needs_you", title: "RLR 10.2.26 ready for your approval · 2 flags", packageId: "demo-10-2-26" }],
+  [15, { kind: "network", result: "blocked", title: "Agent ran curl", destination: "example.com", reason: "Not on the allow-list" }],
+  [29, { kind: "action", result: "done", title: "Drafted the Mixcloud package (title, 5 tags, description)" }],
+  [59, { kind: "network", result: "allowed", title: "Model call (Nemotron 3 Super)", destination: "Nebius Token Factory" }],
+  [77, { kind: "network", result: "blocked", title: "Hermes contacted its maker", destination: "portal.nousresearch.com", reason: "Not on the allow-list" }],
+  [90, { kind: "action", result: "done", title: "Updated skill: title style (you shortened a title)" }],
+  [128, { kind: "network", result: "allowed", title: "Web search for release dates", destination: "api.tavily.com" }],
+  [150, { kind: "network", result: "allowed", title: "Checked for new Telegram messages", destination: "api.telegram.org" }],
+  [298, { kind: "action", result: "done", title: "Fact-checked 31 tracks (2 open claims)" }],
 ] as const;
 
 type Row = { label: string; text: string; sources?: string[] };
