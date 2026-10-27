@@ -23,7 +23,7 @@ const upcoming = [
 
 describe("RunProgressCard", () => {
   it("renders done, working and skipped rows from V12 replay state", () => {
-    render(<RunProgressCard title="Writing show notes · Hour 1" state={running()} totals={totals} upcoming={upcoming} onTakeOver={() => {}} />);
+    render(<RunProgressCard title="Writing show notes · Hour 1" state={running()} totals={totals} upcoming={upcoming} status="running" source="scripted" onTakeOver={() => {}} />);
     expect(screen.getByRole("heading", { name: "Writing show notes · Hour 1" })).toBeInTheDocument();
     expect(screen.getAllByText("Done")).toHaveLength(1);
     expect(screen.getByText("Working")).toBeInTheDocument();
@@ -38,20 +38,20 @@ describe("RunProgressCard", () => {
 
   it("take over calls the handler", () => {
     const fn = vi.fn();
-    render(<RunProgressCard title="t" state={running()} totals={totals} onTakeOver={fn} />);
+    render(<RunProgressCard title="t" state={running()} totals={totals} status="running" source="scripted" onTakeOver={fn} />);
     fireEvent.click(screen.getByRole("button", { name: "Take over" }));
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("stopping disables take over", () => {
-    render(<RunProgressCard title="t" state={{ ...running(), status: "stopping" }} totals={totals} onTakeOver={() => {}} />);
-    const b = screen.getByRole("button", { name: "Stopping after this track…" });
+    render(<RunProgressCard title="t" state={running()} totals={totals} status="stopping" source="scripted" upcoming={upcoming} onTakeOver={() => {}} />);
+    const b = screen.getByRole("button", { name: "Stopping at the next step…" });
     expect(b).toBeDisabled();
   });
 
   it("cancelled shows stopped message", () => {
-    render(<RunProgressCard title="t" state={replay()} totals={totals} onTakeOver={() => {}} />);
-    expect(screen.getByText("Stopped. Your draft is open.")).toBeInTheDocument();
+    render(<RunProgressCard title="t" state={replay()} totals={totals} upcoming={upcoming} status="cancelled" source="scripted" onTakeOver={() => {}} />);
+    expect(screen.getByText("Stopped. You have it from here.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
   });
@@ -63,7 +63,7 @@ describe("RunProgressCard", () => {
         { id: "a", tool: "x", preview: "Kiwanuka [verify] release date", status: "done", startedAt: 1, label: "H1.5", sources: ["discogs.com", "[verify] sources disagree"] },
       ],
     };
-    render(<RunProgressCard title="t" state={state} totals={{ tracks: 2, closingSkipped: 0 }} onTakeOver={() => {}} />);
+    render(<RunProgressCard title="t" state={state} totals={{ tracks: 2, closingSkipped: 0 }} upcoming={upcoming} status="running" source="scripted" onTakeOver={() => {}} />);
     expect(screen.getByText("H1.5")).toBeInTheDocument();
     const normal = screen.getByText("discogs.com");
     expect(normal).toHaveClass("bg-surface", "text-ink-soft", "border-line");
@@ -77,9 +77,9 @@ describe("RunProgressCard", () => {
   });
 
   it("guards zero total and shows Sample tag", () => {
-    render(<RunProgressCard title="t" sample state={initialRun("r")} totals={{ tracks: 0, closingSkipped: 0 }} onTakeOver={() => {}} />);
+    render(<RunProgressCard title="t" state={initialRun("r")} totals={{ tracks: 0, closingSkipped: 0 }} upcoming={upcoming} status="running" source="scripted" onTakeOver={() => {}} />);
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
-    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText("Sample · scripted")).toBeInTheDocument();
   });
 
   describe("live run states", () => {
@@ -95,14 +95,24 @@ describe("RunProgressCard", () => {
       fireEvent.click(b);
       expect(fn).toHaveBeenCalledOnce();
       expect(b).toBeDisabled();
-      reject(new Error("NOT_FOUND"));
-      expect(await screen.findByText(/NOT_FOUND/)).toBeInTheDocument();
+      reject(Object.assign(new Error("[CONVEX] Server Error"), { data: { code: "NOT_FOUND" } }));
+      expect(await screen.findByText("That run no longer exists.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Take over" })).not.toBeDisabled();
     });
 
-    it("queued copy", () => {
+    it("a generic error shows plain copy and hides server detail", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const fn = vi.fn(() => Promise.reject(new Error("[CONVEX M(runs:requestStop)] [Request ID abc] Server Error")));
+      render(<RunProgressCard {...base} status="running" state={liveState()} onTakeOver={fn} />);
+      fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+      expect(await screen.findByText("Could not stop the run. Please try again.")).toBeInTheDocument();
+      expect(screen.queryByText(/Request ID/)).not.toBeInTheDocument();
+    });
+
+    it("queued copy next to Take over", () => {
       render(<RunProgressCard {...base} status="queued" state={{ runId: "r", status: "running", steps: [] }} onTakeOver={() => {}} />);
       expect(screen.getByText("Waiting for the agent…")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Take over" })).toBeInTheDocument();
     });
     it("stopping copy and disabled button", () => {
       render(<RunProgressCard {...base} status="stopping" state={liveState()} onTakeOver={() => {}} />);

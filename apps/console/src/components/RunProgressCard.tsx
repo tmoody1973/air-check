@@ -71,40 +71,40 @@ function LiveTag() {
   );
 }
 
+const ERROR_COPY: Record<string, string> = { NOT_FOUND: "That run no longer exists." };
+const GENERIC_ERROR = "Could not stop the run. Please try again.";
+
+// Server detail (request ids, stack text) goes to the console only, never to the page.
 function errorText(e: unknown): string {
-  const data = (e as { data?: { code?: string } })?.data;
-  return data?.code ?? (e instanceof Error ? e.message : "Something went wrong");
+  console.error("requestStop failed", e);
+  const code = (e as { data?: { code?: string } })?.data?.code;
+  return (code && ERROR_COPY[code]) || GENERIC_ERROR;
 }
 
-/**
- * `status` is the run row's status. Leave it out for the original seeded track-by-track card, which
- * reads state.status. The track line and percent bar appear only when there are upcoming rows (or no `status`).
- */
+/** `status` is the run row's status. The track line and percent bar appear only when there are upcoming rows. */
 export function RunProgressCard({
-  title, state, totals, upcoming = [], sample = false, onTakeOver, status, source, runId, kind, packageId,
+  title, state, totals, upcoming = [], onTakeOver, status, source, runId, kind, packageId,
 }: {
   title: string;
   state: RunState;
   totals: RunTotals;
   upcoming?: UpcomingRow[];
-  sample?: boolean;
   onTakeOver: () => unknown;
-  status?: RunRowStatus;
-  source?: "live" | "scripted";
+  status: RunRowStatus;
+  source: "live" | "scripted";
   runId?: string;
   kind?: "chat" | "draft-package";
   packageId?: string;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const modern = status !== undefined;
   const done = state.steps.filter((s) => s.status === "done").length;
   const pct = totals.tracks > 0 ? Math.min(100, Math.round((done / totals.tracks) * 100)) : 0;
-  const stopping = (status ?? state.status) === "stopping";
-  const cancelled = (status ?? state.status) === "cancelled";
-  const trackMode = !modern || upcoming.length > 0;
+  const stopping = status === "stopping";
+  const cancelled = status === "cancelled";
+  const trackMode = upcoming.length > 0;
   const skipped = totals.closingSkipped;
-  const canStop = !cancelled && (!modern || status === "queued" || status === "running" || status === "stopping");
+  const canStop = status === "queued" || status === "running" || status === "stopping";
 
   async function takeOver() {
     setPending(true);
@@ -117,7 +117,7 @@ export function RunProgressCard({
       <style>{`.run-pulse{animation:run-pulse 1.4s ease-in-out infinite}@keyframes run-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){.run-pulse{animation:none}}`}</style>
       <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4">
         <h2 className="font-serif text-[22px] leading-tight">{title}</h2>
-        {source === "live" ? <LiveTag /> : source === "scripted" ? <SampleTag>Sample · scripted</SampleTag> : sample && <SampleTag />}
+        {source === "live" ? <LiveTag /> : <SampleTag>Sample · scripted</SampleTag>}
       </div>
       {trackMode ? (
         <>
@@ -149,19 +149,19 @@ export function RunProgressCard({
               type="button" onClick={takeOver} disabled={stopping || pending}
               className="inline-flex min-h-11 items-center whitespace-nowrap rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold disabled:text-muted"
             >
-              {stopping ? (modern ? "Stopping at the next step…" : "Stopping after this track…") : "Take over"}
+              {stopping ? "Stopping at the next step…" : "Take over"}
             </button>
             <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
               {status === "queued" ? "Waiting for the agent…" : COPY}
             </span>
           </>
         ) : cancelled ? (
-          <p className="text-sm font-semibold">{modern ? "Stopped. You have it from here." : "Stopped. Your draft is open."}</p>
+          <p className="text-sm font-semibold">Stopped. You have it from here.</p>
         ) : status === "failed" ? (
           <p className="text-sm font-semibold text-problem-text">The run stopped with an error.</p>
         ) : null}
-        {error && <p role="alert" className="basis-full text-sm text-problem-text">Could not stop the run: {error}</p>}
-        {cancelled && modern && kind === "draft-package" && runId && (
+        {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
+        {cancelled && kind === "draft-package" && runId && (
           <Link href={`/tracklist?from=${encodeURIComponent(runId)}`} className={linkClass}>Edit and draft again</Link>
         )}
         {packageId && <Link href={`/packages/${encodeURIComponent(packageId)}`} className={linkClass}>Review package</Link>}
