@@ -180,6 +180,13 @@ describe("deploy files", () => {
     expect(runProbes(["Agent tools", "Demo agent tools"], { airc: reg("false"), aircdemo: reg("true") })).toEqual(["DOWN", "UP"]);
   });
 
+  it("the Agent skills probe goes DOWN when either sandbox lacks rlr-description-safety (Plan 5c Task 5)", () => {
+    const listed = "│ rlr-description-safety  │ local │ enabled │";
+    expect(runProbes(["Agent skills"], { airc: listed, aircdemo: listed })).toEqual(["UP"]);
+    expect(runProbes(["Agent skills"], { airc: listed, aircdemo: "│ claude-code │ builtin │" })).toEqual(["DOWN"]);
+    expect(runProbes(["Agent skills"], { airc: "", aircdemo: listed })).toEqual(["DOWN"]);
+  });
+
   it("both hermes units re-wire their MCP tools after recover, each bounded by timeout 120", () => {
     for (const [file, box] of [["hermes/aircheck-hermes.service", "airc"], ["hermes/aircheck-hermes-demo.service", "aircdemo"]] as const) {
       const unit = read(file);
