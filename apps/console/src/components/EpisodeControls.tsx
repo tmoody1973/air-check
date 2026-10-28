@@ -1,3 +1,4 @@
+import { ConvexError } from "convex/values";
 import { useState, type FormEvent } from "react";
 import { showDateLabel } from "../lib/date";
 import { BTN } from "./MixcloudConnection";
@@ -35,21 +36,27 @@ const SECONDARY = `${BTN} border-line-strong bg-surface text-ink hover:bg-surfac
 const PRIMARY = `${BTN} border-signal bg-signal text-white hover:bg-signal-deep disabled:opacity-60`;
 const FIELD = "min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal";
 
-const errorText = (e: unknown) =>
-  (e as { data?: { message?: string } }).data?.message ?? (e instanceof Error ? e.message : "That didn't save. Try again.");
+/** Only a ConvexError's own plain message is shown; anything else (a server crash, a network error) never leaks raw text. */
+function errorText(e: unknown): string {
+  const message = e instanceof ConvexError ? (e.data as { message?: unknown } | null)?.message : undefined;
+  return typeof message === "string" ? message : "That didn't save. Try again.";
+}
 
 /** One row's save: busy while it runs, the reason when it is refused, a line for screen readers when it lands. */
 function useSave(announce: (msg: string) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True when it saved. */
   const save = async (run: () => Promise<unknown>, done: string) => {
     setBusy(true);
     setError(null);
     try {
       await run();
       announce(done);
+      return true;
     } catch (e) {
       setError(errorText(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -136,7 +143,8 @@ export function MarkForm({ showDate, ctx, onClose }: { showDate: string; ctx: Ro
   const { busy, error, save } = useSave(ctx.announce);
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (of) await save(() => ctx.actions.markRerun({ showDate, rerunOf: of }), `${showDateLabel(showDate)} marked as a rerun of ${showDateLabel(of)}`);
+    // Closed once saved, so an Undo later does not bring the form back open.
+    if (of && (await save(() => ctx.actions.markRerun({ showDate, rerunOf: of }), `${showDateLabel(showDate)} marked as a rerun of ${showDateLabel(of)}`))) onClose();
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">

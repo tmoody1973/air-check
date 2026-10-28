@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { ConvexError } from "convex/values";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EpisodeItem } from "./EpisodeItem";
 import { EpisodesView, type EpisodeActions, type EpisodeRow } from "./EpisodesView";
@@ -106,12 +107,34 @@ describe("EpisodesView questions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Answer saved for Jan 9, 2026");
   });
 
-  it("a refused save shows the reason", async () => {
-    const acts = actions({ answer: vi.fn(async () => { throw new Error("the answer must be 1 to 2000 characters"); }) });
-    setup([ep("2026-01-09", { status: "question", questions: [{ id: "t1", kind: "tracklist", text: "Keep track 3?" }] })], { today: "2026-01-09", acts });
-    fireEvent.change(screen.getByLabelText("Keep track 3?"), { target: { value: "x" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save answer" })));
+  it("a refused save shows Convex's plain reason; any other error never shows raw server text", async () => {
+    const refuse = (err: unknown) => {
+      cleanup();
+      const acts = actions({ answer: vi.fn(async () => { throw err; }) });
+      setup([ep("2026-01-09", { status: "question", questions: [{ id: "t1", kind: "tracklist", text: "Keep track 3?" }] })], { today: "2026-01-09", acts });
+      fireEvent.change(screen.getByLabelText("Keep track 3?"), { target: { value: "x" } });
+      return act(async () => fireEvent.click(screen.getByRole("button", { name: "Save answer" })));
+    };
+    await refuse(new ConvexError({ code: "BAD_INPUT", message: "the answer must be 1 to 2000 characters" }));
     expect(screen.getByRole("alert")).toHaveTextContent("the answer must be 1 to 2000 characters");
+    await refuse(new Error("[CONVEX M(episodes:answer)] [Request ID: 1a2b] Server Error Uncaught Error: boom at handler"));
+    expect(screen.getByRole("alert")).toHaveTextContent("That didn't save. Try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/CONVEX|boom/);
+    await refuse(new ConvexError("a bare string"));
+    expect(screen.getByRole("alert")).toHaveTextContent("That didn't save. Try again.");
+  });
+
+  it("the same message twice is announced twice (the live region's text changes)", async () => {
+    setup([ep("2026-01-09", { status: "question", questions: [{ id: "t1", kind: "tracklist", text: "Keep track 3?" }] })], { today: "2026-01-09" });
+    fireEvent.change(screen.getByLabelText("Keep track 3?"), { target: { value: "x" } });
+    const save = () => act(async () => fireEvent.click(screen.getByRole("button", { name: "Save answer" })));
+    await save();
+    const first = screen.getByRole("status").textContent;
+    await save();
+    const second = screen.getByRole("status").textContent;
+    expect(first).toContain("Answer saved for Jan 9, 2026");
+    expect(second).toContain("Answer saved for Jan 9, 2026");
+    expect(second).not.toBe(first);
   });
 
   it("rerun question with a candidate: Yes or No", async () => {
@@ -230,10 +253,35 @@ describe("EpisodeItem as a card (R15: phone width, no sideways scroll)", () => {
     render(
       <EpisodesView layout="cards" data={{ episodes: [ep("2026-01-09")], awaitingReview: 0 }} sources={[{ source: "box", state: "connected" }, { source: "dropbox", state: "connected" }]} workspace="real" today="2026-01-09" actions={actions()} />,
     );
-    expect(screen.getByText("1 show · 1 blank Friday")).toBeInTheDocument();
+    expect(screen.getByText("1 show · tracklists not connected · 1 blank Friday")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: /2026 shows/ })).toBeInTheDocument();
     expect(rowOf("2026-01-02")).toHaveTextContent("No show folder or tracklist found");
     expect(screen.getByRole("link", { name: "Connect Google in Settings" })).toHaveAttribute("href", "/settings");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});
+
+describe("review fixes 4 and 6", () => {
+  it("the Mark form closes after a save, so it does not reopen after Undo", async () => {
+    const acts = actions();
+    const view = (episodes: EpisodeRow[]) => <EpisodesView data={{ episodes, awaitingReview: 0 }} sources={connected} workspace="real" today="2026-01-09" actions={acts} />;
+    const { rerender } = render(view([ep("2026-01-02"), ep("2026-01-09")]));
+    fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Mark as rerun of…" }));
+    fireEvent.change(within(rowOf("2026-01-09")).getByLabelText("Rerun of"), { target: { value: "2026-01-02" } });
+    await act(async () => fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Save" })));
+    expect(within(rowOf("2026-01-09")).queryByLabelText("Rerun of")).not.toBeInTheDocument();
+    rerender(view([ep("2026-01-02"), ep("2026-01-09", { status: "rerun", rerunOf: "2026-01-02", rerunSource: "episodes" })]));
+    await act(async () => fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Undo" })));
+    rerender(view([ep("2026-01-02"), ep("2026-01-09")]));
+    expect(within(rowOf("2026-01-09")).queryByLabelText("Rerun of")).not.toBeInTheDocument();
+    expect(within(rowOf("2026-01-09")).getByRole("button", { name: "Mark as rerun of…" })).toBeInTheDocument();
+  });
+
+  it("a rerun row's source cells are neutral: a dash, 'Not needed', never red Missing", () => {
+    setup([ep("2026-01-02"), ep("2026-01-09", { status: "rerun", rerunOf: "2026-01-02", rerunSource: "chat", audio: { status: "none" }, tracklist: { status: "missing" }, notes: { status: "missing" }, gaps: ["audio", "tracklist", "notes"] })], { today: "2026-01-09" });
+    const r = rowOf("2026-01-09");
+    expect(within(r).queryByText("Missing")).not.toBeInTheDocument();
+    expect(within(r).getAllByText("Not needed")).toHaveLength(3);
+    expect(within(r).getAllByText("—")).toHaveLength(3);
   });
 });

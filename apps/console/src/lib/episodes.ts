@@ -8,14 +8,22 @@ const DONE = new Set(["published", "rerun", "skipped"]);
 export const inBacklog = (r: { status: string }) => !DONE.has(r.status);
 export const backlogCount = (rows: readonly { status: string }[]) => rows.filter(inBacklog).length;
 
+const DAY = 86_400_000;
+/** The Friday on or after a yyyy-mm-dd date: the Friday a show dated in the 7 days ending on it covers. */
+function coveringFriday(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const ms = Date.UTC(y!, m! - 1, d!);
+  return new Date(ms + ((5 - new Date(ms).getUTCDay() + 7) % 7) * DAY).toISOString().slice(0, 10);
+}
+
 /**
- * Every Friday from Jan 2, 2026 up to and including `today` (a Chicago yyyy-mm-dd key) that has no episode row.
- * UTC calendar math, so daylight saving never skips or doubles a week.
+ * Every Friday from Jan 2, 2026 up to and including `today` (a Chicago yyyy-mm-dd key) with no show dated in the
+ * 7 days ending on it (an off-Friday date still covers its week). UTC calendar math, so DST never skips a week.
  */
 export function blankFridays(showDates: Iterable<string>, today: string): string[] {
-  const have = new Set(showDates);
+  const have = new Set([...showDates].map(coveringFriday));
   const out: string[] = [];
-  for (let ms = Date.UTC(2026, 0, 2); ; ms += 7 * 86_400_000) {
+  for (let ms = Date.UTC(2026, 0, 2); ; ms += 7 * DAY) {
     const key = new Date(ms).toISOString().slice(0, 10);
     if (key > today) return out;
     if (!have.has(key)) out.push(key);
@@ -24,17 +32,24 @@ export function blankFridays(showDates: Iterable<string>, today: string): string
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "31 shows · 4 missing audio · 2 missing notes · 7 blank Fridays · 3 questions · 2 reruns". Gaps count unfinished shows only. */
-export function summaryLine(rows: readonly Countable[], blanks: number): string {
+type Column = "audio" | "tracklist" | "notes";
+const NOT_CONNECTED: Record<Column, string> = { audio: "audio not connected", tracklist: "tracklists not connected", notes: "notes not connected" };
+
+/**
+ * "31 shows · 4 missing audio · 2 missing notes · 7 blank Fridays · 3 questions · 2 reruns". Gaps count unfinished
+ * shows only. A column whose source isn't connected shows a dash, so it is named once ("notes not connected"), not counted.
+ */
+export function summaryLine(rows: readonly Countable[], blanks: number, notConnected: readonly Column[] = []): string {
   const open = rows.filter(inBacklog);
-  const gap = (g: string) => open.filter((r) => r.gaps.includes(g)).length;
+  const count = (g: Column) => open.filter((r) => r.gaps.includes(g)).length;
+  const gap = (g: Column, words: (n: number) => string) => (notConnected.includes(g) ? NOT_CONNECTED[g] : count(g) && words(count(g)));
   const questions = open.reduce((n, r) => n + r.questions.filter((q) => !q.answer).length, 0);
   const reruns = rows.filter((r) => r.status === "rerun").length;
   const parts = [
     plural(rows.length - reruns, "show"),
-    gap("audio") && `${gap("audio")} missing audio`,
-    gap("tracklist") && plural(gap("tracklist"), "missing tracklist"),
-    gap("notes") && `${gap("notes")} missing notes`,
+    gap("audio", (n) => `${n} missing audio`),
+    gap("tracklist", (n) => plural(n, "missing tracklist")),
+    gap("notes", (n) => `${n} missing notes`),
     blanks && plural(blanks, "blank Friday"),
     questions && plural(questions, "question"),
     reruns && plural(reruns, "rerun"),

@@ -14,6 +14,7 @@ export type { EpisodeActions, EpisodeRow };
 const CONNECT_NOTE = { box: "Set up Box in Settings", google: "Connect Google in Settings", dropbox: "Connect Dropbox in Settings" } as const;
 const RECONNECT = { box: "Fix the Box sign-in (ingest.env)", google: "Reconnect Google in Settings", dropbox: "Reconnect Dropbox in Settings" } as const;
 const SOURCES = ["box", "google", "dropbox"] as const;
+const COLUMNS = ["audio", "tracklist", "notes"] as const;
 const th = "px-3 py-2.5 text-left align-top font-mono text-[10.5px] font-normal uppercase tracking-[0.1em] text-muted";
 const NOTE_LINK = "font-sans text-xs normal-case tracking-normal text-ink-soft underline underline-offset-2";
 
@@ -46,7 +47,9 @@ export function EpisodesView({
   /** Forces a layout (tests, screenshots); otherwise the screen width picks. */
   layout?: "table" | "cards";
 }) {
-  const [said, setSaid] = useState("");
+  // A save message with a counter: the same words twice still change the live region, so both are announced.
+  const [said, setSaid] = useState({ text: "", n: 0 });
+  const announce = (text: string) => setSaid((s) => ({ text, n: s.n + 1 }));
   const wide = useWide();
   if (workspace === "demo") return <p className="text-ink-soft">{"The demo doesn't include the backlog."}</p>;
   if (data === undefined) return <p className="text-ink-soft">Loading…</p>;
@@ -63,7 +66,7 @@ export function EpisodesView({
   const rows = [...data.episodes.map((e) => ({ date: e.showDate, e })), ...blanks.map((date) => ({ date, e: null }))].sort((a, b) => a.date.localeCompare(b.date));
   const ctxFor = (date: string): RowCtx => ({
     actions,
-    announce: setSaid,
+    announce,
     choices: data.episodes.filter((x) => x.status !== "rerun" && x.showDate < date).map((x) => x.showDate),
   });
   const items = rows.map(({ date, e }) => (
@@ -80,7 +83,7 @@ export function EpisodesView({
 
   return (
     <div className="mx-auto flex max-w-[1000px] min-w-0 flex-col gap-4">
-      <p className="text-ink-soft">{summaryLine(data.episodes, blanks.length)}</p>
+      <p className="text-ink-soft">{summaryLine(data.episodes, blanks.length, COLUMNS.filter((c) => states[COLUMN_SOURCE[c]] === "not_connected"))}</p>
       {failing.length > 0 && (
         <p className="rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">
           {failing.map((s, i) => (
@@ -118,7 +121,7 @@ export function EpisodesView({
           </table>
         </section>
       )}
-      <p role="status" className="sr-only">{said}</p>
+      <p role="status" className="sr-only">{said.text}{said.n % 2 ? "\u00a0" : ""}</p>
     </div>
   );
 }

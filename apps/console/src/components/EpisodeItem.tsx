@@ -35,7 +35,8 @@ export const COLUMN_SOURCE = { audio: "box", tracklist: "google", notes: "dropbo
 const GOOD = "text-signal-deep";
 const WARN = "text-caution-text";
 const BAD = "text-problem-text";
-type Value = { text: string; cls: string } | null; // null: that source is not connected (R13)
+/** A word in a colour, or a neutral dash with its reason for screen readers (R13: not connected; a rerun: not needed). */
+type Value = { text: string; cls: string } | { dash: "Not connected" | "Not needed" };
 
 function audioValue(e: EpisodeRow): Value {
   if (e.fetch?.status === "fetching") return { text: "Downloading", cls: WARN };
@@ -47,7 +48,8 @@ function audioValue(e: EpisodeRow): Value {
 const found = (s: "found" | "missing"): Value => (s === "found" ? { text: "Found", cls: GOOD } : { text: "Missing", cls: BAD });
 
 function cellsOf(e: EpisodeRow, sources: SourceStates): [label: string, value: Value][] {
-  const shown = (column: keyof typeof COLUMN_SOURCE, v: Value) => (sources[COLUMN_SOURCE[column]] === "not_connected" ? null : v);
+  const shown = (column: keyof typeof COLUMN_SOURCE, v: Value): Value =>
+    e.status === "rerun" ? { dash: "Not needed" } : sources[COLUMN_SOURCE[column]] === "not_connected" ? { dash: "Not connected" } : v;
   return [
     ["Audio", shown("audio", audioValue(e))],
     ["Tracklist", shown("tracklist", found(e.tracklist.status))],
@@ -56,13 +58,13 @@ function cellsOf(e: EpisodeRow, sources: SourceStates): [label: string, value: V
 }
 
 const ValueText = ({ value }: { value: Value }) =>
-  value ? (
-    <span className={value.cls}>{value.text}</span>
-  ) : (
+  "dash" in value ? (
     <span className="text-muted">
       <span aria-hidden="true">—</span>
-      <span className="sr-only">Not connected</span>
+      <span className="sr-only">{value.dash}</span>
     </span>
+  ) : (
+    <span className={value.cls}>{value.text}</span>
   );
 
 function statusLink(e: EpisodeRow): ReactNode {

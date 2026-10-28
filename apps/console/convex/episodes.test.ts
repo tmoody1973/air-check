@@ -86,6 +86,7 @@ describe("episodes.answer", () => {
 
   test("rerun question, Yes: the week becomes a rerun of the candidate, source detected, and the question goes", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     await upsert(t, episode("2026-07-17", [{ id: "rerun", text: "Is 2026-07-17 a rerun of 2026-03-13?", kind: "rerun", rerunOf: "2026-03-13" }]));
     await t.withIdentity(human).mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "rerun", answer: "yes" });
     expect(await row(t)).toMatchObject({ rerunOf: "2026-03-13", rerunSource: "detected", questions: [] });
@@ -94,6 +95,7 @@ describe("episodes.answer", () => {
 
   test("rerun question with an unknown original (R8): Yes needs the date; No declines and is never asked again", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-02-06")); // the original must exist (review fix 1)
     const q: Q = { id: "rerun", text: "Is 2026-07-17 a rerun, and of which show?", kind: "rerun", rerunOf: "" };
     await upsert(t, episode("2026-07-17", [q]));
     const h = t.withIdentity(human);
@@ -117,6 +119,7 @@ describe("episodes.answer", () => {
 describe("episodes.markRerun / unmarkRerun", () => {
   test("a signed-in real human marks a week ahead of the scan; the scan keeps it; unmark clears it but keeps rerunDeclined", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     const h = t.withIdentity(human);
     await h.mutation(api.episodes.markRerun, { showDate: "2026-07-17", rerunOf: "2026-03-13" });
     expect(await row(t)).toMatchObject({ rerunOf: "2026-03-13", rerunSource: "episodes" });
@@ -125,7 +128,7 @@ describe("episodes.markRerun / unmarkRerun", () => {
     expect(await statusOf(t)).toBe("rerun");
     expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-07-17" })).toEqual({ queued: false, reason: "rerun" });
 
-    await t.run(async (ctx) => ctx.db.patch((await ctx.db.query("episodes").first())!._id, { rerunDeclined: true }));
+    await t.run(async (ctx) => ctx.db.patch((await ctx.db.query("episodes").withIndex("by_showDate", (q) => q.eq("showDate", "2026-07-17")).unique())!._id, { rerunDeclined: true }));
     await h.mutation(api.episodes.unmarkRerun, { showDate: "2026-07-17" });
     const r = (await row(t))!;
     expect(r.rerunOf).toBeUndefined();
@@ -136,6 +139,7 @@ describe("episodes.markRerun / unmarkRerun", () => {
 
   test("R12: Undo on a detected rerun means 'not a rerun': it declines, so the scan never asks again", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     const q: Q = { id: "rerun", text: "Is 2026-07-17 a rerun of 2026-03-13?", kind: "rerun", rerunOf: "2026-03-13" };
     await upsert(t, episode("2026-07-17", [q]));
     const h = t.withIdentity(human);
@@ -152,6 +156,7 @@ describe("episodes.markRerun / unmarkRerun", () => {
 
   test("Undo on a chat or Episodes mark just clears it (a later detection may still ask)", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     await upsert(t, episode());
     const h = t.withIdentity(human);
     await h.mutation(api.episodes.markRerun, { showDate: "2026-07-17", rerunOf: "2026-03-13" });
@@ -177,6 +182,7 @@ describe("episodes.markRerun / unmarkRerun", () => {
 describe("POST /agent/episodes/rerun", () => {
   test("the real agent token marks the week with source chat", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     await upsert(t, episode());
     const res = await post(t, { showDate: "2026-07-17", rerunOf: "2026-03-13", rerunSource: "episodes", status: "approved" });
     expect(res.status).toBe(200);
@@ -186,6 +192,7 @@ describe("POST /agent/episodes/rerun", () => {
 
   test("ahead of time: a week not scanned yet gets a row the scan fills in later", async () => {
     const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-03-13")); // the original must exist (review fix 1)
     expect((await post(t, { showDate: "2026-11-06", rerunOf: "2026-03-13" })).status).toBe(200);
     await upsert(t, episode("2026-11-06"));
     expect(await row(t, "2026-11-06")).toMatchObject({ rerunOf: "2026-03-13", rerunSource: "chat", tracklist: { status: "found" } });
@@ -214,6 +221,56 @@ describe("POST /agent/episodes/rerun", () => {
     vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", "");
     expect((await post(t, { showDate: "2026-07-17", rerunOf: "2026-03-13" })).status).toBe(503);
     expect(await t.run((ctx) => ctx.db.query("episodes").collect())).toEqual([]);
+  });
+});
+
+describe("the rerun original must be a real 2026 show that is not itself a rerun (review fix 1)", () => {
+  const reason = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (e) {
+      return (e as { data?: { code?: string; message?: string } }).data;
+    }
+    return "no error";
+  };
+  const setupShows = async () => {
+    const t = convexTest(schema, modules);
+    for (const d of ["2026-03-13", "2026-05-01", "2026-07-17"]) await upsert(t, episode(d));
+    await t.withIdentity(human).mutation(api.episodes.markRerun, { showDate: "2026-05-01", rerunOf: "2026-03-13" });
+    return t;
+  };
+  const CASES = [
+    ["2026-03-20", "no show on that date"],
+    ["2026-05-01", "that show is itself a rerun"],
+    ["2025-12-26", "the original must be a 2026 show"],
+  ] as const;
+
+  test("markRerun refuses each with a plain reason and writes nothing", async () => {
+    const t = await setupShows();
+    for (const [rerunOf, message] of CASES)
+      expect(await reason(t.withIdentity(human).mutation(api.episodes.markRerun, { showDate: "2026-07-17", rerunOf })), rerunOf).toEqual({ code: "BAD_INPUT", message });
+    expect((await row(t))!.rerunOf).toBeUndefined();
+  });
+
+  test("answer Yes refuses each, whether the original came from the question or from Tarik", async () => {
+    const t = await setupShows();
+    const h = t.withIdentity(human);
+    for (const [rerunOf, message] of CASES) {
+      await upsert(t, episode("2026-07-17", [{ id: "known", text: "Is it a rerun?", kind: "rerun", rerunOf }, { id: "unknown", text: "Of which?", kind: "rerun", rerunOf: "" }]));
+      expect(await reason(h.mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "known", answer: "Yes" })), rerunOf).toEqual({ code: "BAD_INPUT", message });
+      expect(await reason(h.mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "unknown", answer: "Yes", rerunOf })), rerunOf).toEqual({ code: "BAD_INPUT", message });
+    }
+    expect((await row(t))!.rerunOf).toBeUndefined();
+  });
+
+  test("the agent route gets 400 with the plain reason", async () => {
+    const t = await setupShows();
+    for (const [rerunOf, message] of CASES) {
+      const res = await post(t, { showDate: "2026-07-17", rerunOf });
+      expect(res.status, rerunOf).toBe(400);
+      expect((await res.json()).problems).toEqual([message]);
+    }
+    expect((await row(t))!.rerunOf).toBeUndefined();
   });
 });
 

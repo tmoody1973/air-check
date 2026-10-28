@@ -97,11 +97,18 @@ async function requireRealHuman(ctx: QueryCtx): Promise<void> {
 const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
 const notFound = (message: string) => new ConvexError({ code: "NOT_FOUND", message });
 
-/** Why a rerun mark is refused, in plain words; [] when it is fine. */
-function rerunProblems(showDate: string, rerunOf: string): string[] {
+/**
+ * Why a rerun mark is refused, in plain words; [] when it is fine. Every path that sets rerunOf (the Episodes row, the
+ * answer Yes, the agent's route) checks the original here: an earlier 2026 show that exists and is not itself a rerun.
+ */
+async function rerunProblems(ctx: QueryCtx, showDate: string, rerunOf: string): Promise<string[]> {
   if (!isShowDate(showDate)) return ["showDate must be a real date, yyyy-mm-dd"];
   if (!isShowDate(rerunOf)) return ["rerunOf must be a real date, yyyy-mm-dd"];
-  return rerunOf < showDate ? [] : ["rerunOf must be an earlier show than showDate"];
+  if (rerunOf >= showDate) return ["rerunOf must be an earlier show than showDate"];
+  if (!rerunOf.startsWith("2026-")) return ["the original must be a 2026 show"];
+  const original = await episodeByDate(ctx, rerunOf);
+  if (!original) return ["no show on that date"];
+  return original.rerunOf ? ["that show is itself a rerun"] : [];
 }
 
 const withoutRerunQuestions = (qs: Question[]) => qs.filter((q) => q.kind !== "rerun");
@@ -194,7 +201,7 @@ export const answer = mutation({
     if (!/^yes$/i.test(text)) throw badInput("answer Yes or No");
     const of = q.rerunOf || args.rerunOf?.trim() || "";
     if (!of) throw badInput("say which show it is a rerun of");
-    const problems = rerunProblems(row.showDate, of);
+    const problems = await rerunProblems(ctx, row.showDate, of);
     if (problems.length) throw badInput(problems[0]!);
     await ctx.db.patch(row._id, { rerunOf: of, rerunSource: "detected", questions });
   },
@@ -205,7 +212,7 @@ export const markRerun = mutation({
   args: { showDate: v.string(), rerunOf: v.string() },
   handler: async (ctx, { showDate, rerunOf }) => {
     await requireRealHuman(ctx);
-    const problems = rerunProblems(showDate, rerunOf);
+    const problems = await rerunProblems(ctx, showDate, rerunOf);
     if (problems.length) throw badInput(problems[0]!);
     await markRerunOf(ctx, showDate, rerunOf, "episodes");
   },
@@ -238,7 +245,7 @@ export const agentMarkRerun = internalMutation({
   args: { workspace: workspaceV, showDate: v.string(), rerunOf: v.string() },
   handler: async (ctx, { workspace, showDate, rerunOf }): Promise<AgentMarkResult> => {
     if (workspace !== "real") return { ok: false, code: "NOT_FOUND" };
-    const problems = rerunProblems(showDate, rerunOf);
+    const problems = await rerunProblems(ctx, showDate, rerunOf);
     if (problems.length) return { ok: false, code: "BAD_INPUT", problems };
     await markRerunOf(ctx, showDate, rerunOf, "chat");
     return { ok: true };
