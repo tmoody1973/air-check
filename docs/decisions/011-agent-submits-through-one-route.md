@@ -14,4 +14,6 @@
 
 **How we'll know if this was right:** A forged request with extra fields (`status: "approved"`, `workspace: "demo"`) still produces an unapproved `real` draft; the Hard Rule 1 test fails if a second route appears or if the route files name any Convex function other than the one save function (it checks the source text, not every possible call path); and the bridge host holds no Convex deploy key.
 
+**Update (2026-10-28):** "One route" and "one tool" are no longer literally true. Plan 5c added two more routes behind the same token, `POST /agent/packages/revise` and `POST /agent/packages/get`, and two matching agent tools, `package_revise` and `package_get`, beside `package_submit`. The idea of this decision still holds: none of the three can approve or publish. `package_get` only reads a package. `package_revise` can change the description of a package that is waiting for review (which resets its fingerprint, so Tarik must look again before Approve works) or propose a new description for a show already on Mixcloud (which waits for his Approve). The Hard Rule 1 test now pins the route list at these three. Decision 015 has the reasoning, including what this means for Hard Rule 5.
+
 **What actually happened:**
