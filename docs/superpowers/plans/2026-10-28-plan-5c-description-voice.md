@@ -86,7 +86,7 @@
 ### Task 5: Live on the VM (controller, with Tarik's go per step)
 
 1. Deploy Convex, bridge, publisher, console (DEPLOY.md procedures).
-2. `nemohermes airc skill remove mixcloud-package-submission`; `skill install` `skills/rlr-description-safety` and `skills/rlr-mixcloud-title-and-tags` into `airc` and `aircdemo`; `skill list` shows them.
+2. `nemohermes airc skill remove mixcloud-package-submission`; install the station skills with a new `deploy/hermes/install-skills.sh` that, for each of `airc` and `aircdemo` and each of `rlr-description-safety` and `rlr-mixcloud-title-and-tags`, runs `skill remove` (ignore "not found") then `skill install` (NemoHermes refuses to replace a same-name skill), then `skill list`. Add a watchdog probe "Agent skills" that fails when `nemohermes airc skill list` lacks `rlr-description-safety`. Persistence (checked in the NemoHermes v0.0.137 docs on the VM, Oct 28): skills live in `/sandbox/.hermes/skills/<name>`; they survive stop/start and `rebuild` (which backs up and restores Hermes state files) but not destroy + re-onboard, so DEPLOY.md's re-onboard steps gain "run install-skills.sh".
 3. In Chat: "Rewrite the description for pkg-10-2-26." The agent researches with Crate, calls `package_revise`, and a proposed update appears on the package page with its sources.
 4. Tarik reads it, edits if he likes, and presses **Approve update**. Verify on the live Mixcloud page that only the description changed (title, tags, cover, tracklist untouched).
 5. `skill list` again: no agent-made description skill came back.
