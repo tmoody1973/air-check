@@ -1,8 +1,11 @@
-import { GateError, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
+import { GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { actorOf, gateFor, workspaceOf } from "./gate";
+import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
+import { publishQueue } from "./publisher";
 
 const asDraft = (d: unknown) => d as PackageDraft;
 
@@ -32,9 +35,58 @@ export const listAwaiting = query({
   },
 });
 
-export type DecideResult = { ok: true; record: PackageRecord } | { ok: false; code: GateErrorCode; message: string };
+/** A real package for a signed-in real human; null for anyone else, for demo packages and for unknown ids. */
+async function realPackage(ctx: QueryCtx, packageId: string) {
+  if (workspaceOf(await actorOf(ctx)) !== "real") return null;
+  const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+  return doc?.workspace === "real" ? doc : null;
+}
 
-/** The only public mutation on packages (Hard Rule 1). */
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudStatus["state"]; lastError?: string };
+
+/**
+ * R2: which Chicago day an approved package should go up (0 = today), from the same queue and count the publisher
+ * uses. Like the publisher, a package with no cover (its own or the standard one) is not queued.
+ */
+export const publishState = query({
+  // `today` is the browser's Chicago day key. A subscribed query never re-runs because time passed, so the page
+  // passes the day and asks again after midnight. It only shapes this display; the publisher counts its own day.
+  args: { packageId: v.string(), today: v.string() },
+  handler: async (ctx, { packageId, today }): Promise<PublishState | null> => {
+    if (!DAY_KEY.test(today)) throw new ConvexError({ code: "BAD_INPUT", message: "today must be YYYY-MM-DD" });
+    if (!(await realPackage(ctx, packageId))) return null;
+    const { packages, publishedToday } = await publishQueue(ctx, today);
+    // Same mapping as the publisher service's nextToPublish call (apps/publisher/src/publish.ts).
+    const approved = packages
+      .filter((p) => p.coverStorageId)
+      .map((p) => ({ packageId: p.packageId, showDate: p.showDate, approvedAt: p.decidedAt ?? "" }));
+    const status = await ctx.db.query("mixcloudStatus").first();
+    // I3: a short code only (e.g. cover_unavailable), never a credential (Hard Rule 2 keeps those out of the row).
+    return {
+      dayOffset: publishDayOffset(approved, publishedToday, packageId, 3), mixcloudState: status?.state ?? "not_connected",
+      ...(status?.lastError ? { lastError: status.lastError } : {}),
+    };
+  },
+});
+
+/** R5: the cover the package page shows: the package's own, else the standard cover, else null. */
+export const coverPreview = query({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<string | null> => {
+    const doc = await realPackage(ctx, packageId);
+    const id = (doc?.draft as PackageDraft | undefined)?.coverStorageId ?? (doc ? process.env.STANDARD_COVER_STORAGE_ID : undefined);
+    if (!id) return null;
+    // A mistyped STANDARD_COVER_STORAGE_ID is not a storage id; show no cover rather than break the page.
+    return ctx.storage.getUrl(id as Id<"_storage">).catch(() => null);
+  },
+});
+
+export type DecideResult = { ok: true; record: PackageRecord } | { ok: false; code: GateErrorCode; message: string };
+export type CoverResult = DecideResult | { ok: false; code: "BAD_INPUT"; message: string };
+
+/** The only public mutation that decides a package (Hard Rule 1). */
 export const decide = mutation({
   args: { packageId: v.string(), fingerprint: v.string(), decision: v.union(v.literal("approve"), v.literal("skip")) },
   handler: async (ctx, { packageId, fingerprint, decision }): Promise<DecideResult> => {
@@ -62,6 +114,82 @@ export const decide = mutation({
   },
 });
 
+/**
+ * A signed-in real human picks the cover (or clears it with null) while the package awaits review. The cover goes
+ * public, so the package re-fingerprints and must be approved as it now looks.
+ */
+export const setCover = mutation({
+  args: { packageId: v.string(), storageId: v.union(v.id("_storage"), v.null()) },
+  handler: async (ctx, { packageId, storageId }): Promise<CoverResult> => {
+    const actor = await actorOf(ctx);
+    const forbidden = { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can change the cover" } as const;
+    if (workspaceOf(actor) !== "real") return forbidden;
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    if (doc && doc.workspace !== "real") return forbidden;
+    if (storageId) {
+      const file = await ctx.db.system.get(storageId);
+      if (!file?.contentType?.startsWith("image/")) return { ok: false, code: "BAD_INPUT", message: "The cover must be an image." };
+    }
+    try {
+      return { ok: true, record: await gateFor(ctx).setCover(packageId, storageId, actor!) };
+    } catch (e) {
+      if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
+      throw e;
+    }
+  },
+});
+
+/** A real package for a signed-in real human, or why not. Same FORBIDDEN for a demo package as for a demo caller. */
+async function staffOn(ctx: MutationCtx, packageId: string) {
+  const actor = await actorOf(ctx);
+  if (workspaceOf(actor) !== "real") return null;
+  const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+  return doc && doc.workspace !== "real" ? null : actor!;
+}
+
+const asResult = async (call: () => Promise<PackageRecord>): Promise<DecideResult> => {
+  try {
+    return { ok: true, record: await call() };
+  } catch (e) {
+    if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
+    throw e;
+  }
+};
+
+const STAFF_ONLY = { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can do this" } as const;
+
+/**
+ * I2: a failed or uncertain upload goes back to review (awaiting_review), so the host can fix it and approve again.
+ * A signed-in real human only; it never makes a package approved (Hard Rule 1).
+ */
+export const reopen = mutation({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    return asResult(() => gateFor(ctx).reopen(packageId, actor));
+  },
+});
+
+/** I2: the host checked Mixcloud and an uncertain upload is there: record its address as the receipt. */
+export const confirmPosted = mutation({
+  args: { packageId: v.string(), url: v.string() },
+  handler: async (ctx, { packageId, url }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    return asResult(() => gateFor(ctx).confirmPosted(packageId, url.trim(), actor));
+  },
+});
+
+/** A one-time Convex storage upload URL for a cover image. A signed-in real human only. */
+export const coverUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") throw new ConvexError({ code: "FORBIDDEN" });
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
 // Internal: reachable only with the deploy key (Plans 4 and 5).
 export const submit = internalMutation({
   args: { draft: v.any() },
@@ -81,6 +209,7 @@ const audioV = v.object({
   hour2Id: v.string(),
   mp3Sha256: v.string(),
   hour1DurationSec: v.optional(v.number()),
+  mp3Bytes: v.optional(v.number()),
 });
 
 export const attachAudio = internalMutation({

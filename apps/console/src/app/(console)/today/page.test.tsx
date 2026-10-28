@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const auth = { isSignedIn: false };
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => auth, SignOutButton: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock("convex/react", () => ({ useQuery: () => null }));
-vi.mock("../../../../convex/_generated/api", () => ({ api: { today: { summary: "today.summary" } } }));
+vi.mock("../../../../convex/_generated/api", () => ({ api: { today: { summary: "today.summary" }, media: { issues: "media.issues" } } }));
 vi.mock("@/components/Shell", () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   useWorkspace: () => "real",

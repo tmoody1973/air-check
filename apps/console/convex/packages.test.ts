@@ -1,6 +1,6 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
@@ -141,5 +141,87 @@ describe("packages.decide", () => {
     expect(blocked.map((r) => r.title)).toEqual(["Blocked evil.example"]);
     expect((await as.query(api.activity.list, {})).length).toBeGreaterThan(1);
     expect(await t.query(api.activity.list, {})).toEqual([]);
+  });
+});
+
+// I2: a failed or uncertain upload is not a dead end. Only a signed-in real human reopens it or confirms the post.
+describe("packages.reopen and packages.confirmPosted", () => {
+  const PUB = "p".repeat(48);
+  const SHOW = "https://www.mixcloud.com/rhythmlab/rlr-10-2-26/";
+  beforeEach(() => vi.stubEnv("PUBLISHER_TOKEN", PUB));
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function finished(t: ReturnType<typeof convexTest>, result: { status: "failed"; error: string } | { status: "outcome_unknown" }) {
+    const { id, fp } = await seed(t);
+    await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: id, result });
+    return { id, fp };
+  }
+  const doc = (t: ReturnType<typeof convexTest>) => t.run((ctx) => ctx.db.query("packages").first());
+
+  test("reopen: failed -> awaiting_review with the result and decision cleared; approve again to publish", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await finished(t, { status: "failed", error: "cover is not a usable image" });
+    const r = await t.withIdentity(human).mutation(api.packages.reopen, { packageId: id });
+    expect(r.ok && r.record.status).toBe("awaiting_review");
+    const d = await doc(t);
+    expect(d).toMatchObject({ status: "awaiting_review", fingerprint: fp });
+    expect(d?.result).toBeUndefined();
+    expect(d?.decidedBy).toBeUndefined();
+    expect((await rows(t)).at(-1)).toMatchObject({ title: "Package ready for your approval", kind: "waiting", result: "needs_you", packageId: id });
+    const again = await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    expect(again.ok && again.record.status).toBe("approved");
+  });
+
+  test("reopen after an audio failure: preparing_audio, the MP3 hash dropped, so media lists it again", async () => {
+    vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+    const t = convexTest(schema, modules);
+    const { id } = await finished(t, { status: "failed", error: "audio_changed" });
+    const r = await t.withIdentity(human).mutation(api.packages.reopen, { packageId: id });
+    expect(r.ok && r.record.status).toBe("preparing_audio");
+    const d = await doc(t);
+    expect(d?.draft.audio).toEqual({ hour1Id: "box-h1", hour2Id: "box-h2" });
+    expect(d?.fingerprint).toBeUndefined();
+    expect(await t.query(api.media.pending, { token: "m".repeat(48) })).toEqual([{ packageId: id, showDate: "2026-10-02" }]);
+  });
+
+  test("confirmPosted: outcome_unknown -> succeeded with the URL; a bad URL is refused", async () => {
+    const t = convexTest(schema, modules);
+    const { id } = await finished(t, { status: "outcome_unknown" });
+    const as = t.withIdentity(human);
+    expect(await as.mutation(api.packages.confirmPosted, { packageId: id, url: "https://evil.example/x" })).toMatchObject({ ok: false, code: "BAD_INPUT" });
+    expect((await doc(t))?.status).toBe("outcome_unknown");
+    const r = await as.mutation(api.packages.confirmPosted, { packageId: id, url: SHOW });
+    expect(r.ok && r.record.result?.url).toBe(SHOW);
+    expect((await doc(t))?.status).toBe("succeeded");
+    expect((await rows(t)).at(-1)).toMatchObject({ title: `Published package ${id}`, kind: "action", result: "done" });
+  });
+
+  test("anonymous, outside-domain and demo callers are refused and nothing changes", async () => {
+    const t = convexTest(schema, modules);
+    const { id } = await finished(t, { status: "outcome_unknown" });
+    const before = await doc(t);
+    for (const as of [t, t.withIdentity({ subject: "x", email: "x@gmail.com", emailVerified: true }), t.withIdentity({ subject: "d1", role: "demo" })]) {
+      expect(await as.mutation(api.packages.reopen, { packageId: id })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+      expect(await as.mutation(api.packages.confirmPosted, { packageId: id, url: SHOW })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    }
+    expect(await doc(t)).toEqual(before);
+  });
+
+  test("a demo package is never reopened by a real human", async () => {
+    const t = convexTest(schema, modules);
+    const draft = goldenDraft({ id: "demo-1", workspace: "demo", audio: { hour1Id: "h1", hour2Id: "h2" } });
+    await t.mutation(internal.packages.submit, { draft });
+    expect(await t.withIdentity(human).mutation(api.packages.reopen, { packageId: "demo-1" })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  });
+
+  test("reopen is refused while approved or after success", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t);
+    const as = t.withIdentity(human);
+    await as.mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
+    expect(await as.mutation(api.packages.reopen, { packageId: id })).toMatchObject({ ok: false, code: "NOT_READY" });
+    expect((await doc(t))?.status).toBe("approved");
   });
 });

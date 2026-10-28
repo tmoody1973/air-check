@@ -1,0 +1,31 @@
+# Air Check publisher: the only program that uploads to Mixcloud. Uploads human-approved packages (at most 3 per
+# America/Chicago day, oldest first), never retries an upload whose outcome is unknown, and sends Telegram
+# "ready to review" cards (a link only). Runs on the host, like the relay and media.
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable --now aircheck-publisher
+# The unlisted test (Task 7): stop this service, then run node dist/main.js --unlisted-test <packageId> as user.
+[Unit]
+Description=Air Check: Mixcloud publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=user
+EnvironmentFile=/home/user/.aircheck/publisher.env
+Environment=PATH=/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+WorkingDirectory=/home/user/aircheck-publisher
+# The state folder must exist before the sandbox is set up (ReadWritePaths needs it); "+" runs this one step unsandboxed.
+ExecStartPre=+/usr/bin/install -d -m 0700 -o user /home/user/.aircheck/publisher
+ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-publisher/dist/main.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+# Read-only: the prepared MP3s (/home/user/aircheck-audio/prepared), the Mixcloud token file and ~/.airc/secrets.env.
+ProtectHome=read-only
+# Write: only the state folder (sent card ids, the hash of a refused key), written by atomic rename. Never the rest
+# of ~/.aircheck, which holds every service's env file and the bridge CA private key (R24).
+ReadWritePaths=/home/user/.aircheck/publisher
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

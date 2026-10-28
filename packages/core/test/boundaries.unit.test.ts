@@ -7,9 +7,12 @@ test("agent importing the publisher is a violation", () => {
   expect(one("agent/tools/x.ts", 'import { upload } from "../../services/publisher/upload";')).toHaveLength(1);
 });
 
-test("Mixcloud upload URL outside the publisher is a violation", () => {
-  expect(one("apps/console/x.ts", 'fetch("https://api.mixcloud.com/upload/")')).toHaveLength(1);
-  expect(one("services/publisher/upload.ts", 'fetch("https://api.mixcloud.com/upload/")')).toEqual([]);
+test("Mixcloud upload URL outside the publisher's source is a violation", () => {
+  const upload = 'fetch("https://api.mixcloud.com/upload/")';
+  expect(one("apps/publisher/src/mixcloud.ts", upload)).toEqual([]);
+  for (const path of ["apps/console/x.ts", "apps/media/src/x.ts", "apps/relay/src/x.ts", "agent/x.ts", "apps/publisher/test/x.test.ts", "services/publisher/upload.ts", "deploy/publisher/x.sh"]) {
+    expect(one(path, upload), path).toEqual([`${path}: Mixcloud upload URL outside apps/publisher/src (Hard Rule 1)`]);
+  }
 });
 
 test("agent reading source or Mixcloud credentials is a violation", () => {
@@ -30,6 +33,7 @@ test("docs, skills, fixtures and markdown are exempt", () => {
 test("agent reaching the approval gate or publish steps is a violation", () => {
   expect(one("agent/tools/approve.ts", 'import { ApprovalGate } from "@aircheck/core";\nnew ApprovalGate(s)')).toHaveLength(1);
   expect(one("agent/tools/p.ts", "await gate.claimForPublish(id)")).toHaveLength(1);
+  expect(one("agent/tools/u.ts", 'await gate.unclaim(id, "invalid_token")')).toHaveLength(1);
   expect(one("agent/tools/q.ts", 'import { upload } from "@aircheck/publisher";')).toHaveLength(1);
   expect(one("agent/tools/ok.ts", 'import { parseTracklist } from "@aircheck/core";')).toEqual([]);
 });

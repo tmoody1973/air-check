@@ -70,4 +70,15 @@ describe("PlayerProvider", () => {
     expect(screen.getByText("Long title")).toBeInTheDocument();
     expect(screen.getByText("0:00:05 / 0:00:20")).toBeInTheDocument();
   });
+
+  it("a real MP3 has no known length until the browser reads it; then the bar and hour-2 tick use it", () => {
+    const real: PlayerTrack = { src: "/api/audio/pkg-10-2-26?v=abc", title: "RLR", hour2AtSec: 3600 };
+    const { container } = render(<PlayerProvider><PlayerBar track={real} /></PlayerProvider>);
+    expect(screen.getByText("0:00:00 / –:––:––")).toBeInTheDocument();
+    const audio = container.ownerDocument.querySelector("audio")!;
+    Object.defineProperty(audio, "duration", { configurable: true, value: 7200 });
+    fireEvent.durationChange(audio);
+    expect(screen.getByText("0:00:00 / 2:00:00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Jump to hour 2" })).toBeEnabled();
+  });
 });

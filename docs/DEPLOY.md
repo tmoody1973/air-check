@@ -54,9 +54,21 @@ unset CONVEX_DEPLOY_KEY
 
 ### The VM's env file
 
-Copy `deploy/console.env.example` to `~/.aircheck/console.env` on the VM, fill in the values, then `chmod 600` it. It holds seven names: the Convex URL, the Clerk publishable and secret keys, the app URL, the demo user id, and two telemetry-off switches. It has no Convex deploy key.
+Copy `deploy/console.env.example` to `~/.aircheck/console.env` on the VM, fill in the values, then `chmod 600` it. It holds ten names: the Convex URL, the Clerk publishable and secret keys, the app URL, the demo user id, two telemetry-off switches, and the three Mixcloud settings (`MIXCLOUD_CLIENT_ID`, `MIXCLOUD_CLIENT_SECRET`, and `MIXCLOUD_TOKEN_FILE`, which stays empty to mean `/mixcloud/token.json`). It has no Convex deploy key. In the Mixcloud app settings, the redirect URI must be exactly the app URL followed by `/api/mixcloud/callback`.
 
 The `NEXT_PUBLIC_*` values are baked into the image when it is built, so changing one needs a rebuild, not just a restart.
+
+### The Mixcloud token folder
+
+"Connect Mixcloud" in the console's Settings page writes the Mixcloud access token to `~/.aircheck/mixcloud/token.json`. The publisher (a separate service on the VM) is the only other thing that reads it. The token is never stored in Convex. The console container runs as user id 1000 and the VM's own user is 1001, so the folder is shared through its group. Create it before the first `up`, because Docker would otherwise create it owned by root and the console could not write to it:
+
+```sh
+mkdir -p ~/.aircheck/mixcloud ~/aircheck-audio/inbox ~/aircheck-audio/prepared
+sudo chown 1000:1001 ~/.aircheck/mixcloud
+sudo chmod 2770 ~/.aircheck/mixcloud   # owner 1000, group 1001; the 2 (setgid) makes new files group 1001
+```
+
+The console writes `token.json` with mode 640: the console can rewrite it and the publisher (group 1001) can read it, and no one else can. Check after connecting with `ls -ln ~/.aircheck/mixcloud` (expect `-rw-r----- 1000 1001`). "Disconnect" in Settings deletes the file. The container only mounts this folder read-write, plus `~/aircheck-audio/prepared` read-only for the player; the rest of the container stays read-only.
 
 ## Everyday commands (on the VM)
 
@@ -138,7 +150,7 @@ dc down
 ### Redo from scratch on a new VM
 
 1. Set up Docker and the firewall as in `docs/NEBIUS_SETUP.md`.
-2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above.
+2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above, and the Mixcloud token folder as in "The Mixcloud token folder".
 3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
 5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:
@@ -356,6 +368,18 @@ The unit sets `ProtectSystem=strict` (the whole filesystem is read-only to the r
 ### Convex settings the relay needs
 
 `RELAY_TOKEN` is set on both dev and prod, with different values. Every `relay.*` Convex function takes it as its first argument and fails closed (refuses the call) if the env var is missing or short. Set it from the Mac the same way as the other env vars: `npx convex env set RELAY_TOKEN <value>` in `apps/console`. `DEMO_AGENT_SUBMIT_TOKEN` is set on prod (it must equal the bridge's value). `DEMO_RUNS_PER_SESSION` (default 5 per 10 minutes), `DEMO_LIVE_RUNS_PER_DAY` (default 40) and `DEMO_LIVE` (0 forces scripted replies) are optional and unset, so the defaults apply.
+
+## The media service (the audio inbox)
+
+The media service (`apps/media`, unit `deploy/media/aircheck-media.service`) joins each show's two hour WAVs into the one MP3 that Tarik previews and Mixcloud gets. Audio arrives by copying the two WAVs into `~/aircheck-audio/inbox/<YYYY-MM-DD>/`, one folder per show date. Name the two files so their numbers sort in hour order (`1-hour.wav`, `2-hour.wav`), or give neither a number; a mix of the two is refused rather than guessed. The unit creates `~/aircheck-audio/inbox` and `~/aircheck-audio/prepared` before it starts.
+
+Copy each WAV under a temporary name and rename it only once the copy has finished, so the service never sees a half-copied file. Use ssh and `cat`, as for the relay:
+
+```sh
+ssh user@<the VM's static IP> 'mkdir -p ~/aircheck-audio/inbox/2026-10-02 && cd ~/aircheck-audio/inbox/2026-10-02 && cat > 1-hour.wav.part && mv 1-hour.wav.part 1-hour.wav' < 1-hour.wav
+```
+
+The `mv` runs only if `cat` finished (`&&`). A dropped connection leaves a `.part` file, which the service ignores; copy again. As a second guard, the service also waits until a WAV's header says the whole file is there and nothing has written to it for 2 minutes. Until then the Today page says "<date> is still copying (or the copy is incomplete)". Why: ffmpeg turns a cut-off WAV into a short MP3 without complaint, and that short show would have gone up.
 
 ## Certificates and renewal dates
 

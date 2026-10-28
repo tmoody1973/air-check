@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p packages/core && pnpm --filter console typecheck && pnpm --filter @aircheck/bridge typecheck && pnpm --filter @aircheck/relay typecheck",
+    "typecheck": "tsc --noEmit -p packages/core && pnpm --filter console typecheck && pnpm --filter @aircheck/bridge typecheck && pnpm --filter @aircheck/relay typecheck && pnpm --filter @aircheck/media typecheck && pnpm --filter @aircheck/publisher typecheck",
     "build": "pnpm --filter console build",
     "seed:demo": "pnpm --filter console exec convex run seed:seedDemo"
   },

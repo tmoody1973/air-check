@@ -1,4 +1,5 @@
-import { ApprovalGate, type Actor, actorFromIdentity } from "@aircheck/core";
+import { ApprovalGate, type Actor, actorFromIdentity, GateError } from "@aircheck/core";
+import { ConvexError } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { convexPackageStore } from "./packageStore";
 
@@ -22,18 +23,28 @@ export function workspaceOf(actor: Actor | null): Workspace | null {
   return actor?.kind === "demo" ? "demo" : actor?.kind === "human" ? "real" : null;
 }
 
-const ACTIVITY: Record<string, { kind: "waiting" | "action"; result: "needs_you" | "done"; title: (t: string) => string }> = {
+type ActivitySpec = { kind: "waiting" | "action"; result: "needs_you" | "done"; title: (title: string, id: string) => string };
+const ACTIVITY: Record<string, ActivitySpec> = {
   awaiting_review: { kind: "waiting", result: "needs_you", title: () => "Package ready for your approval" },
   approved: { kind: "action", result: "done", title: (t) => `Approved package ${t}` },
   skipped: { kind: "action", result: "done", title: (t) => `Skipped package ${t}` },
+  // Publish rows (R11) carry the package id and status only: no title, URL or error text.
+  publishing: { kind: "action", result: "done", title: (_t, id) => `Publishing package ${id}` },
+  succeeded: { kind: "action", result: "done", title: (_t, id) => `Published package ${id}` },
+  failed: { kind: "waiting", result: "needs_you", title: (_t, id) => `Publish failed for package ${id}` },
+  outcome_unknown: { kind: "waiting", result: "needs_you", title: (_t, id) => `Publish outcome unknown for package ${id}` },
 };
 
-/** A gate whose transitions write their activity row in the same mutation. Other transitions write none (Plan 5 adds publish rows). */
+// publisher.unclaim (publishing -> approved) is not an approval: nothing was sent (Mixcloud refused the key, or the
+// claim's answer was lost, M3), so the package is queued again. A refused key also alerts on Telegram and in Settings.
+const UNCLAIMED: ActivitySpec = { kind: "waiting", result: "needs_you", title: (_t, id) => `Package ${id} is back in the queue: nothing was sent to Mixcloud` };
+
+/** A gate whose transitions write their activity row in the same mutation. preparing_audio writes none. */
 export function gateFor(ctx: MutationCtx) {
   const store = convexPackageStore(ctx);
   return new ApprovalGate(store, {
     onTransition: async (t) => {
-      const spec = ACTIVITY[t.to];
+      const spec = t.from === "publishing" && t.to === "approved" ? UNCLAIMED : ACTIVITY[t.to];
       const rec = await store.get(t.id);
       if (!spec || !rec) return;
       await ctx.db.insert("activity", {
@@ -41,9 +52,19 @@ export function gateFor(ctx: MutationCtx) {
         at: Date.parse(t.at),
         kind: spec.kind,
         result: spec.result,
-        title: spec.title(rec.draft.title),
+        title: spec.title(rec.draft.title, t.id),
         packageId: t.id,
       });
     },
   });
+}
+
+/** Runs a gate call for a token-gated service. Only ConvexError data reaches a remote caller, so a GateError crosses as {code, message}. */
+export async function viaGate<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (e) {
+    if (e instanceof GateError) throw new ConvexError({ code: e.code, message: e.message });
+    throw e;
+  }
 }

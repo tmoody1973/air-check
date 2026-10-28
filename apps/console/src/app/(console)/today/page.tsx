@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { api } from "../../../../convex/_generated/api";
+import { AudioIssues } from "@/components/AudioIssues";
 import { Pill } from "@/components/Pill";
 import { SampleTag } from "@/components/SampleTag";
 import { Shell, useWorkspace } from "@/components/Shell";
@@ -33,6 +34,8 @@ const Empty = ({ children }: { children: ReactNode }) => <p className="text-sm t
 export default function TodayPage() {
   const workspace = useWorkspace();
   const s = useQuery(api.today.summary);
+  // Real workspace only (the query returns [] for anyone else), so demo never shows the card.
+  const audioIssues = useQuery(api.media.issues, {});
   const { isSignedIn } = useAuth();
 
   return (
@@ -74,6 +77,8 @@ export default function TodayPage() {
                   </ul>
                 )}
               </Card>
+
+              <AudioIssues issues={audioIssues ?? undefined} />
 
               <Card
                 title="Claims that failed verification"

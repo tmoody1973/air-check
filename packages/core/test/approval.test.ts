@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "vitest";
-import { type Actor, ApprovalGate, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
+import { type Actor, ApprovalGate, AUDIO_CHANGED, AUDIO_MISSING, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
 import { goldenDraft } from "./helpers/goldens";
 import { memoryStore } from "./helpers/memory-store";
 
@@ -209,4 +209,182 @@ test("flags and alternates are display-only: the fingerprint ignores them", asyn
   const withMp3 = { ...base, audio: { ...base.audio, mp3Sha256: MP3 } };
   expect(await fingerprint({ ...withMp3, flags: ["x"] })).toBe(await fingerprint(withMp3));
   expect(await fingerprint({ ...withMp3, alternates: ["y"] })).toBe(await fingerprint(withMp3));
+});
+
+// Plan 5 Task 2: cover art, MP3 size, result time.
+const COVER = "kg2cover0000000000000000000000000";
+
+test("a draft with no cover keeps today's fingerprint; a cover changes it", async () => {
+  const d = goldenDraft();
+  expect(await fingerprint({ ...d, coverStorageId: undefined })).toBe(await fingerprint(d));
+  expect(await fingerprint({ ...d, coverStorageId: COVER })).not.toBe(await fingerprint(d));
+});
+
+test("MP3 size is stored with the audio but not fingerprinted", async () => {
+  const rec = await gate.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3, mp3Bytes: 1234 });
+  expect(withAudio.draft.audio.mp3Bytes).toBe(1234);
+  expect(withAudio.fingerprint).toBe(await fingerprint({ ...withAudio.draft, audio: { hour1Id, hour2Id, mp3Sha256: MP3 } }));
+  expect((await gate.revise(rec.draft.id, goldenDraft())).draft.audio.mp3Bytes).toBe(1234);
+});
+
+test("setCover: a human sets and clears the cover while awaiting review, and it re-fingerprints", async () => {
+  const { id, fp } = await ready();
+  const set = await gate.setCover(id, COVER, tarik);
+  expect(set.draft.coverStorageId).toBe(COVER);
+  expect(set.status).toBe("awaiting_review");
+  expect(set.fingerprint).toBe(await fingerprint(set.draft));
+  expect(set.fingerprint).not.toBe(fp);
+  expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("PACKAGE_CHANGED");
+  const cleared = await gate.setCover(id, null, tarik);
+  expect(cleared.draft.coverStorageId).toBeUndefined();
+  expect(cleared.fingerprint).toBe(fp);
+});
+
+test("setCover: only a signed-in human, only while awaiting review", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.setCover(id, COVER, { kind: "agent" }))).toBe("FORBIDDEN");
+  expect(await code(gate.setCover(id, COVER, judge))).toBe("FORBIDDEN");
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.setCover(id, COVER, tarik))).toBe("NOT_READY");
+  const pending = await gate.submit(goldenDraft({ id: "pkg-x" }));
+  expect(await code(gate.setCover(pending.draft.id, COVER, tarik))).toBe("NOT_READY");
+});
+
+test("the agent cannot set the cover through submit or revise", async () => {
+  const rec = await gate.submit(goldenDraft({ coverStorageId: "agent-cover" }));
+  expect(rec.draft.coverStorageId).toBeUndefined();
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  await gate.setCover(rec.draft.id, COVER, tarik);
+  const revised = await gate.revise(rec.draft.id, goldenDraft({ coverStorageId: "agent-cover" }));
+  expect(revised.draft.coverStorageId).toBe(COVER);
+});
+
+test("recordResult stamps when the result arrived", async () => {
+  const at = new Date("2026-10-28T15:00:00Z");
+  const timed = new ApprovalGate(memoryStore(), { now: () => at });
+  const rec = await timed.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const { fingerprint: fp } = await timed.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  await timed.decide(rec.draft.id, fp!, "approve", tarik);
+  await timed.claimForPublish(rec.draft.id);
+  const done = await timed.recordResult(rec.draft.id, { status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/x/" });
+  expect(done.result).toEqual({ url: "https://www.mixcloud.com/rhythmlab/x/", at: at.toISOString() });
+});
+
+test("unclaim: publishing -> approved only, after Mixcloud refused the key (nothing was posted)", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // awaiting review
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // approved, never claimed
+  await gate.claimForPublish(id);
+  const back = await gate.unclaim(id, "invalid_token");
+  expect(back.status).toBe("approved");
+  expect(back.fingerprint).toBe(fp); // still the version Tarik approved
+  expect(transitions.at(-1)).toMatchObject({ id, from: "publishing", to: "approved", by: "publisher" });
+  expect(await gate.claimForPublish(id)).not.toBeNull(); // queued again once reconnected
+  await gate.recordResult(id, { status: "outcome_unknown" });
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // a result is final
+  expect(await code(gate.unclaim("nope", "invalid_token"))).toBe("NOT_READY");
+});
+
+// I2: failed and outcome_unknown are not dead ends. A human reopens (back to review, approve again) or confirms the post.
+const URL_OK = "https://www.mixcloud.com/rhythmlab/rlr-10-2-26/";
+async function settled(r: "failed" | "outcome_unknown") {
+  const { id, fp } = await ready({ id: `pkg-${r}` });
+  await gate.decide(id, fp, "approve", tarik);
+  await gate.claimForPublish(id);
+  await gate.recordResult(id, r === "failed" ? { status: "failed", error: "cover is not a usable image" } : { status: "outcome_unknown" });
+  return { id, fp };
+}
+
+test("reopen: failed or outcome_unknown -> awaiting_review, cleared and re-fingerprinted; Approve is needed again", async () => {
+  for (const r of ["failed", "outcome_unknown"] as const) {
+    const { id } = await settled(r);
+    const back = await gate.reopen(id, tarik);
+    expect(back.status).toBe("awaiting_review");
+    expect(back.result).toBeUndefined();
+    expect(back.decidedBy).toBeUndefined();
+    expect(back.decidedAt).toBeUndefined();
+    expect(back.fingerprint).toBe(await fingerprint(back.draft));
+    expect(transitions.at(-1)).toMatchObject({ id, from: r, to: "awaiting_review", by: "tarik@radiomilwaukee.org" });
+    expect(await gate.claimForPublish(id)).toBeNull(); // Hard Rule 1: reopening never yields approved
+    const again = await gate.decide(id, back.fingerprint!, "approve", tarik);
+    expect(again.status).toBe("approved");
+  }
+});
+
+test("reopen: only from failed or outcome_unknown, only a real-workspace human", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // awaiting review
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // approved
+  await gate.claimForPublish(id);
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // publishing
+  await gate.recordResult(id, { status: "succeeded", url: URL_OK });
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // succeeded is final
+  expect(await code(gate.reopen("nope", tarik))).toBe("NOT_FOUND");
+});
+
+test("reopen and confirmPosted refuse the agent, the demo login and outside domains", async () => {
+  const { id } = await settled("outcome_unknown");
+  for (const actor of [{ kind: "agent" } as Actor, judge, { kind: "human", userId: "u2", email: "x@gmail.com" } as Actor]) {
+    expect(await code(gate.reopen(id, actor))).toBe("FORBIDDEN");
+    expect(await code(gate.confirmPosted(id, URL_OK, actor))).toBe("FORBIDDEN");
+  }
+});
+
+test("confirmPosted: outcome_unknown -> succeeded with the URL, stamped now (counts toward that day's pacing)", async () => {
+  const at = new Date("2026-10-28T15:00:00Z");
+  const timed = new ApprovalGate(memoryStore(), { now: () => at, onTransition: async (t) => void transitions.push(t) });
+  const rec = await timed.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const { fingerprint: fp } = await timed.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  const id = rec.draft.id;
+  await timed.decide(id, fp!, "approve", tarik);
+  expect(await code(timed.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY"); // approved
+  await timed.claimForPublish(id);
+  await timed.recordResult(id, { status: "outcome_unknown" });
+  for (const bad of ["http://www.mixcloud.com/x/", "https://mixcloud.com/x/", "https://www.mixcloud.com.evil.com/x", "javascript:alert(1)", ""])
+    expect(await code(timed.confirmPosted(id, bad, tarik))).toBe("BAD_INPUT");
+  const done = await timed.confirmPosted(id, URL_OK, tarik);
+  expect(done.status).toBe("succeeded");
+  expect(done.result).toEqual({ url: URL_OK, at: at.toISOString() });
+  expect(transitions.at(-1)).toMatchObject({ id, from: "outcome_unknown", to: "succeeded", by: "tarik@radiomilwaukee.org" });
+  expect(await code(timed.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY"); // already succeeded
+});
+
+test("confirmPosted: a failed upload cannot be marked posted (it was refused, so it is not up)", async () => {
+  const { id } = await settled("failed");
+  expect(await code(gate.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY");
+});
+
+// Follow-up (Tarik's ruling): an audio failure reopens to preparing_audio, so media rebuilds the MP3.
+test("reopen after audio_changed or audio_missing: back to preparing_audio with only the hour ids kept", async () => {
+  for (const error of [AUDIO_CHANGED, AUDIO_MISSING]) {
+    const { id, fp } = await ready({ id: `pkg-${error}` });
+    await gate.decide(id, fp, "approve", tarik);
+    await gate.claimForPublish(id);
+    const failed = await gate.recordResult(id, { status: "failed", error });
+    const back = await gate.reopen(id, tarik);
+    expect(back.status).toBe("preparing_audio");
+    expect(back.draft.audio).toEqual({ hour1Id: failed.draft.audio.hour1Id, hour2Id: failed.draft.audio.hour2Id });
+    expect(back.fingerprint).toBeUndefined();
+    expect(back.result).toBeUndefined();
+    expect(back.decidedBy).toBeUndefined();
+    expect(back.decidedAt).toBeUndefined();
+    expect(transitions.at(-1)).toMatchObject({ id, from: "failed", to: "preparing_audio", by: "tarik@radiomilwaukee.org" });
+    expect(await gate.claimForPublish(id)).toBeNull(); // Hard Rule 1: never approved
+    expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("NOT_READY"); // needs the rebuilt MP3 first
+    const rebuilt = await gate.attachAudio(id, { ...back.draft.audio, mp3Sha256: "d".repeat(64) });
+    expect(rebuilt.status).toBe("awaiting_review");
+    expect(rebuilt.fingerprint).not.toBe(fp);
+  }
+});
+
+test("other failures still reopen to awaiting_review", async () => {
+  const { id } = await settled("failed"); // "cover is not a usable image"
+  expect((await gate.reopen(id, tarik)).status).toBe("awaiting_review");
 });

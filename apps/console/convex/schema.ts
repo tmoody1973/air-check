@@ -5,6 +5,13 @@ export const workspaceV = v.union(v.literal("real"), v.literal("demo"));
 export const resultV = v.union(v.literal("needs_you"), v.literal("done"), v.literal("allowed"), v.literal("blocked"));
 export const kindV = v.union(v.literal("waiting"), v.literal("action"), v.literal("network"));
 
+export const mixcloudStatusFields = {
+  state: v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected")),
+  account: v.optional(v.string()),
+  connectedAt: v.optional(v.number()),
+  lastError: v.optional(v.string()),
+};
+
 export const runStatusV = v.union(
   v.literal("queued"), v.literal("running"), v.literal("stopping"),
   v.literal("completed"), v.literal("cancelled"), v.literal("failed"),
@@ -20,7 +27,8 @@ export default defineSchema({
     fingerprint: v.optional(v.string()),
     decidedBy: v.optional(v.string()),
     decidedAt: v.optional(v.string()),
-    result: v.optional(v.object({ url: v.optional(v.string()), error: v.optional(v.string()) })),
+    // `at`: when the publisher reported the result (ISO); paces the 3-per-day limit.
+    result: v.optional(v.object({ url: v.optional(v.string()), error: v.optional(v.string()), at: v.optional(v.string()) })),
   })
     .index("by_packageId", ["packageId"])
     .index("by_workspace_status", ["workspace", "status"]),
@@ -38,6 +46,10 @@ export default defineSchema({
   })
     .index("by_workspace_at", ["workspace", "at"])
     .index("by_workspace_key", ["workspace", "key"]),
+  // Why a show's audio is not ready yet. The media service replaces the whole set on every scan (media.waiting).
+  audioIssues: defineTable({ showDate: v.string(), reason: v.string(), updatedAt: v.number() }),
+  // One row (real workspace). Hard Rule 2: no credential here; the Mixcloud token lives only in the publisher's token file.
+  mixcloudStatus: defineTable(mixcloudStatusFields),
   // One row per workspace, upserted by the relay every few minutes (relay.status).
   sandboxStatus: defineTable({
     workspace: workspaceV,

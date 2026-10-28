@@ -17,4 +17,5 @@ export const NAV: readonly NavItem[] = [
   item("release-radar", "Release radar"),
   item("trust", "Trust", true),
   item("skills", "Skills and memory"),
+  item("settings", "Settings", true),
 ];

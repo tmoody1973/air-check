@@ -24,6 +24,11 @@ describe("deploy files", () => {
     expect(web.env_file).toBe("${HOME}/.aircheck/console.env");
   });
 
+  it("console mounts only the Mixcloud token folder (rw) and the prepared audio (ro)", () => {
+    expect(web.read_only).toBe(true);
+    expect(web.volumes).toEqual(["${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/aircheck-audio/prepared:/audio:ro"]);
+  });
+
   it("caddy keeps only the bind capability", () => {
     expect(caddy.cap_drop).toEqual(["ALL"]);
     expect(caddy.cap_add).toEqual(["NET_BIND_SERVICE"]);
@@ -87,6 +92,7 @@ describe("deploy files", () => {
     expect(lines.map((l) => l.split("=")[0])).toEqual([
       "NEXT_PUBLIC_CONVEX_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_APP_URL",
       "CLERK_SECRET_KEY", "AIRCHECK_DEMO_USER_ID", "NEXT_TELEMETRY_DISABLED", "CLERK_TELEMETRY_DISABLED",
+      "MIXCLOUD_CLIENT_ID", "MIXCLOUD_CLIENT_SECRET", "MIXCLOUD_TOKEN_FILE",
     ]);
   });
 
@@ -130,5 +136,19 @@ describe("deploy files", () => {
     expect(execs.length).toBeGreaterThanOrEqual(3);
     for (const l of execs) expect(l).toMatch(/^Exec\w+=-/);
     expect(execs.join("\n")).not.toMatch(/\bairc\b(?!demo)/);
+  });
+
+  it("the media unit creates its audio folders before the sandbox needs them (M4)", () => {
+    const unit = read("media/aircheck-media.service");
+    expect(unit).toMatch(
+      /^ExecStartPre=\+\/usr\/bin\/install -d -m 0755 -o user -g user \/home\/user\/aircheck-audio \/home\/user\/aircheck-audio\/inbox \/home\/user\/aircheck-audio\/prepared$/m,
+    );
+    expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
+  });
+
+  it("DEPLOY copies WAVs under a temporary name so a half-copied file is never an inbox WAV (C1)", () => {
+    const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
+    expect(doc).toMatch(/cat > [^\n']*\.wav\.part && mv [^\n']*\.wav\.part [^\n']*\.wav/);
+    expect(doc).toMatch(/mkdir -p [^\n]*~\/aircheck-audio\/inbox/);
   });
 });
