@@ -21,8 +21,8 @@ export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: ne
 export interface ScanDeps {
   convex: IngestConvex; log: (line: string) => void; memory: SourceMemory;
   tokenDir: string; inboxDir: string; preparedDir: string;
-  /** null: BOX_* not set. `key` is the refusal hash of the client credentials. */
-  box: { client: BoxClient; folderId: string; key: string } | null;
+  /** null: BOX_* not set. */
+  box: { client: BoxClient; folderId: string } | null;
   /** null: the app's client id/secret are not set. Called with the token file's refresh token, once per scan. */
   google: ((refreshToken: string) => DriveClient) | null;
   dropbox: ((refreshToken: string) => DropboxClient) | null;
@@ -53,9 +53,9 @@ async function report(deps: ScanDeps, r: SourceReport): Promise<void> {
  * Reads one source. A refused credential is remembered and reported as needs_reconnect (Settings and Episodes say
  * "Reconnect needed"); a provider that is merely down is skipped this scan with its status left alone.
  */
-async function guarded<T>(deps: ScanDeps, source: SourceName, key: string, account: string | undefined, read: () => Promise<{ value: T; count: number }>): Promise<T | null> {
+async function guarded<T>(deps: ScanDeps, source: SourceName, key: string | null, account: string | undefined, read: () => Promise<{ value: T; count: number }>): Promise<T | null> {
   const who = account ? { account } : {};
-  const refused = deps.memory.refused.get(key);
+  const refused = key === null ? undefined : deps.memory.refused.get(key);
   if (refused) {
     await report(deps, { source, state: "needs_reconnect", ...who, lastError: refused });
     return null;
@@ -69,7 +69,7 @@ async function guarded<T>(deps: ScanDeps, source: SourceName, key: string, accou
   } catch (e) {
     deps.log(`ingest step=scan source=${source} ok=false error=${code(e)}`);
     if (e instanceof AuthRefused) {
-      deps.memory.refused.set(key, e.code);
+      if (key !== null) deps.memory.refused.set(key, e.code);
       await report(deps, { source, state: "needs_reconnect", ...who, lastError: e.code });
     }
     return null;
@@ -90,8 +90,10 @@ async function readBox(deps: ScanDeps): Promise<Map<string, BoxFolder[]> | null>
     await report(deps, { source: "box", state: "not_connected", lastError: "not_configured" });
     return null;
   }
-  const { client, folderId, key } = deps.box;
-  return guarded(deps, "box", key, undefined, async () => {
+  const { client, folderId } = deps.box;
+  // Box has no Reconnect button: the fix is an admin authorising the app, with the same credentials. So a refusal is
+  // not remembered; it is tried again next scan (once an hour, not a loop) and needs no restart once fixed.
+  return guarded(deps, "box", null, undefined, async () => {
     const byDate = new Map<string, BoxFolder[]>();
     for (const f of await client.items(folderId)) {
       const date = f.type === "folder" ? dated(f.name) : null;

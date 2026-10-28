@@ -120,7 +120,7 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     expect(w.cv.lastSource("google")).toEqual({ source: "google", state: "needs_reconnect", lastError: "invalid_token_file" });
   });
 
-  test("Box not configured → not_connected; Box refusing the client credentials → needs_reconnect, not retried", async () => {
+  test("Box not configured → not_connected; Box refusing the client credentials → needs_reconnect, tried once per scan", async () => {
     const w = await make({ box: false });
     await runScan(w.deps);
     expect(w.cv.lastSource("box")).toEqual({ source: "box", state: "not_connected", lastError: "not_configured" });
@@ -130,7 +130,8 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     await runScan(v.deps);
     await runScan(v.deps);
     expect(v.cv.lastSource("box")).toEqual({ source: "box", state: "needs_reconnect", lastError: "invalid_client" });
-    expect(v.box.calls("POST /oauth2/token")).toHaveLength(1);
+    expect(v.box.calls("POST /oauth2/token")).toHaveLength(2); // no Reconnect button: an admin's fix needs no restart
+    expect(v.cv.sources.filter((s) => s.source === "box")).toHaveLength(1);
     expect(v.google.calls("GET /drive/v3/files")).toHaveLength(2);
   });
 

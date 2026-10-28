@@ -7,7 +7,6 @@ import { dropboxClient } from "./dropbox.js";
 import { fetchPass } from "./fetch.js";
 import { realHttp } from "./http.js";
 import { newMemory, runScan, type ScanDeps } from "./scan.js";
-import { refusalKey } from "./tokens.js";
 
 // Hard Rule 8: journald (stdout) only, and only `ingest date=... step=... ok=... ms=...` lines: dates, steps, counts,
 // codes and timings. Never a file or doc name, notes text, a token or a URL.
@@ -35,7 +34,7 @@ function main(): void {
   }
   const { box, google, dropbox } = config;
   const convex = connectConvex(config.convexUrl, config.ingestToken);
-  const boxSide = box ? { client: boxClient(realHttp, box), folderId: box.folderId, key: refusalKey("box", box.clientId, box.clientSecret, box.enterpriseId) } : null;
+  const boxSide = box ? { client: boxClient(realHttp, box), folderId: box.folderId } : null;
   const scanDeps: ScanDeps = {
     convex, log, memory: newMemory(), tokenDir: config.tokenDir, inboxDir: config.inboxDir, preparedDir: config.preparedDir,
     box: boxSide,

@@ -97,7 +97,7 @@ export async function world(o: WorldOptions = {}) {
   const logs: string[] = [];
   const deps: ScanDeps = {
     convex: cv.convex, log: (l) => logs.push(l), memory: newMemory(), tokenDir, inboxDir, preparedDir,
-    box: o.box === false ? null : { client: scaledBox, folderId: "123", key: "box-key" },
+    box: o.box === false ? null : { client: scaledBox, folderId: "123" },
     google: (rt) => driveClient(http, { clientId: "gid", clientSecret: "gsecret" }, rt, { tokenUrl: `${google.base}/token`, api: `${google.base}/drive/v3` }),
     dropbox: (rt) => dropboxClient(http, { clientId: "did", clientSecret: "dsecret" }, rt, { tokenUrl: `${dropbox.base}/oauth2/token`, api: `${dropbox.base}/2`, content: `${dropbox.base}/2` }),
   };
