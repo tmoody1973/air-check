@@ -4,6 +4,8 @@ import {
   formatTrack,
   nextAudioToFetch,
   nextToDraft,
+  rerunCandidate,
+  assembleEpisode,
   parsePaperExport,
   parseTracklist,
   reconcile,
@@ -180,4 +182,56 @@ test("skipped episodes are never picked for audio or drafting", () => {
   expect(nextAudioToFetch(eps, 0)).toBeNull();
   expect(nextToDraft(eps, 0)).toBeNull();
   expect(nextToDraft([...eps, ep("2026-02-01")], 0)?.showDate).toBe("2026-02-01");
+});
+
+const tr = (n: number) => Array.from({ length: n }, (_, i) => ({ artist: `Artist ${i}`, title: `Song ${i}` }));
+const earlier = ep("2026-03-06", { tracks: tr(20) });
+
+test("rerun status: rerunOf wins over derived, never picked, package status still wins", () => {
+  const r = ep("2026-04-03", { rerunOf: "2026-03-06", rerunSource: "chat" });
+  expect(episodeStatus(r).status).toBe("rerun");
+  expect(nextAudioToFetch([r], 0)).toBeNull();
+  expect(nextToDraft([r], 0)).toBeNull();
+  expect(episodeStatus({ ...r, packageStatus: "awaiting_review" }).status).toBe("awaiting-review");
+});
+
+test("rerunCandidate: track overlap threshold, earliest best match", () => {
+  const mine = (n: number) => ep("2026-04-03", { tracks: [...tr(n), ...Array.from({ length: 20 - n }, (_, i) => ({ artist: "New", title: `T${i}` }))] });
+  expect(rerunCandidate(mine(17), [earlier])?.of).toBe("2026-03-06");
+  expect(rerunCandidate(mine(10), [earlier])).toBeNull();
+  const dup = ep("2026-03-13", { tracks: tr(20) });
+  expect(rerunCandidate(mine(17), [dup, earlier])?.of).toBe("2026-03-06");
+  expect(rerunCandidate(mine(20), [ep("2026-05-01", { tracks: tr(20) })])).toBeNull();
+});
+
+test("rerunCandidate: normalizes feat. and punctuation", () => {
+  const a = ep("2026-03-06", { tracks: [{ artist: "A", title: "Song (Again)" }] });
+  const b = ep("2026-04-03", { tracks: [{ artist: "a", title: "song again feat. X" }] });
+  expect(rerunCandidate(b, [a])?.of).toBe("2026-03-06");
+});
+
+test("rerunCandidate: older MMDDYY stamp, evergreen title", () => {
+  expect(rerunCandidate(ep("2026-04-03", { stampDate: "2026-03-06" }), [])?.of).toBe("2026-03-06");
+  expect(rerunCandidate(ep("2026-04-03", { stampDate: "2026-04-03" }), [])).toBeNull();
+  const g = rerunCandidate(ep("2026-04-03", { docTitle: "Rhythm Lab Radio 4-3-26 (evergreen)" }), []);
+  expect(g?.reason).toMatch(/evergreen/);
+  expect(showDateFromTitle("Rhythm Lab Radio 4-3-26 (evergreen)")).toEqual({ ok: true, date: "2026-04-03" });
+});
+
+test("rerunCandidate: skipped when already a rerun or declined", () => {
+  const base = { stampDate: "2026-03-06", docTitle: "x (evergreen)", tracks: tr(20) };
+  expect(rerunCandidate(ep("2026-04-03", { ...base, rerunDeclined: true }), [earlier])).toBeNull();
+  expect(rerunCandidate(ep("2026-04-03", { ...base, rerunOf: "2026-03-06" }), [earlier])).toBeNull();
+});
+
+test("assemble exposes the MMDDYY stamp date", () => {
+  const f = (name: string) => ({ id: name, name, size: 600_000_000 });
+  const a = assembleEpisode("3-6-26", [
+    f("RLR - Full Hour 1 - 030626.wav"),
+    f("RLR - Full Hour 2 - 030626.wav"),
+  ]);
+  expect(a.stampDate).toBe("2026-03-06");
+  const m = assembleEpisode("4-3-26", [f("RLR - Full Hour 1 - 030626.wav"), f("RLR - Full Hour 2 - 030626.wav")]);
+  expect(m.status).toBe("ask");
+  expect(m.stampDate).toBe("2026-03-06");
 });

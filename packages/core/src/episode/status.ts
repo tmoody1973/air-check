@@ -19,6 +19,17 @@ export interface EpisodeFacts {
   packageStatus: LinkedPackageStatus;
   /** Set by the ingest service once the WAVs are local. */
   audioOnDisk?: boolean;
+  /** Set once a person (or chat) says this show repeats an earlier one. */
+  rerunOf?: string;
+  rerunSource?: "chat" | "episodes" | "detected";
+  /** The person answered No to "is this a rerun?". */
+  rerunDeclined?: true;
+  /** Reconciled tracks, for rerun detection. */
+  tracks?: { artist: string; title: string }[];
+  /** assembleEpisode's stampDate. */
+  stampDate?: string;
+  /** Drive doc title. */
+  docTitle?: string;
 }
 
 export type EpisodeStatus =
@@ -32,7 +43,8 @@ export type EpisodeStatus =
   | "published"
   | "failed"
   | "outcome-unknown"
-  | "skipped";
+  | "skipped"
+  | "rerun";
 
 export interface EpisodeStatusResult {
   status: EpisodeStatus;
@@ -59,6 +71,7 @@ export function episodeStatus(e: EpisodeFacts): EpisodeStatusResult {
 
   const fromPackage = FROM_PACKAGE[e.packageStatus];
   if (fromPackage) return { status: fromPackage, gaps };
+  if (e.rerunOf) return { status: "rerun", gaps };
 
   // An answered question no longer blocks; an unanswered one, or an audio "ask" nobody has answered, does.
   const unresolved = e.questions.some((q) => !q.answer);

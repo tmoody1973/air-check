@@ -25,3 +25,4 @@ export * from "./episode/status";
 export * from "./episode/pacing";
 export * from "./episode/paper";
 export * from "./episode/dates";
+export * from "./episode/rerun";
