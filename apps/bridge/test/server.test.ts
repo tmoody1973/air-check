@@ -22,15 +22,16 @@ let port: number;
 let bareServer: Server; // same config minus the demo pair
 let barePort: number;
 let convexStub: HttpServer;
-const convexHits: { auth?: string; body: string }[] = [];
+const convexHits: { auth?: string; body: string; url?: string }[] = [];
 
 beforeAll(async () => {
   convexStub = createHttpServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
-      convexHits.push({ auth: req.headers.authorization, body });
-      res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub" }));
+      convexHits.push({ auth: req.headers.authorization, body, url: req.url });
+      const revise = req.url === "/agent/packages/revise";
+      res.writeHead(revise ? 200 : 201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", ...(revise && { status: "awaiting_review" }) }));
     });
   });
   await new Promise<void>((r) => convexStub.listen(0, "127.0.0.1", r));
@@ -149,9 +150,9 @@ describe("bridge HTTPS server", () => {
     expect(r.status).toBe(400);
   });
 
-  it("/aircheck/mcp lists package_submit only", async () => {
+  it("/aircheck/mcp lists package_submit and package_revise only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
-    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit"]);
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise"]);
   });
 
   it("/aircheck/mcp refuses an unknown tool name", async () => {
@@ -179,9 +180,25 @@ describe("bridge HTTPS server", () => {
     expect(JSON.parse(convexHits[0]!.body)).not.toHaveProperty("extra");
   });
 
+  it("/aircheck/mcp package_revise reaches the Convex revise route and returns back-in-review text", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_revise", arguments: { packageId: "pkg-stub", description: "d", status: "approved" } }),
+    });
+    const out = JSON.parse(r.body).result;
+    expect(out.isError).toBe(false);
+    expect(out.content[0].text).toMatch(/^Revised pkg-stub/);
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.url).toBe("/agent/packages/revise");
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
+    expect(JSON.parse(convexHits[0]!.body)).toEqual({ packageId: "pkg-stub", description: "d" });
+  });
+
   it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
     const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
-    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit"]);
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise"]);
     convexHits.length = 0;
     const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
     const r = await send("/aircheck-demo/mcp", {

@@ -10,7 +10,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { packageSubmitTool } from "./aircheckTools.js";
+import { packageReviseTool, packageSubmitTool } from "./aircheckTools.js";
 import { bearerOk } from "./auth.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import { createCrateProxy } from "./crateProxy.js";
@@ -94,18 +94,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
   await transport.handleRequest(req, res, body);
 }
 
-/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit),
- * and /aircheck-demo/mcp (the same tool, demo workspace) when the demo token pair is configured. */
+/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit, package_revise),
+ * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   const crate = createCrateProxy(config.crate);
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
-    const submit = packageSubmitTool({ siteUrl: config.convexSiteUrl, token: submitToken });
+    const tools = [packageSubmitTool, packageReviseTool].map((make) => make({ siteUrl: config.convexSiteUrl, token: submitToken }));
     return {
       token,
-      listTools: async () => [submit.tool],
+      listTools: async () => tools.map((t) => t.tool),
       callTool: async (name, args) => {
-        if (name !== submit.tool.name) throw new Error(`Tool ${name} is not available`);
-        return submit.call(args);
+        const t = tools.find((x) => x.tool.name === name);
+        if (!t) throw new Error(`Tool ${name} is not available`);
+        return t.call(args);
       },
     };
   };
