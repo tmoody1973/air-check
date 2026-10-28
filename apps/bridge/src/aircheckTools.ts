@@ -1,5 +1,6 @@
 import type { AgentPackageInput } from "@aircheck/core";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { DESCRIPTION_SKILL_TEXT } from "./descriptionSkill.js";
 
 const str = (description: string) => ({ type: "string", description });
 const strs = (description: string) => ({ type: "array", items: { type: "string" }, description });
@@ -146,7 +147,8 @@ export function packageReviseTool(opts: { siteUrl: string; token: string; fetch?
 
 /**
  * `package_get`: read-only. The package's tracklist, title, tags and current description (for a show on Mixcloud, the
- * live one and any open update's status), so the agent can rewrite a description it never saw. It changes nothing.
+ * live one and any open update's status), so the agent can rewrite a description it never saw, plus `descriptionGuide`
+ * (the rlr-description-safety skill text). It changes nothing.
  */
 export function packageGetTool(opts: { siteUrl: string; token: string; fetch?: typeof fetch }): PackageSubmitTool {
   const doFetch = opts.fetch ?? fetch;
@@ -156,7 +158,7 @@ export function packageGetTool(opts: { siteUrl: string; token: string; fetch?: t
     tool: {
       name: "package_get",
       description:
-        "Read-only: read a package's tracklist, title, tags and current public description, e.g. before rewriting it with package_revise. It changes nothing.",
+        "Read-only: read a package's tracklist, title, tags and current public description, e.g. before rewriting it with package_revise. It changes nothing. Before writing or revising a description, follow descriptionGuide exactly; it overrides the current description's style.",
       inputSchema: { type: "object", properties: { packageId: str("The package id, e.g. pkg-10-2-26") }, required: ["packageId"], additionalProperties: false },
     },
 
@@ -166,7 +168,8 @@ export function packageGetTool(opts: { siteUrl: string; token: string; fetch?: t
       const id = String((args as { packageId?: unknown } | null)?.packageId ?? "the package");
       switch (res.status) {
         case 200:
-          return result(JSON.stringify(res.data, null, 2));
+          // The skill rides along because the model does not reliably open it on its own (live test, Oct 28).
+          return result(JSON.stringify({ ...res.data, descriptionGuide: DESCRIPTION_SKILL_TEXT }, null, 2));
         case 400:
           return result(["Not read:", ...problemList(res.data).map((p) => `- ${p}`)].join("\n"), true);
         case 404:

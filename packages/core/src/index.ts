@@ -6,6 +6,7 @@ export * from "./episode/assemble";
 export * from "./package/title";
 export * from "./stations";
 export * from "./package/description";
+export * from "./package/descriptionSkill";
 export * from "./package/mixcloud";
 export * from "./package/build";
 export * from "./package/fingerprint";
