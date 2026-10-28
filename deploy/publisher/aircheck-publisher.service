@@ -24,7 +24,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 # Write: only the state folder (sent card ids, the hash of a refused key), written by atomic rename. Never the rest
 # of ~/.aircheck, which holds every service's env file and the bridge CA private key (R24).
-ReadWritePaths=/home/user/.aircheck/publisher
+ReadWritePaths=-/home/user/.aircheck/publisher
 PrivateTmp=yes
 
 [Install]

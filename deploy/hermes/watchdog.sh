@@ -19,6 +19,8 @@ PROBES=(
   "Demo Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8643/health"
   "Crate bridge|curl -sf -m 5 -o /dev/null --cacert ${HOME}/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz"
   "Relay|systemctl is-active --quiet aircheck-relay"
+  "Media|systemctl is-active --quiet aircheck-media"
+  "Publisher|systemctl is-active --quiet aircheck-publisher"
 )
 
 down=()
