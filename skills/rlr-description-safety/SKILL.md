@@ -37,6 +37,7 @@ Format only (a placeholder, not a real result):
 - Anything under a `VERIFY` flag or in a "Pre-Air Verify List", unless it has since been confirmed by a source the agent can cite.
 - Time-relative phrases: "out today", "out this week", "this week's show", "next Friday", "coming October 23". Use no dates for future releases at all.
 - Never mention health, age or death. List it in the review flags for Tarik.
+  - Exception, tribute shows: only when Tarik's own input (the tracklist header or his Chat message) says the show is a tribute to an artist who has died, you may say so plainly (e.g. "honoring the late D'Angelo"). Confirm the death through Crate (Wikipedia) and list it in `descriptionSources`. Never give the cause, the age or any health detail. Still list it in the review flags. Never decide on your own that a show is a tribute.
 - Personal family, legal, or other private details about artists, even when they appear in the show notes. Notes marked "handle with care on-air" are a strong signal. When unsure, leave it out and mention it in the review flags.
 - Talk-break scripting and "Angle" or "Transition" lines. Those are on-air prep, not description copy. No on-air talk, scripts or social copy.
 - The tracklist. It goes in Mixcloud `sections` (artist and song only).

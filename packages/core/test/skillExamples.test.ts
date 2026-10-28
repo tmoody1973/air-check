@@ -39,4 +39,11 @@ describe("rlr-description-safety skill examples", () => {
     expect(skill).not.toMatch(/Rhythm Lab Radio, week of/);
     expect(skill).toMatch(/^---\nname: rlr-description-safety\ndescription: .+\n---/);
   });
+
+  it("keeps the death rule and its narrow tribute-show exception", () => {
+    expect(skill).toMatch(/Never mention health, age or death/);
+    const exception = skill.split("\n").find((l) => /tribute/i.test(l)) ?? "";
+    for (const key of ["tribute", "Never decide on your own", "cause", "age", "descriptionSources", "review flags"])
+      expect(exception).toContain(key);
+  });
 });
