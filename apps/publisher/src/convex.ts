@@ -9,7 +9,7 @@ export interface MixcloudStatus { state: "connected" | "needs_reconnect" | "not_
 /** Plan 5c Task 4: an approved description update, claimed (now pushing). `showUrl` is the package's own receipt URL. */
 export interface UpdateClaim { id: string; packageId: string; description: string; showUrl: string }
 /** How a push ended. `retry`: no clear answer (Convex counts the try); `unclaim`: Mixcloud refused the key, nothing sent. */
-export type UpdateOutcome = { status: "pushed" } | { status: "failed"; error: string } | { status: "retry" } | { status: "unclaim" };
+export type UpdateOutcome = { status: "pushed" } | { status: "failed"; error: string } | { status: "retry" } | { status: "unconfirmed" } | { status: "unclaim" };
 export type PublishResult = { status: "succeeded"; url: string } | { status: "failed"; error: string } | { status: "outcome_unknown" };
 
 /** Everything the publisher needs from Convex. The token lives inside the real implementation. */

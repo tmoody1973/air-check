@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { AUDIO_CHANGED, AUDIO_MISSING, type PackageDraft, nextToPublish, toMixcloudFields, validateForUpload } from "@aircheck/core";
-import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem } from "./convex.js";
+import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem, UpdateOutcome } from "./convex.js";
 import { timed, whoTag, type Who } from "./log.js";
 import { editDescription, imageType, MAX_COVER_BYTES, readTokenFile, showEditUrl, uploadShow, type EditOutcome, type UploadOutcome } from "./mixcloud.js";
 import type { StateBox } from "./state.js";
@@ -273,7 +273,8 @@ export async function updatePass(deps: PublishDeps): Promise<void> {
     await settle(deps, who, "update_record", () => deps.convex.recordUpdate(u.id, { status: "unclaim" }));
     return deps.report({ ...conn.status, state: "needs_reconnect", lastError: "invalid_token" });
   }
-  const outcome = out.kind === "pushed" ? { status: "pushed" as const } : out.kind === "failed" ? { status: "failed" as const, error: out.code } : { status: "retry" as const };
+  const outcome: UpdateOutcome =
+    out.kind === "pushed" || out.kind === "retry" || out.kind === "unconfirmed" ? { status: out.kind } : { status: "failed", error: out.code };
   await settle(deps, who, "update_record", () => deps.convex.recordUpdate(u.id, outcome));
 }
 

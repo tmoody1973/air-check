@@ -136,7 +136,7 @@ test("descriptionUpdates: proposals are only ever inserted as proposed; only app
   expect(record.indexOf(`u?.status !== "pushing"`)).toBeGreaterThan(0);
   expect(record.indexOf(`u?.status !== "pushing"`)).toBeLessThan(record.indexOf(`status: "approved"`));
   expect(fnBody(text, "async function retryLater(")).toMatch(/status: "approved"/);
-  expect(text.match(/retryLater\(ctx, u\)/g)).toHaveLength(2); // record (from pushing) and requeueStuckUpdates (by_status pushing)
+  expect(text.match(/retryLater\(ctx, u\b/g)).toHaveLength(2); // record (from pushing) and requeueStuckUpdates (by_status pushing)
   // The publisher's functions check its token first, and claim takes only approved rows.
   for (const name of ["claim", "record"]) expect(fnBody(text, `export const ${name} = mutation(`)).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requirePublisher\(token\);/);
   const claim = fnBody(text, "export const claim = mutation(");

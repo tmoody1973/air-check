@@ -30,6 +30,7 @@ const CAPTION = "font-mono text-[11px] tracking-[0.1em] text-muted uppercase";
 /** The publisher's short codes in plain words. Anything else (Mixcloud's own code) shows as written. */
 const FAILURE: Record<string, string> = {
   retries_exhausted: "Mixcloud didn't answer after 3 tries. The old description is probably still up.",
+  unconfirmed: "Mixcloud accepted the request but didn't confirm it. Check the show page — the new description may already be live.",
   bad_show_url: "The show's address on the receipt isn't one Air Check can edit. Nothing was sent.",
   not_published: "This show isn't marked as on Mixcloud any more. Nothing was sent.",
 };

@@ -117,13 +117,24 @@ describe("updatePass", () => {
     ["a rate limit (403 + Retry-After)", recordUpload(403, { error: { type: "RateLimitException" } }, { "retry-after": "30" })],
     ["a 500", recordUpload(500, {})],
     ["a 429", recordUpload(429, {})],
-    ["a 200 without success", recordUpload(200, { result: { success: false } })],
-    ["a 200 that is not JSON", recordUpload(200, "<html>")],
     ["a dropped connection", async (req: IncomingMessage, res: ServerResponse) => { req.resume(); res.destroy(); }],
   ] as const)("%s: retry (back to approved for the next pass; Convex counts the try), nothing waited for", async (_name, handler) => {
     const s = await setup({ edit: [handler as never] });
     await updatePass(await s.deps());
     expect(recorded(s.fake.calls)).toEqual([{ status: "retry" }]);
+    expect(s.fake.updateStatus.get("upd1")).toBe("approved");
+  });
+
+  // Mixcloud took the request but did not say it changed: not a network failure. Convex retries it (an edit is
+  // idempotent) and, after the third, fails it as `unconfirmed` so the console can say it may already be live.
+  test.each([
+    ["a 200 without success", recordUpload(200, { result: { success: false } })],
+    ["a 200 that is not JSON", recordUpload(200, "<html>")],
+    ["a 201 with no result", recordUpload(201, {})],
+  ] as const)("%s: unconfirmed, back to approved for the next pass", async (_name, handler) => {
+    const s = await setup({ edit: [handler as never] });
+    await updatePass(await s.deps());
+    expect(recorded(s.fake.calls)).toEqual([{ status: "unconfirmed" }]);
     expect(s.fake.updateStatus.get("upd1")).toBe("approved");
   });
 

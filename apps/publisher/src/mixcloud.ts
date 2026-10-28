@@ -124,7 +124,7 @@ export function showEditUrl(showUrl: string, base: string = MIXCLOUD_UPLOAD_URL)
   return m ? `${base}${m[1]}/${m[2]}/edit/` : null;
 }
 
-export type EditOutcome = { kind: "pushed" } | { kind: "retry" } | { kind: "invalid_token" } | { kind: "failed"; code: string };
+export type EditOutcome = { kind: "pushed" } | { kind: "retry" } | { kind: "unconfirmed" } | { kind: "invalid_token" } | { kind: "failed"; code: string };
 
 /**
  * One multipart POST with only `description`: Mixcloud changes name, picture and description only when posted, and
@@ -144,14 +144,17 @@ export async function editDescription(i: { accessToken: string; editUrl: string;
   }
 }
 
-/** Only a 2xx with `success: true` is pushed; a refused key and other 4xx are final; everything else is tried again. */
+/**
+ * Only a 2xx with `success: true` is pushed. Any other 2xx is `unconfirmed`: Mixcloud took it but did not say it changed
+ * (tried again, and named apart from a network failure). A refused key and other 4xx are final; the rest is `retry`.
+ */
 export function classifyEdit(status: number, retryAfter: string | null, text: string): EditOutcome {
   if (status >= 200 && status < 300) {
     let success: unknown;
     try {
       success = (JSON.parse(text) as { result?: { success?: unknown } } | null)?.result?.success;
     } catch { /* not JSON: no proof it changed */ }
-    return success === true ? { kind: "pushed" } : { kind: "retry" };
+    return success === true ? { kind: "pushed" } : { kind: "unconfirmed" };
   }
   if (status === 408 || status === 429) return { kind: "retry" };
   const o = classify(status, retryAfter, text);

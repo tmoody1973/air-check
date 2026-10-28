@@ -124,7 +124,7 @@ export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; 
     async recordUpdate(id, outcome: UpdateOutcome) {
       calls.push(["recordUpdate", id, outcome]);
       if (updateStatus.get(id) !== "pushing") throw new Error(`NOT_READY ${id}`);
-      updateStatus.set(id, outcome.status === "unclaim" || outcome.status === "retry" ? "approved" : outcome.status);
+      updateStatus.set(id, outcome.status === "unclaim" || outcome.status === "retry" || outcome.status === "unconfirmed" ? "approved" : outcome.status);
     },
   };
   return { convex, calls, status, updateStatus, names: () => calls.map((c) => c[0]) };

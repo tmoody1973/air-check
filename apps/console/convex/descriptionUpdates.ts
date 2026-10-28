@@ -123,10 +123,13 @@ export const forPackage = query({
   },
 });
 
-/** A try that ended without an answer: back to approved (an edit is idempotent), or failed after the third. */
-async function retryLater(ctx: MutationCtx, u: Update) {
+/**
+ * A try that ended without a clear answer: back to approved (an edit is idempotent), or failed after the third, with
+ * `unconfirmed` when Mixcloud took the last one without confirming it (it may be live) and `retries_exhausted` otherwise.
+ */
+async function retryLater(ctx: MutationCtx, u: Update, error: "retries_exhausted" | "unconfirmed" = "retries_exhausted") {
   const attempts = u.attempts + 1;
-  await ctx.db.patch(u._id, attempts >= MAX_ATTEMPTS ? { status: "failed", attempts, error: "retries_exhausted" } : { status: "approved", attempts });
+  await ctx.db.patch(u._id, attempts >= MAX_ATTEMPTS ? { status: "failed", attempts, error } : { status: "approved", attempts });
 }
 
 /**
@@ -162,6 +165,7 @@ const outcomeV = v.union(
   v.object({ status: v.literal("pushed") }),
   v.object({ status: v.literal("failed"), error: v.string() }),
   v.object({ status: v.literal("retry") }), // no answer, a timeout, a 5xx or a rate limit
+  v.object({ status: v.literal("unconfirmed") }), // a 2xx without success: true; may already be live
   v.object({ status: v.literal("unclaim") }), // Mixcloud refused the key: nothing was sent
 );
 
@@ -175,6 +179,6 @@ export const record = mutation({
     if (outcome.status === "pushed") await ctx.db.patch(id, { status: "pushed", pushedAt: new Date().toISOString() });
     else if (outcome.status === "failed") await ctx.db.patch(id, { status: "failed", error: outcome.error.slice(0, 60) });
     else if (outcome.status === "unclaim") await ctx.db.patch(id, { status: "approved" });
-    else await retryLater(ctx, u);
+    else await retryLater(ctx, u, outcome.status === "unconfirmed" ? "unconfirmed" : "retries_exhausted");
   },
 });

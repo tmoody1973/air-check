@@ -109,6 +109,12 @@ describe("DescriptionUpdate", () => {
     expect(screen.getByLabelText("New description")).toHaveValue("A brighter take on the same two hours.");
   });
 
+  it("failed unconfirmed: says Mixcloud accepted it but didn't confirm, so it may already be live", () => {
+    setup(view({ status: "failed", error: "unconfirmed" }));
+    expect(screen.getByText("Mixcloud accepted the request but didn't confirm it. Check the show page — the new description may already be live.")).toBeInTheDocument();
+    expect(screen.queryByText(/didn't answer after 3 tries/)).toBeNull();
+  });
+
   it("an unknown failure code is shown as written", () => {
     setup(view({ status: "failed", error: "http_404" }));
     expect(screen.getByText(/http_404/)).toBeInTheDocument();

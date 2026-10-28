@@ -57,7 +57,7 @@ async function approvedUpdate(t: T, packageId: string, description?: string) {
   return id;
 }
 const claim = (t: T) => t.mutation(api.descriptionUpdates.claim, { token: PUB });
-const record = (t: T, id: UpdateId, outcome: { status: "pushed" } | { status: "failed"; error: string } | { status: "retry" } | { status: "unclaim" }) =>
+const record = (t: T, id: UpdateId, outcome: { status: "pushed" } | { status: "failed"; error: string } | { status: "retry" } | { status: "unconfirmed" } | { status: "unclaim" }) =>
   t.mutation(api.descriptionUpdates.record, { token: PUB, id, outcome });
 
 beforeEach(() => {
@@ -271,6 +271,18 @@ describe("the publisher's side", () => {
     }
     expect(await row(t, id)).toMatchObject({ attempts: 3, error: "retries_exhausted" });
     expect(await claim(t)).toBeNull();
+  });
+
+  test("unconfirmed (a 2xx without success) is retried like retry, but the third ends failed unconfirmed, not retries_exhausted", async () => {
+    const t = convexTest(schema, modules);
+    const pid = await published(t);
+    const id = await approvedUpdate(t, pid);
+    for (const expected of ["approved", "approved", "failed"]) {
+      expect((await claim(t))?.id).toBe(id);
+      await record(t, id, { status: "unconfirmed" });
+      expect((await row(t, id))!.status).toBe(expected);
+    }
+    expect(await row(t, id)).toMatchObject({ attempts: 3, error: "unconfirmed" });
   });
 
   test("an update left pushing (lost claim answer, or a restart) goes back to approved with the try counted: by reconcile, or by the next claim", async () => {
