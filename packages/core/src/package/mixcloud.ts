@@ -14,8 +14,10 @@ export interface PackageDraft {
   tags: string[];
   description: string;
   tracks: Track[];
-  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string; hour1DurationSec?: number };
+  audio: { hour1Id: string; hour2Id: string; mp3Sha256?: string; hour1DurationSec?: number; mp3Bytes?: number };
   picture?: string;
+  /** Convex file-storage id of the cover a human picked (packages.setCover). The agent never sets it. */
+  coverStorageId?: string;
   /** Notes for the reviewer. Display only: never in the fingerprint or the upload. */
   flags?: string[];
   /** Other title options. Display only: never in the fingerprint or the upload. */

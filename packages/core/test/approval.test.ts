@@ -210,3 +210,66 @@ test("flags and alternates are display-only: the fingerprint ignores them", asyn
   expect(await fingerprint({ ...withMp3, flags: ["x"] })).toBe(await fingerprint(withMp3));
   expect(await fingerprint({ ...withMp3, alternates: ["y"] })).toBe(await fingerprint(withMp3));
 });
+
+// Plan 5 Task 2: cover art, MP3 size, result time.
+const COVER = "kg2cover0000000000000000000000000";
+
+test("a draft with no cover keeps today's fingerprint; a cover changes it", async () => {
+  const d = goldenDraft();
+  expect(await fingerprint({ ...d, coverStorageId: undefined })).toBe(await fingerprint(d));
+  expect(await fingerprint({ ...d, coverStorageId: COVER })).not.toBe(await fingerprint(d));
+});
+
+test("MP3 size is stored with the audio but not fingerprinted", async () => {
+  const rec = await gate.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const withAudio = await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3, mp3Bytes: 1234 });
+  expect(withAudio.draft.audio.mp3Bytes).toBe(1234);
+  expect(withAudio.fingerprint).toBe(await fingerprint({ ...withAudio.draft, audio: { hour1Id, hour2Id, mp3Sha256: MP3 } }));
+  expect((await gate.revise(rec.draft.id, goldenDraft())).draft.audio.mp3Bytes).toBe(1234);
+});
+
+test("setCover: a human sets and clears the cover while awaiting review, and it re-fingerprints", async () => {
+  const { id, fp } = await ready();
+  const set = await gate.setCover(id, COVER, tarik);
+  expect(set.draft.coverStorageId).toBe(COVER);
+  expect(set.status).toBe("awaiting_review");
+  expect(set.fingerprint).toBe(await fingerprint(set.draft));
+  expect(set.fingerprint).not.toBe(fp);
+  expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("PACKAGE_CHANGED");
+  const cleared = await gate.setCover(id, null, tarik);
+  expect(cleared.draft.coverStorageId).toBeUndefined();
+  expect(cleared.fingerprint).toBe(fp);
+});
+
+test("setCover: only a signed-in human, only while awaiting review", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.setCover(id, COVER, { kind: "agent" }))).toBe("FORBIDDEN");
+  expect(await code(gate.setCover(id, COVER, judge))).toBe("FORBIDDEN");
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.setCover(id, COVER, tarik))).toBe("NOT_READY");
+  const pending = await gate.submit(goldenDraft({ id: "pkg-x" }));
+  expect(await code(gate.setCover(pending.draft.id, COVER, tarik))).toBe("NOT_READY");
+});
+
+test("the agent cannot set the cover through submit or revise", async () => {
+  const rec = await gate.submit(goldenDraft({ coverStorageId: "agent-cover" }));
+  expect(rec.draft.coverStorageId).toBeUndefined();
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  await gate.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  await gate.setCover(rec.draft.id, COVER, tarik);
+  const revised = await gate.revise(rec.draft.id, goldenDraft({ coverStorageId: "agent-cover" }));
+  expect(revised.draft.coverStorageId).toBe(COVER);
+});
+
+test("recordResult stamps when the result arrived", async () => {
+  const at = new Date("2026-10-28T15:00:00Z");
+  const timed = new ApprovalGate(memoryStore(), { now: () => at });
+  const rec = await timed.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const { fingerprint: fp } = await timed.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  await timed.decide(rec.draft.id, fp!, "approve", tarik);
+  await timed.claimForPublish(rec.draft.id);
+  const done = await timed.recordResult(rec.draft.id, { status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/x/" });
+  expect(done.result).toEqual({ url: "https://www.mixcloud.com/rhythmlab/x/", at: at.toISOString() });
+});

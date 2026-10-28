@@ -17,7 +17,8 @@ export interface PackageRecord {
   fingerprint?: string;
   decidedBy?: string;
   decidedAt?: string;
-  result?: { url?: string; error?: string };
+  /** `at` is when the publisher reported the result (ISO); it paces the 3-per-day limit. */
+  result?: { url?: string; error?: string; at?: string };
 }
 
 export interface PackageStore {
@@ -39,6 +40,8 @@ export interface AudioRef {
   mp3Sha256: string;
   /** Derived from the MP3, so it is stored but not fingerprinted. */
   hour1DurationSec?: number;
+  /** Size of the prepared MP3, for the publisher's pre-upload checks. Not fingerprinted (the hash already covers the file). */
+  mp3Bytes?: number;
 }
 
 export interface Transition {
@@ -84,10 +87,13 @@ function actorName(actor: Actor): string {
   return actor.kind === "human" ? actor.email : actor.kind === "demo" ? `demo:${actor.userId}` : "agent";
 }
 
-/** The MP3 hash is set only by attachAudio (the media job), never by the agent's draft. */
-function withoutMp3(draft: PackageDraft): PackageDraft {
+/**
+ * The MP3 hash is set only by attachAudio (the media job), and the cover only by setCover (a human),
+ * never by the agent's draft. `coverStorageId` is the record's own cover (undefined on submit).
+ */
+function agentDraft(draft: PackageDraft, coverStorageId?: string): PackageDraft {
   const { hour1Id, hour2Id } = draft.audio;
-  return { ...draft, audio: { hour1Id, hour2Id } };
+  return { ...draft, audio: { hour1Id, hour2Id }, coverStorageId };
 }
 
 export function canPublish(rec: PackageRecord): boolean {
@@ -123,7 +129,7 @@ export class ApprovalGate {
 
   async submit(draft: PackageDraft): Promise<PackageRecord> {
     if (await this.store.get(draft.id)) throw new GateError("ALREADY_EXISTS", `package ${draft.id} already exists`);
-    const rec: PackageRecord = { draft: withoutMp3(draft), status: "preparing_audio" };
+    const rec: PackageRecord = { draft: agentDraft(draft), status: "preparing_audio" };
     await this.store.put(rec);
     await this.emit(draft.id, null, rec.status, "agent");
     return rec;
@@ -149,11 +155,10 @@ export class ApprovalGate {
     if (cur.status !== "awaiting_review") throw new GateError("NOT_READY", `package ${id} cannot be revised now`);
     const sameAudio = draft.audio.hour1Id === cur.draft.audio.hour1Id && draft.audio.hour2Id === cur.draft.audio.hour2Id;
     // ponytail: the existing MP3 is carried over only when the source hours are unchanged; otherwise audio is prepared again
-    const mp3Sha256 = sameAudio ? cur.draft.audio.mp3Sha256 : undefined;
-    const hour1DurationSec = sameAudio ? cur.draft.audio.hour1DurationSec : undefined;
-    // id, workspace and show date belong to the record, never to the agent's revision
-    const base = withoutMp3({ ...draft, id, workspace: cur.draft.workspace, showDate: cur.draft.showDate });
-    const revised = mp3Sha256 ? { ...base, audio: { ...base.audio, mp3Sha256, hour1DurationSec } } : base;
+    const { mp3Sha256, hour1DurationSec, mp3Bytes } = sameAudio ? cur.draft.audio : ({} as Partial<AudioRef>);
+    // id, workspace, show date and cover belong to the record, never to the agent's revision
+    const base = agentDraft({ ...draft, id, workspace: cur.draft.workspace, showDate: cur.draft.showDate }, cur.draft.coverStorageId);
+    const revised = mp3Sha256 ? { ...base, audio: { ...base.audio, mp3Sha256, hour1DurationSec, mp3Bytes } } : base;
     const patch: Partial<PackageRecord> = mp3Sha256
       ? { draft: revised, status: "awaiting_review", fingerprint: await fingerprint(revised) }
       : { draft: revised, status: "preparing_audio", fingerprint: undefined };
@@ -182,6 +187,22 @@ export class ApprovalGate {
     return next;
   }
 
+  /** A signed-in human picks (or clears, with null) the cover. It goes public, so the package re-fingerprints. */
+  async setCover(id: string, coverStorageId: string | null, actor: Actor): Promise<PackageRecord> {
+    if (actor.kind !== "human" || !mayDecide(actor, "real"))
+      throw new GateError("FORBIDDEN", "only a signed-in Radio Milwaukee user can change the cover");
+    const cur = await this.load(id);
+    if (cur.status !== "awaiting_review") throw new GateError("NOT_READY", `the cover of ${id} cannot change now`);
+    const draft = { ...cur.draft, coverStorageId: coverStorageId ?? undefined };
+    const next = await this.store.compareAndSwap(
+      id,
+      { status: "awaiting_review", fingerprint: cur.fingerprint },
+      { draft, fingerprint: await fingerprint(draft) },
+    );
+    if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while setting the cover`);
+    return next;
+  }
+
   async claimForPublish(id: string): Promise<PackageRecord | null> {
     const cur = await this.load(id);
     if (cur.draft.workspace !== "real") throw new GateError("DEMO_CANNOT_PUBLISH", "demo packages never publish");
@@ -192,7 +213,8 @@ export class ApprovalGate {
   }
 
   async recordResult(id: string, r: PublishResult): Promise<PackageRecord> {
-    const result = r.status === "succeeded" ? { url: r.url } : r.status === "failed" ? { error: r.error } : {};
+    const at = this.now().toISOString();
+    const result = r.status === "succeeded" ? { url: r.url, at } : r.status === "failed" ? { error: r.error, at } : { at };
     const next = await this.store.compareAndSwap(id, { status: "publishing" }, { status: r.status, result });
     if (!next) throw new GateError("NOT_READY", `package ${id} is not publishing`);
     await this.emit(id, "publishing", r.status, "publisher");
