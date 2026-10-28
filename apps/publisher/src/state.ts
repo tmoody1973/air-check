@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 /** What must survive a restart: which ready cards went out, and a hash (never the key) of the connection Mixcloud refused. */
 export interface PublisherState { sentCards: string[]; rejectedToken?: string }
@@ -20,6 +21,7 @@ export async function openState(path: string): Promise<StateBox> {
     async update(change) {
       current = change(current);
       // The publish and card loops can overlap, so each write gets its own temp name.
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       const tmp = `${path}.${randomUUID()}.tmp`;
       await writeFile(tmp, JSON.stringify(current), { mode: 0o600 });
       await rename(tmp, path);

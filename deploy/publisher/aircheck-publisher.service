@@ -13,6 +13,8 @@ User=user
 EnvironmentFile=/home/user/.aircheck/publisher.env
 Environment=PATH=/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
 WorkingDirectory=/home/user/aircheck-publisher
+# The state folder must exist before the sandbox is set up (ReadWritePaths needs it); "+" runs this one step unsandboxed.
+ExecStartPre=+/usr/bin/install -d -m 0700 -o user /home/user/.aircheck/publisher
 ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-publisher/dist/main.js
 Restart=on-failure
 RestartSec=5s
@@ -20,8 +22,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 # Read-only: the prepared MP3s (/home/user/aircheck-audio/prepared), the Mixcloud token file and ~/.airc/secrets.env.
 ProtectHome=read-only
-# Write: only the state file's folder (sent card ids, the hash of a refused key), written by atomic rename.
-ReadWritePaths=/home/user/.aircheck
+# Write: only the state folder (sent card ids, the hash of a refused key), written by atomic rename. Never the rest
+# of ~/.aircheck, which holds every service's env file and the bridge CA private key (R24).
+ReadWritePaths=/home/user/.aircheck/publisher
 PrivateTmp=yes
 
 [Install]

@@ -16,7 +16,8 @@ export function loadConfig(env: Record<string, string | undefined>): PublisherCo
     convexUrl, publisherToken, appUrl,
     tokenFile: env.MIXCLOUD_TOKEN_FILE?.trim() || "/home/user/.aircheck/mixcloud/token.json",
     preparedDir: env.PREPARED_DIR?.trim() || "/home/user/aircheck-audio/prepared",
-    stateFile: env.STATE_FILE?.trim() || "/home/user/.aircheck/publisher-state.json",
+    // R24: its own folder, the only place the service may write (~/.aircheck also holds env files and the CA key).
+    stateFile: env.STATE_FILE?.trim() || "/home/user/.aircheck/publisher/state.json",
     secretsFile: env.AIRC_SECRETS_FILE?.trim() || "/home/user/.airc/secrets.env",
     pollMs: Number.isFinite(poll) && poll >= 1000 ? poll : 30_000,
   };

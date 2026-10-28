@@ -9,7 +9,7 @@ describe("loadConfig", () => {
       convexUrl: base.CONVEX_URL, publisherToken: base.PUBLISHER_TOKEN, appUrl: base.APP_URL,
       tokenFile: "/home/user/.aircheck/mixcloud/token.json",
       preparedDir: "/home/user/aircheck-audio/prepared",
-      stateFile: "/home/user/.aircheck/publisher-state.json",
+      stateFile: "/home/user/.aircheck/publisher/state.json",
       secretsFile: "/home/user/.airc/secrets.env",
       pollMs: 30_000,
     });
