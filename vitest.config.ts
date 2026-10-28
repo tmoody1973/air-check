@@ -12,6 +12,7 @@ export default defineConfig({
       "apps/console",
       "apps/bridge",
       "apps/relay",
+      "apps/media",
     ],
   },
 });

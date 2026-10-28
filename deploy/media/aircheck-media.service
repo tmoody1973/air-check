@@ -1,0 +1,24 @@
+# Air Check media service: watches the audio inbox, joins each show's two hour WAVs into one MP3 with
+# ffmpeg, hashes it, and tells Convex the package is ready for human review. Runs on the host, like the relay.
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable --now aircheck-media
+[Unit]
+Description=Air Check: audio inbox -> MP3 media service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=user
+EnvironmentFile=/home/user/.aircheck/media.env
+Environment=PATH=/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+WorkingDirectory=/home/user/aircheck-media
+ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-media/dist/main.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/user/aircheck-audio
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
