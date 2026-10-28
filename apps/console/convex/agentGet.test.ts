@@ -60,7 +60,7 @@ describe("POST /agent/packages/get", () => {
     expect(body).toMatchObject({ packageId: draft.id, showDate: draft.showDate, status: "awaiting_review", title: draft.title, tags: draft.tags, description: draft.description, descriptionSources: SOURCES });
     const parsed = parseTracklist(body.tracklistText);
     expect(parsed.bad).toEqual([]);
-    expect(parsed.tracks.map((x) => [x.hour, x.artist])).toEqual(draft.tracks.map((x) => [x.hour, x.artist]));
+    expect(parsed.tracks.map((x) => [x.hour, x.artist, x.title, x.feat])).toEqual(draft.tracks.map((x) => [x.hour, x.artist, x.title, x.feat]));
     // Never the cover, audio ids or hashes, the fingerprint, or who decided.
     expect(JSON.stringify(body)).not.toMatch(/kg2cover|box-h1|bbbb|fingerprint|decidedBy/);
     expect(await snapshot(t)).toEqual(before); // read-only: no writes, no activity rows

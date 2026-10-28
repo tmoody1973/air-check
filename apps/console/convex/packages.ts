@@ -1,5 +1,5 @@
 import {
-  checkDescriptionChange, GateError, publishDayOffset, toSections, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
+  checkDescriptionChange, formatTrack, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
   type Track,
 } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
@@ -270,11 +270,9 @@ export const revise = internalMutation({
   },
 });
 
-/** Both hours as plain lines in the package's own spellings (the Mixcloud sections); parses back to the same tracks. */
+/** Both hours in the package's own spellings, one formatTrack line each; parses back to the same tracks. */
 const tracklistText = (tracks: Track[]) =>
-  ([1, 2] as const)
-    .map((h) => [`Hour ${h}`, ...toSections(tracks.filter((t) => t.hour === h)).map((s) => `${s.artist} - ${s.song}`)].join("\n"))
-    .join("\n\n");
+  ([1, 2] as const).map((h) => [`Hour ${h}`, ...tracks.filter((t) => t.hour === h).map(formatTrack)].join("\n")).join("\n\n");
 
 /**
  * Internal (the agent's /agent/packages/get): what the agent needs to rewrite a description, read-only, in its token's
