@@ -151,6 +151,23 @@ describe("deploy files", () => {
     expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
   });
 
+  it("the ingest unit creates the audio folders, may write only there, and its env example holds names only", () => {
+    const unit = read("ingest/aircheck-ingest.service");
+    expect(unit).toMatch(
+      /^ExecStartPre=\+\/usr\/bin\/install -d -m 0755 -o user -g user \/home\/user\/aircheck-audio \/home\/user\/aircheck-audio\/inbox \/home\/user\/aircheck-audio\/prepared$/m,
+    );
+    expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
+    expect(unit.match(/^ReadWritePaths=.*$/gm)).toEqual(["ReadWritePaths=-/home/user/aircheck-audio"]);
+    for (const l of ["ProtectSystem=strict", "ProtectHome=read-only", "NoNewPrivileges=yes", "User=user", "EnvironmentFile=/home/user/.aircheck/ingest.env"])
+      expect(unit).toContain(l);
+    const env = read("ingest/ingest.env.example").split("\n").filter((l) => l && !l.startsWith("#"));
+    for (const l of env) expect(l).toMatch(/^[A-Z_]+=$/);
+    expect(env.map((l) => l.slice(0, -1))).toEqual(expect.arrayContaining([
+      "CONVEX_URL", "INGEST_TOKEN", "BOX_CLIENT_ID", "BOX_CLIENT_SECRET", "BOX_ENTERPRISE_ID", "BOX_FOLDER_ID",
+      "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "INGEST_TOKEN_DIR", "INBOX_DIR", "PREPARED_DIR",
+    ]));
+  });
+
   it("DEPLOY copies WAVs under a temporary name so a half-copied file is never an inbox WAV (C1)", () => {
     const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
     expect(doc).toMatch(/cat > [^\n']*\.wav\.part && mv [^\n']*\.wav\.part [^\n']*\.wav/);
