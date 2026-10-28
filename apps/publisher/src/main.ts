@@ -1,3 +1,4 @@
+import { guardArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { connectConvex } from "./convex.js";
 import { publishPass, startup, statusReporter, unlistedTest, type PublishDeps } from "./publish.js";
@@ -21,6 +22,8 @@ function every(ms: number, step: string, fn: () => Promise<void>): NodeJS.Timeou
 }
 
 async function main(): Promise<void> {
+  // I1: a mistyped flag must never fall through to the public service.
+  const mode = guardArgs(process.argv.slice(2), { err: (l) => console.error(l), exit: (code) => process.exit(code) });
   let config;
   try {
     config = loadConfig(process.env);
@@ -29,10 +32,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const convex = connectConvex(config.convexUrl, config.publisherToken);
-  const args = process.argv.slice(2);
-  if (args[0] === "--unlisted-test") {
+  if (mode.kind === "unlisted") {
     // R8: by hand over ssh, with the service stopped. Prints only the show's URL or an error code.
-    const out = args[1] ? await unlistedTest({ convex, log: () => {}, tokenFile: config.tokenFile, preparedDir: config.preparedDir }, args[1]) : "usage: --unlisted-test <packageId>";
+    const out = await unlistedTest({ convex, log: () => {}, tokenFile: config.tokenFile, preparedDir: config.preparedDir }, mode.packageId);
     console.log(out);
     process.exit(out.startsWith("https://") ? 0 : 1);
   }

@@ -251,7 +251,7 @@ describe("publisher.unclaim", () => {
     expect(doc.fingerprint).toBe(fp);
     const rows = (await t.run((ctx) => ctx.db.query("activity").collect())).slice(before);
     expect(rows.map(({ workspace, kind, result, title, packageId }) => ({ workspace, kind, result, title, packageId }))).toEqual([
-      { workspace: "real", kind: "waiting", result: "needs_you", title: `Mixcloud refused the key: package ${id} waits for Reconnect`, packageId: id },
+      { workspace: "real", kind: "waiting", result: "needs_you", title: `Package ${id} is back in the queue: nothing was sent to Mixcloud`, packageId: id },
     ]);
     expect(JSON.stringify(rows)).not.toContain(doc.draft.title as string);
     expect((await t.query(api.publisher.queue, { token: PUB })).packages.map((p) => p.packageId)).toEqual([id]);

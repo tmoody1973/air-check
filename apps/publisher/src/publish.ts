@@ -96,32 +96,49 @@ function sha256File(path: string): Promise<string> {
   });
 }
 
+/** A package problem: the package is claimed and recorded failed (nothing is sent), so a human can reopen it. */
 type Fail = { error: string };
-type Prepared = { mp3Path: string; fields: Record<string, string>; picture: { bytes: Uint8Array<ArrayBuffer>; type: string } };
+/** A passing or shared problem: nothing is claimed; it shows as Mixcloud's lastError and the next pass tries again. */
+type Hold = { hold: "cover_unavailable" | "bad_cover" };
+type Picture = { bytes: Uint8Array<ArrayBuffer>; type: string };
+type Checked = { mp3Path: string; fields: Record<string, string>; picture: Picture };
 
-async function checkAudio(mp3Path: string, expected: string | undefined): Promise<{ mp3Bytes: number } | Fail> {
-  let mp3Bytes: number;
+const BAD_COVER = "cover is not a usable image";
+const isOk = (v: object) => !("error" in v) && !("hold" in v);
+
+/** The MP3 on disk must be the one Tarik approved (Review Focus 2). Checked after the claim, just before sending. */
+async function checkAudio(mp3Path: string, expected: string | undefined): Promise<object | Fail> {
   let actual: string;
   try {
-    mp3Bytes = (await stat(mp3Path)).size;
     actual = await sha256File(mp3Path);
   } catch {
     return { error: "audio file missing" };
   }
-  return actual === expected ? { mp3Bytes } : { error: "audio changed since approval" };
+  return actual === expected ? {} : { error: "audio changed since approval" };
 }
 
-async function checkCover(convex: PublisherConvex, storageId: string): Promise<Prepared["picture"] | Fail> {
+/**
+ * I3: a network error, a timeout or a 5xx (from Convex or storage) is passing: hold and try again next pass. A cover
+ * that arrives but is not a JPEG/PNG/WebP/GIF under 10 MB, or is gone from storage, is a problem with the cover.
+ */
+async function checkCover(convex: PublisherConvex, storageId: string): Promise<Picture | Fail | Hold> {
+  let url: string;
+  try {
+    url = await convex.coverUrl(storageId);
+  } catch (e) {
+    return (e as { data?: { code?: string } })?.data?.code === "NOT_FOUND" ? { error: BAD_COVER } : { hold: "cover_unavailable" };
+  }
   let bytes: Uint8Array<ArrayBuffer>;
   try {
-    const res = await fetch(await convex.coverUrl(storageId), { signal: AbortSignal.timeout(COVER_TIMEOUT_MS) });
-    if (!res.ok) return { error: "cover download failed" };
+    const res = await fetch(url, { signal: AbortSignal.timeout(COVER_TIMEOUT_MS) });
+    if (res.status >= 500 || res.status === 408 || res.status === 429) return { hold: "cover_unavailable" };
+    if (!res.ok) return { error: BAD_COVER };
     bytes = new Uint8Array(await res.arrayBuffer());
   } catch {
-    return { error: "cover download failed" };
+    return { hold: "cover_unavailable" };
   }
   const type = imageType(bytes);
-  return type && bytes.length <= MAX_COVER_BYTES ? { bytes, type } : { error: "cover is not a usable image" };
+  return type && bytes.length <= MAX_COVER_BYTES ? { bytes, type } : { error: BAD_COVER };
 }
 
 function checkDraft(draft: PackageDraft, mp3Bytes: number, pictureBytes: number): { fields: Record<string, string> } | Fail {
@@ -134,22 +151,23 @@ function checkDraft(draft: PackageDraft, mp3Bytes: number, pictureBytes: number)
   }
 }
 
-/** Everything that can go wrong before a byte goes to Mixcloud. A Fail here means nothing was sent. */
-async function prepare(deps: UploadDeps, p: QueueItem, storageId: string): Promise<Prepared | Fail> {
+/** Everything that can be checked before the claim (I3). Nothing here sends a byte to Mixcloud. */
+async function precheck(deps: UploadDeps, p: QueueItem, storageId: string): Promise<Checked | Fail | Hold> {
   const id = p.packageId;
   if (!SAFE_ID.test(id)) return { error: "bad package id" };
   const mp3Path = join(deps.preparedDir, `${id}.mp3`);
-  const isOk = (v: object) => !("error" in v);
-  const audio = await timed(deps.log, id, "hash", () => checkAudio(mp3Path, p.draft.audio.mp3Sha256), isOk);
-  if ("error" in audio) return audio;
   const picture = await timed(deps.log, id, "cover", () => checkCover(deps.convex, storageId), isOk);
-  if ("error" in picture) return picture;
-  const draft = await timed(deps.log, id, "validate", async () => checkDraft(p.draft, audio.mp3Bytes, picture.bytes.length), isOk);
+  // A bad standard cover would fail every show that uses it: hold until it is replaced, never fail them all.
+  if ("error" in picture && !p.draft.coverStorageId) return { hold: "bad_cover" };
+  if (!isOk(picture)) return picture as Fail | Hold;
+  const mp3Bytes = await stat(mp3Path).then((st) => st.size, () => null);
+  if (mp3Bytes === null) return { error: "audio file missing" };
+  const draft = await timed(deps.log, id, "validate", async () => checkDraft(p.draft, mp3Bytes, (picture as Picture).bytes.length), isOk);
   if ("error" in draft) return draft;
-  return { mp3Path, fields: draft.fields, picture };
+  return { mp3Path, fields: draft.fields, picture: picture as Picture };
 }
 
-const send = (deps: UploadDeps, id: string, accessToken: string, ready: Prepared, unlisted = false) =>
+const send = (deps: UploadDeps, id: string, accessToken: string, ready: Checked, unlisted = false) =>
   timed(deps.log, id, "upload", () => uploadShow({ accessToken, ...ready, unlisted, uploadUrl: deps.uploadUrl, timeoutMs: deps.uploadTimeoutMs }), (o) => o.kind === "succeeded");
 
 /** At most one upload per pass: the oldest approved show with a cover, unless today's 3 already went up. */
@@ -171,19 +189,38 @@ export async function publishPass(deps: PublishDeps): Promise<void> {
   if (!pkg?.coverStorageId) return deps.report(status);
   const id = pkg.packageId;
 
-  await timed(deps.log, id, "claim", () => deps.convex.claim(id));
+  // I3: the cover and the fields are checked before the claim, so a passing outage never fails a package.
+  let ready: Checked | Fail | Hold;
+  try {
+    ready = await precheck(deps, pkg, pkg.coverStorageId);
+  } catch {
+    ready = { error: "internal_error" };
+  }
+  if ("hold" in ready) return deps.report({ ...status, lastError: ready.hold });
+
+  try {
+    await timed(deps.log, id, "claim", () => deps.convex.claim(id));
+  } catch (e) {
+    // M3: an answer lost on the way back means the claim may or may not have landed. Never upload on an unknown
+    // claim. Undo it instead: nothing was sent, so approved is the truth, and unclaim's NOT_READY (the claim never
+    // landed) counts as done. A NOT_READY claim was refused outright, so there is nothing to undo.
+    if (!notReady(e)) await settle(deps, id, "unclaim", () => deps.convex.unclaim(id));
+    return deps.report(status);
+  }
   // From here on every path ends in one settled write (result or unclaim), whatever throws.
+  if (!isOk(ready)) return settle(deps, id, "result", () => deps.convex.result(id, { status: "failed", error: (ready as Fail).error }));
+  const checked = ready as Checked;
   let sent = false;
   let out: UploadOutcome;
   try {
-    const ready = await prepare(deps, pkg, pkg.coverStorageId);
-    if ("error" in ready) return await settle(deps, id, "result", () => deps.convex.result(id, { status: "failed", error: ready.error }));
+    const audio = await timed(deps.log, id, "hash", () => checkAudio(checked.mp3Path, pkg.draft.audio.mp3Sha256), isOk);
+    if ("error" in audio) return await settle(deps, id, "result", () => deps.convex.result(id, { status: "failed", error: (audio as Fail).error }));
     sent = true;
-    out = await send(deps, id, conn.accessToken, ready);
+    out = await send(deps, id, conn.accessToken, checked);
     if (out.kind === "rate_limited") {
       // A rate limit proves Mixcloud did not take the show: wait as asked, then the one and only retry.
       await (deps.sleep ?? wait)(out.retryAfterSec * 1000);
-      out = await send(deps, id, conn.accessToken, ready);
+      out = await send(deps, id, conn.accessToken, checked);
       if (out.kind === "rate_limited") out = { kind: "failed", code: "rate_limited" };
     }
   } catch {
@@ -220,8 +257,11 @@ export async function unlistedTest(deps: UploadDeps & Pick<PublishDeps, "tokenFi
   if (!pkg.coverStorageId) return "no_cover";
   const t = await readTokenFile(deps.tokenFile);
   if (t.kind !== "ok") return t.kind === "missing" ? "no_token" : "invalid_token_file";
-  const ready = await prepare(deps, pkg, pkg.coverStorageId);
+  const ready = await precheck(deps, pkg, pkg.coverStorageId);
+  if ("hold" in ready) return ready.hold;
   if ("error" in ready) return ready.error;
+  const audio = await checkAudio(ready.mp3Path, pkg.draft.audio.mp3Sha256);
+  if ("error" in audio) return (audio as Fail).error;
   const out = await send(deps, packageId, t.accessToken, ready, true);
   return out.kind === "succeeded" ? out.url : out.kind === "failed" ? out.code : out.kind;
 }

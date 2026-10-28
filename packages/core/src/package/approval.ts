@@ -262,8 +262,9 @@ export class ApprovalGate {
   }
 
   /**
-   * publishing -> approved, the one way back to approved. Only for `invalid_token`: Mixcloud rejects the access
-   * token before it takes any audio, so nothing was posted and the package can safely wait for a reconnect.
+   * publishing -> approved, the one way back to approved, and only when nothing was sent: Mixcloud rejected the access
+   * token before it took any audio (`invalid_token`), or the publisher lost the claim's answer and never started the
+   * upload (M3; it reuses the same call). The package waits, still approved as Tarik approved it.
    */
   async unclaim(id: string, reason: "invalid_token"): Promise<PackageRecord> {
     void reason;

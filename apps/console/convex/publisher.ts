@@ -72,8 +72,9 @@ export const result = mutation({
 });
 
 /**
- * publishing -> approved, only after Mixcloud refused the access token (R23). Mixcloud checks the token before it
- * takes any audio, so nothing was posted; the package waits, still approved, until Tarik reconnects.
+ * publishing -> approved, only when nothing was sent: Mixcloud refused the access token (R23; it checks the token
+ * before it takes any audio), or the publisher lost the claim's answer and never started the upload (M3). The
+ * package waits, still approved.
  */
 export const unclaim = mutation({
   args: { token: v.string(), packageId: v.string() },

@@ -52,6 +52,7 @@ export async function fakeServer(opts: { upload?: Handler[]; cover?: Buffer } = 
       res.writeHead(200, { "content-type": "image/jpeg" });
       return res.end(opts.cover ?? JPEG);
     }
+    if (url.pathname.startsWith("/down/")) return json(res, 503, {}); // a storage outage
     if (url.pathname.endsWith("/sendMessage")) return json(res, 200, { ok: true });
     json(res, 404, {});
   });

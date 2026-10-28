@@ -61,7 +61,7 @@ describe("publishPass: the happy path", () => {
     expect(sha256(Buffer.from(await mp3.arrayBuffer()))).toBe(sha256(s.ws.mp3));
     expect(Buffer.from(await picture.arrayBuffer()).equals(JPEG)).toBe(true);
     expect(picture.type).toBe("image/jpeg");
-    expect(s.fake.names()).toEqual(["queue", "claim", "coverUrl", "result", "setMixcloud"]);
+    expect(s.fake.names()).toEqual(["queue", "coverUrl", "claim", "result", "setMixcloud"]);
     expect(results(s.fake.calls)).toEqual([{ status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/rhythm-lab-radio-10-2-26/" }]);
     expect(statuses(s.fake.calls)).toEqual([{ state: "connected", account: "rhythmlab", connectedAt: 1_761_000_000_000 }]);
     expect(s.fake.status.get(s.items[0]!.packageId)).toBe("succeeded");
@@ -107,10 +107,12 @@ describe("publishPass: refusals before any request is sent", () => {
   test.each([
     ["not an image", Buffer.from("<html>nope</html>")],
     ["over 10 MB", Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(10 * 1024 ** 2)])],
-  ])("cover %s: failed 'cover is not a usable image', no upload", async (_n, cover) => {
+  ])("the package's own cover %s: failed 'cover is not a usable image' (reopen to change it), no upload", async (_n, cover) => {
     const s = await setup({ cover });
+    s.items[0]!.draft = { ...s.items[0]!.draft, coverStorageId: "cover-1" };
     await publishPass(await s.deps());
     expect(s.srv.uploads()).toHaveLength(0);
+    expect(s.fake.names().indexOf("coverUrl")).toBeLessThan(s.fake.names().indexOf("claim")); // checked before the claim
     expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "cover is not a usable image" }]);
   });
 
@@ -129,6 +131,92 @@ describe("publishPass: refusals before any request is sent", () => {
     await publishPass(await s.deps());
     expect(s.srv.uploads()).toHaveLength(0);
     expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "bad package id" }]);
+  });
+});
+
+// I3: the cover is fetched and checked before the claim. A passing problem never fails a package.
+describe("publishPass: the cover, before any claim", () => {
+  const notClaimed = (s: Awaited<ReturnType<typeof setup>>) => {
+    expect(s.fake.calls.filter((c) => c[0] === "claim")).toEqual([]);
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+  };
+  const CONNECTED = { state: "connected", account: "rhythmlab", connectedAt: 1_761_000_000_000 };
+
+  test("the cover server answers 503: not claimed, cover_unavailable, and it goes up on a later pass", async () => {
+    let down = true;
+    const s = await setup();
+    const realCoverUrl = s.fake.convex.coverUrl;
+    s.fake.convex.coverUrl = async (id) => (down ? `${s.srv.base}/down/${id}` : realCoverUrl(id));
+    const deps = await s.deps();
+    await publishPass(deps);
+    notClaimed(s);
+    expect(statuses(s.fake.calls).at(-1)).toEqual({ ...CONNECTED, lastError: "cover_unavailable" });
+    down = false;
+    await publishPass(deps);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("succeeded");
+    expect(statuses(s.fake.calls).at(-1)).toEqual(CONNECTED);
+  });
+
+  test("Convex fails to give the cover's address (network, timeout): not claimed, cover_unavailable", async () => {
+    const s = await setup();
+    s.fake.convex.coverUrl = async () => { throw new Error("fetch failed"); };
+    await publishPass(await s.deps());
+    notClaimed(s);
+    expect(statuses(s.fake.calls).at(-1)).toEqual({ ...CONNECTED, lastError: "cover_unavailable" });
+  });
+
+  test("the standard cover is not a usable image: nothing claimed (it would fail every show), bad_cover", async () => {
+    const s = await setup({ cover: Buffer.from("<html>nope</html>") });
+    await publishPass(await s.deps());
+    notClaimed(s);
+    expect(results(s.fake.calls)).toEqual([]);
+    expect(statuses(s.fake.calls).at(-1)).toEqual({ ...CONNECTED, lastError: "bad_cover" });
+  });
+
+  test("the package's own cover is gone from storage (NOT_FOUND): failed, no upload", async () => {
+    const s = await setup();
+    s.items[0]!.draft = { ...s.items[0]!.draft, coverStorageId: "cover-1" };
+    s.fake.convex.coverUrl = async () => { throw Object.assign(new Error("[Request ID: x] Server Error"), { data: { code: "NOT_FOUND" } }); };
+    await publishPass(await s.deps());
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "cover is not a usable image" }]);
+  });
+});
+
+// M3: a claim whose answer is lost may or may not have landed. Never upload then; never leave it publishing.
+describe("publishPass: a lost claim reply", () => {
+  test("the claim landed but its answer was lost: unclaimed back to approved, no upload; the next pass posts it", async () => {
+    const s = await setup();
+    const realClaim = s.fake.convex.claim;
+    let lose = true;
+    s.fake.convex.claim = async (id) => { await realClaim(id); if (lose) { lose = false; throw new Error("network timeout"); } };
+    const deps = await s.deps();
+    await publishPass(deps);
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(s.fake.calls.filter((c) => c[0] === "unclaim")).toHaveLength(1);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+    expect(s.exits).toEqual([]);
+    await publishPass(deps);
+    expect(s.srv.uploadRequests()).toBe(1);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("succeeded");
+  });
+
+  test("the claim never landed: the unclaim finds nothing to undo (NOT_READY), no upload, still approved", async () => {
+    const s = await setup();
+    s.fake.convex.claim = async () => { throw new Error("network timeout"); };
+    await publishPass(await s.deps());
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+    expect(s.exits).toEqual([]);
+  });
+
+  test("a NOT_READY claim (it was not approved any more): nothing to undo, no upload", async () => {
+    const s = await setup();
+    s.fake.convex.claim = async (id) => { throw new Error(`NOT_READY ${id}`); };
+    await publishPass(await s.deps());
+    expect(s.fake.calls.filter((c) => c[0] === "unclaim")).toEqual([]);
+    expect(s.srv.uploadRequests()).toBe(0);
   });
 });
 
