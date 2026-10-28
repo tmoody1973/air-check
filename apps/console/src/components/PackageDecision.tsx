@@ -7,6 +7,7 @@ import { showDateLabel } from "../lib/date";
 import { trackFor } from "../lib/track";
 import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
 import { DescriptionEditor, type DescriptionSaveFn } from "./DescriptionEditor";
+import { DescriptionUpdate, type UpdateFns, type UpdateView } from "./DescriptionUpdate";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl, PublishStatus, type PublishState, type SettleFns, type SettleResult } from "./PublishStatus";
@@ -15,7 +16,7 @@ import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
-export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns };
+export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns, UpdateFns, UpdateView };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -52,6 +53,7 @@ export function PackageDecision({
   mixcloudAccount,
   settle,
   editDescription,
+  descriptionUpdate,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
@@ -68,6 +70,8 @@ export function PackageDecision({
   settle?: SettleFns;
   /** Real workspace: rewrite the public description while the package awaits review (re-fingerprints). */
   editDescription?: DescriptionSaveFn;
+  /** Real workspace, a show on Mixcloud: its live description and the update flow (Plan 5c Task 4). */
+  descriptionUpdate?: { view: UpdateView | null | undefined; fns: UpdateFns };
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
@@ -84,7 +88,9 @@ export function PackageDecision({
   if (!record)
     return <p className="rounded-card border border-line bg-surface p-5 text-ink-soft">Package not found</p>;
 
-  const { draft } = record;
+  // On Mixcloud the description may have been updated since: show the live one (the package itself never changes).
+  const update = workspace === "real" && record.status === "succeeded" && descriptionUpdate?.view ? { ...descriptionUpdate, view: descriptionUpdate.view } : null;
+  const draft = update ? { ...record.draft, description: update.view.live.description, descriptionSources: update.view.live.descriptionSources } : record.draft;
   const pill = statusPill(record, workspace);
   const flags = draft.flags ?? [];
   const closing = draft.tracks.filter((t) => t.closing).length;
@@ -227,6 +233,8 @@ export function PackageDecision({
       {workspace === "real" && cover && <CoverPicker url={cover.url} custom={!!draft.coverStorageId} onChange={changeCover} />}
 
       {workspace === "real" && !deciding && <PublishStatus record={record} publish={publish} mixcloudAccount={mixcloudAccount} settle={settleHere} />}
+
+      {update && <DescriptionUpdate view={update.view} trackTitles={draft.tracks.map((t) => t.title)} fns={update.fns} />}
 
       {workspace === "demo" ? (
         <p className="text-[12.5px] text-ink-soft">Demo workspace · Sample data. Publishing to Mixcloud is switched off.</p>

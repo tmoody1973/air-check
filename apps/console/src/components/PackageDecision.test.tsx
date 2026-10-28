@@ -540,3 +540,26 @@ describe("PackageDecision: edit description", () => {
     expect(screen.queryByText("Sources (not published)")).not.toBeInTheDocument();
   });
 });
+
+// Plan 5c Task 4: a show on Mixcloud shows its live description and the update flow; the package never changes.
+describe("PackageDecision: the live description", () => {
+  const updateFns = { propose: async () => ({ ok: true as const, replaced: false }), approve: async () => ({ ok: true as const }) };
+  const published = withAudio({ status: "succeeded", result: { url: "https://www.mixcloud.com/rhythmlab/x/", at: "2026-10-28T03:04:00.000Z" } });
+  const view = { live: { description: "Updated words, now live.", updatedAt: "2026-10-28T15:04:00.000Z" }, latest: null };
+
+  it("succeeded: the update section, and the counts and disclosure follow the live description", () => {
+    real(published, { descriptionUpdate: { view, fns: updateFns } });
+    expect(screen.getByRole("heading", { name: "Description on Mixcloud" })).toBeInTheDocument();
+    expect(screen.getByText("description chars").previousSibling).toHaveTextContent(String([...view.live.description].length));
+    fireEvent.click(screen.getByRole("button", { name: /See description and tracklist/ }));
+    expect(screen.getAllByText("Updated words, now live.").length).toBe(2);
+  });
+
+  it("not on Mixcloud, or the demo: no update section", () => {
+    const { unmount } = real(withAudio({ status: "awaiting_review" }), { descriptionUpdate: { view, fns: updateFns } });
+    expect(screen.queryByRole("heading", { name: "Description on Mixcloud" })).toBeNull();
+    unmount();
+    render(<PlayerProvider><PackageDecision record={published} workspace="demo" decide={ok} descriptionUpdate={{ view, fns: updateFns }} /></PlayerProvider>);
+    expect(screen.queryByRole("heading", { name: "Description on Mixcloud" })).toBeNull();
+  });
+});
