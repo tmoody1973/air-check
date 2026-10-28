@@ -1,8 +1,11 @@
-import { GateError, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
+import { GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { actorOf, gateFor, workspaceOf } from "./gate";
+import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
+import { publishQueue } from "./publisher";
 
 const asDraft = (d: unknown) => d as PackageDraft;
 
@@ -29,6 +32,45 @@ export const listAwaiting = query({
       .withIndex("by_workspace_status", (q) => q.eq("workspace", ws).eq("status", "awaiting_review"))
       .collect();
     return docs.map(toRecord);
+  },
+});
+
+/** A real package for a signed-in real human; null for anyone else, for demo packages and for unknown ids. */
+async function realPackage(ctx: QueryCtx, packageId: string) {
+  if (workspaceOf(await actorOf(ctx)) !== "real") return null;
+  const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+  return doc?.workspace === "real" ? doc : null;
+}
+
+export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudStatus["state"] };
+
+/**
+ * R2: which Chicago day an approved package should go up (0 = today), from the same queue and count the publisher
+ * uses. Like the publisher, a package with no cover (its own or the standard one) is not queued.
+ */
+export const publishState = query({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<PublishState | null> => {
+    if (!(await realPackage(ctx, packageId))) return null;
+    const { packages, publishedToday } = await publishQueue(ctx);
+    // Same mapping as the publisher service's nextToPublish call (apps/publisher/src/publish.ts).
+    const approved = packages
+      .filter((p) => p.coverStorageId)
+      .map((p) => ({ packageId: p.packageId, showDate: p.showDate, approvedAt: p.decidedAt ?? "" }));
+    const mixcloudState = (await ctx.db.query("mixcloudStatus").first())?.state ?? "not_connected";
+    return { dayOffset: publishDayOffset(approved, publishedToday, packageId, 3), mixcloudState };
+  },
+});
+
+/** R5: the cover the package page shows: the package's own, else the standard cover, else null. */
+export const coverPreview = query({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<string | null> => {
+    const doc = await realPackage(ctx, packageId);
+    const id = (doc?.draft as PackageDraft | undefined)?.coverStorageId ?? (doc ? process.env.STANDARD_COVER_STORAGE_ID : undefined);
+    if (!id) return null;
+    // A mistyped STANDARD_COVER_STORAGE_ID is not a storage id; show no cover rather than break the page.
+    return ctx.storage.getUrl(id as Id<"_storage">).catch(() => null);
   },
 });
 

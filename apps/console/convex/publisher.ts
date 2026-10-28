@@ -1,6 +1,6 @@
 import { chicagoDayKey, type PackageDraft } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
 import { gateFor, viaGate } from "./gate";
 import { writeMixcloudStatus } from "./mixcloud";
@@ -13,28 +13,35 @@ function requirePublisher(token: string): void {
   if (!sameToken(token, process.env.PUBLISHER_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
-/** Approved real packages (demo ones never), and how many went up today (America/Chicago) for the 3-per-day pace. */
+/**
+ * Approved real packages (demo ones never) with the cover the upload will use, and how many went up today
+ * (America/Chicago) for the 3-per-day pace. Shared by `queue` and the package page's `packages.publishState`.
+ */
+export async function publishQueue(ctx: QueryCtx) {
+  const real = (status: "approved" | "succeeded" | "outcome_unknown") =>
+    ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
+  const standard = process.env.STANDARD_COVER_STORAGE_ID;
+  const packages = (await real("approved")).map((d) => {
+    const draft = d.draft as PackageDraft;
+    const coverStorageId = draft.coverStorageId ?? standard;
+    return {
+      packageId: d.packageId, showDate: draft.showDate, decidedAt: d.decidedAt, draft, fingerprint: d.fingerprint,
+      ...(coverStorageId ? { coverStorageId } : {}),
+    };
+  });
+  const today = chicagoDayKey(Date.now());
+  // R10: an unknown outcome may be a real post, so it counts too (pacing errs conservative).
+  // ponytail: scans every such result ever (a few a week); add a by-day index if this grows large.
+  const results = [...(await real("succeeded")), ...(await real("outcome_unknown"))];
+  const publishedToday = results.filter((d) => d.result?.at && chicagoDayKey(Date.parse(d.result.at)) === today).length;
+  return { packages, publishedToday };
+}
+
 export const queue = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requirePublisher(token);
-    const real = (status: "approved" | "succeeded" | "outcome_unknown") =>
-      ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
-    const standard = process.env.STANDARD_COVER_STORAGE_ID;
-    const packages = (await real("approved")).map((d) => {
-      const draft = d.draft as PackageDraft;
-      const coverStorageId = draft.coverStorageId ?? standard;
-      return {
-        packageId: d.packageId, showDate: draft.showDate, decidedAt: d.decidedAt, draft, fingerprint: d.fingerprint,
-        ...(coverStorageId ? { coverStorageId } : {}),
-      };
-    });
-    const today = chicagoDayKey(Date.now());
-    // R10: an unknown outcome may be a real post, so it counts too (pacing errs conservative).
-    // ponytail: scans every such result ever (a few a week); add a by-day index if this grows large.
-    const results = [...(await real("succeeded")), ...(await real("outcome_unknown"))];
-    const publishedToday = results.filter((d) => d.result?.at && chicagoDayKey(Date.parse(d.result.at)) === today).length;
-    return { packages, publishedToday };
+    return publishQueue(ctx);
   },
 });
 

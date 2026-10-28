@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { gateFor, viaGate } from "./gate";
+import { actorOf, gateFor, viaGate, workspaceOf } from "./gate";
 import { convexPackageStore } from "./packageStore";
 
 // The media service on the VM (joins the two hour WAVs into the MP3) is the only caller. Every function checks
@@ -64,5 +64,15 @@ export const cleanup = query({
     const byStatus = (status: "skipped" | "succeeded") =>
       ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
     return (await Promise.all([byStatus("skipped"), byStatus("succeeded")])).flat().map((d) => d.packageId);
+  },
+});
+
+/** R5: the current audio problems for Today, oldest show first. A signed-in real human only; anyone else sees none. */
+export const issues = query({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") return [];
+    const rows = await ctx.db.query("audioIssues").collect();
+    return rows.map(({ showDate, reason }) => ({ showDate, reason })).sort((a, b) => a.showDate.localeCompare(b.showDate));
   },
 });
