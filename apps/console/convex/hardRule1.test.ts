@@ -32,13 +32,15 @@ test("the public writes are exactly the allowlist", async () => {
       "packages.setCover", "packages.coverUploadUrl",
       // I2: a signed-in real human settles a finished upload (reopen for review, or confirm it is on Mixcloud).
       "packages.reopen", "packages.confirmPosted",
+      // Plan 5c: a signed-in real human edits the description before approval (re-fingerprints; never approves).
+      "packages.editDescription",
       "media.attached", "media.waiting",
       "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud", "publisher.unclaim",
       "mixcloud.connected", "mixcloud.disconnected",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
-    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
+    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
   );
 });
 
@@ -77,20 +79,48 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP route is POST /agent/packages", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method])).toEqual([["/agent/packages", "POST"]]);
+test("the only HTTP routes are the agent's submit and revise", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/packages", "POST"], ["/agent/packages/revise", "POST"]]);
 });
 
-test("the agent route reaches only internal.packages.submit", () => {
+test("the agent routes reach only internal.packages.submit and internal.packages.revise", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
-    expect([...refs].filter((r) => r !== "internal.packages.submit")).toEqual([]);
+    expect([...refs].filter((r) => !allowed.includes(r))).toEqual([]);
   }
-  expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain("internal.packages.submit");
+  for (const ref of allowed) expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain(ref);
 });
 
-test("the agent route files import only what they should and make one ctx.run call", () => {
+// Plan 5c: the agent's revise reaches the gate only through revise (which never approves), and only for a package in
+// the token's own workspace; the human edit checks the signed-in actor and workspace before the gate.
+const fnBody = (text: string, decl: string) => {
+  const body = text.slice(text.indexOf(decl));
+  return body.slice(0, body.indexOf("\n});"));
+};
+
+test("packages.revise (the agent's) calls only gateFor(ctx).revise, after the workspace check", () => {
+  const fn = fnBody(src("packages"), "export const revise = internalMutation(");
+  expect([...fn.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1])).toEqual(["revise"]);
+  const workspaceCheck = fn.indexOf("cur.draft.workspace !== workspace");
+  expect(workspaceCheck).toBeGreaterThan(0);
+  expect(workspaceCheck).toBeLessThan(fn.indexOf("gateFor(ctx).revise("));
+  expect(fn).not.toMatch(/\bdecide\b|decidedBy|"approved"/);
+});
+
+test("packages.editDescription checks the signed-in actor and the workspace before the gate", () => {
+  const fn = fnBody(src("packages"), "export const editDescription = mutation(");
+  const gate = fn.indexOf("gateFor(ctx).editDescription(");
+  expect(gate).toBeGreaterThan(0);
+  expect([...fn.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1])).toEqual(["editDescription"]);
+  for (const check of ["await staffOn(ctx, packageId)", `workspaceOf(actor) !== "real"`]) {
+    expect(fn.indexOf(check), check).toBeGreaterThan(0);
+    expect(fn.indexOf(check), check).toBeLessThan(gate);
+  }
+});
+
+test("the agent route files import only what they should and make one ctx.run call per route", () => {
   const read = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
   const httpSrc = read("./http.ts");
   const rel = [...httpSrc.matchAll(/from "(\.[^"]*)"/g)].map((m) => m[1]).sort();
@@ -98,7 +128,7 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation"]);
 });
 
 // Plan 5: the media and publisher services. Neither can decide; the publisher reaches packages only through the

@@ -396,3 +396,52 @@ test("other failures still reopen to awaiting_review", async () => {
   const { id } = await settled("failed"); // "cover is not a usable image"
   expect((await gate.reopen(id, tarik)).status).toBe("awaiting_review");
 });
+
+const issuesOf = async (p: Promise<unknown>) => {
+  try {
+    await p;
+  } catch (e) {
+    return e instanceof GateError ? { code: e.code, issues: e.issues } : `not a GateError: ${String(e)}`;
+  }
+  return "no error";
+};
+
+test("editDescription: a human edits while awaiting review; it re-fingerprints, keeps the sources and stays in review", async () => {
+  const sources = [{ claim: "A fact", source: "crate: musicbrainz" }];
+  const { id, fp } = await ready({ descriptionSources: sources });
+  const before = transitions.length;
+  const edited = await gate.editDescription(id, "Warm, patient soul from start to finish.", tarik, []);
+  expect(edited.status).toBe("awaiting_review");
+  expect(edited.draft.description).toBe("Warm, patient soul from start to finish.");
+  expect(edited.draft.descriptionSources).toEqual(sources);
+  expect(edited.draft.audio.mp3Sha256).toBe(MP3);
+  expect(edited.fingerprint).toBe(await fingerprint(edited.draft));
+  expect(edited.fingerprint).not.toBe(fp);
+  // the old fingerprint cannot approve the new text
+  expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("PACKAGE_CHANGED");
+  expect(transitions.slice(before)).toEqual([expect.objectContaining({ id, from: "awaiting_review", to: "awaiting_review", by: "tarik@radiomilwaukee.org" })]);
+  expect((await gate.decide(id, edited.fingerprint!, "approve", tarik)).status).toBe("approved");
+});
+
+test("editDescription: only a signed-in real human, only while awaiting review", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.editDescription(id, "New text here.", { kind: "agent" }, []))).toBe("FORBIDDEN");
+  expect(await code(gate.editDescription(id, "New text here.", judge, []))).toBe("FORBIDDEN");
+  expect(await code(gate.editDescription(id, "New text here.", { kind: "human", userId: "x", email: "x@gmail.com" }, []))).toBe("FORBIDDEN");
+  expect(await code(gate.editDescription("nope", "New text here.", tarik, []))).toBe("NOT_FOUND");
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.editDescription(id, "New text here.", tarik, []))).toBe("NOT_READY");
+  const pending = await gate.submit(goldenDraft({ id: "pkg-x" }));
+  expect(await code(gate.editDescription(pending.draft.id, "New text here.", tarik, []))).toBe("NOT_READY");
+});
+
+test("editDescription: the checker's issues refuse the edit as BAD_INPUT, with the issue list, and change nothing", async () => {
+  const { id, fp } = await ready();
+  const r = await issuesOf(gate.editDescription(id, "An upcoming record on a tiny label run by Jane Secret.", tarik, ["Jane Secret"]));
+  expect(r).toEqual({ code: "BAD_INPUT", issues: [expect.stringContaining("upcoming"), "description contains a private term"] });
+  expect(await issuesOf(gate.editDescription(id, "x".repeat(1000), tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("1000 characters")] });
+  // the draft's own track titles count toward a pasted tracklist
+  const titles = goldenDraft().tracks.filter((t) => t.title.length >= 5).slice(0, 6).map((t) => t.title).join(", ");
+  expect(await issuesOf(gate.editDescription(id, titles, tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("lists tracks")] });
+  expect((await gate.decide(id, fp, "approve", tarik)).status).toBe("approved");
+});

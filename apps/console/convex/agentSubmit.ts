@@ -77,3 +77,18 @@ export function pickInput(body: unknown): AgentPackageInput | null {
   if (b.descriptionSources !== undefined) (out as Record<string, unknown>).descriptionSources = b.descriptionSources;
   return out as unknown as AgentPackageInput;
 }
+
+/** The server's private terms (AIRCHECK_PRIVATE_TERMS, comma-separated): never allowed in a public description. */
+export const privateTerms = () =>
+  (process.env.AIRCHECK_PRIVATE_TERMS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+export type AgentRevision = { packageId: string; description: string; descriptionSources?: unknown };
+
+/** The agent's revision: the package id and the new description (with optional sources); anything else is dropped. */
+export function pickRevision(body: unknown): AgentRevision | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as Record<string, unknown>;
+  if (typeof b.packageId !== "string" || typeof b.description !== "string") return null;
+  // Optional; its shape is checked (with plain messages) by checkDescriptionChange.
+  return { packageId: b.packageId, description: b.description, ...(b.descriptionSources !== undefined && { descriptionSources: b.descriptionSources }) };
+}

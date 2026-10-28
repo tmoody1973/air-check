@@ -35,7 +35,8 @@ function checkSources(v: unknown): string[] {
   return out;
 }
 
-function describeIssue(i: DescriptionIssue): string {
+/** One checker issue as a plain sentence (also shown in the console's Edit description box). */
+export function describeIssue(i: DescriptionIssue): string {
   switch (i.kind) {
     case "too-long":
       return `description is ${i.length} characters, must be under 1,000`;
@@ -46,6 +47,15 @@ function describeIssue(i: DescriptionIssue): string {
     case "private":
       return "description contains a private term";
   }
+}
+
+/**
+ * A replacement description for an existing draft, checked like a submit: the draft's own track titles count toward
+ * a pasted tracklist, and the sources (when given) have the submit shape. Plain messages; empty when fine.
+ */
+export function checkDescriptionChange(draft: PackageDraft, description: string, sources: unknown, privateTerms: string[]): string[] {
+  const issues = checkDescription(description, { trackTitles: draft.tracks.map((t) => t.title), privateTerms });
+  return [...issues.map(describeIssue), ...checkSources(sources)];
 }
 
 /**
