@@ -84,6 +84,11 @@ function mayDecide(actor: Actor, workspace: PackageDraft["workspace"]): boolean 
   return actor.kind === "demo" && workspace === "demo";
 }
 
+/** The publisher's failure codes for the MP3 itself. Reopening one of these rebuilds the MP3 (Tarik's ruling). */
+export const AUDIO_CHANGED = "audio_changed";
+export const AUDIO_MISSING = "audio_missing";
+const AUDIO_FAILURES: readonly string[] = [AUDIO_CHANGED, AUDIO_MISSING];
+
 /** A show's address on Mixcloud's own site (the only receipt URL the console links). */
 export const MIXCLOUD_SHOW_PREFIX = "https://www.mixcloud.com/";
 
@@ -214,21 +219,24 @@ export class ApprovalGate {
   }
 
   /**
-   * failed or outcome_unknown -> awaiting_review, so a human can fix what went wrong and approve again. Hard Rule 1:
-   * this never yields approved; the decision, result and fingerprint start over.
+   * failed or outcome_unknown -> awaiting_review, so a human can fix what went wrong and approve again. A failure of
+   * the MP3 itself (changed or missing) goes to preparing_audio instead, with only the hour ids kept, so media
+   * rebuilds the MP3 from the inbox. Hard Rule 1: this never yields approved; decision, result and fingerprint start over.
    */
   async reopen(id: string, actor: Actor): Promise<PackageRecord> {
     this.requireStaff(actor);
     const cur = await this.load(id);
     if (cur.status !== "failed" && cur.status !== "outcome_unknown")
       throw new GateError("NOT_READY", `package ${id} can only be reopened after a failed or uncertain upload`);
-    const next = await this.store.compareAndSwap(
-      id,
-      { status: cur.status, fingerprint: cur.fingerprint },
-      { status: "awaiting_review", fingerprint: await fingerprint(cur.draft), result: undefined, decidedBy: undefined, decidedAt: undefined },
-    );
+    const cleared = { result: undefined, decidedBy: undefined, decidedAt: undefined };
+    const rebuild = cur.status === "failed" && AUDIO_FAILURES.includes(cur.result?.error ?? "");
+    const { hour1Id, hour2Id } = cur.draft.audio;
+    const patch: Partial<PackageRecord> = rebuild
+      ? { ...cleared, status: "preparing_audio", draft: { ...cur.draft, audio: { hour1Id, hour2Id } }, fingerprint: undefined }
+      : { ...cleared, status: "awaiting_review", fingerprint: await fingerprint(cur.draft) };
+    const next = await this.store.compareAndSwap(id, { status: cur.status, fingerprint: cur.fingerprint }, patch);
     if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while reopening`);
-    await this.emit(id, cur.status, "awaiting_review", actorName(actor));
+    await this.emit(id, cur.status, next.status, actorName(actor));
     return next;
   }
 

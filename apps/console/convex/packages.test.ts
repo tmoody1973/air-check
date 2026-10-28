@@ -162,7 +162,7 @@ describe("packages.reopen and packages.confirmPosted", () => {
 
   test("reopen: failed -> awaiting_review with the result and decision cleared; approve again to publish", async () => {
     const t = convexTest(schema, modules);
-    const { id, fp } = await finished(t, { status: "failed", error: "audio changed since approval" });
+    const { id, fp } = await finished(t, { status: "failed", error: "cover is not a usable image" });
     const r = await t.withIdentity(human).mutation(api.packages.reopen, { packageId: id });
     expect(r.ok && r.record.status).toBe("awaiting_review");
     const d = await doc(t);
@@ -172,6 +172,18 @@ describe("packages.reopen and packages.confirmPosted", () => {
     expect((await rows(t)).at(-1)).toMatchObject({ title: "Package ready for your approval", kind: "waiting", result: "needs_you", packageId: id });
     const again = await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" });
     expect(again.ok && again.record.status).toBe("approved");
+  });
+
+  test("reopen after an audio failure: preparing_audio, the MP3 hash dropped, so media lists it again", async () => {
+    vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+    const t = convexTest(schema, modules);
+    const { id } = await finished(t, { status: "failed", error: "audio_changed" });
+    const r = await t.withIdentity(human).mutation(api.packages.reopen, { packageId: id });
+    expect(r.ok && r.record.status).toBe("preparing_audio");
+    const d = await doc(t);
+    expect(d?.draft.audio).toEqual({ hour1Id: "box-h1", hour2Id: "box-h2" });
+    expect(d?.fingerprint).toBeUndefined();
+    expect(await t.query(api.media.pending, { token: "m".repeat(48) })).toEqual([{ packageId: id, showDate: "2026-10-02" }]);
   });
 
   test("confirmPosted: outcome_unknown -> succeeded with the URL; a bad URL is refused", async () => {

@@ -113,6 +113,19 @@ describe("runPass", () => {
     expect(convex.attachedCalls[0]!.mp3Bytes).toBe(8);
   });
 
+  test("a reopened audio failure (pending again, old MP3 still on disk) is re-encoded and re-attached with the new hash", async () => {
+    await mkdir(preparedDir);
+    await writeFile(join(preparedDir, "pkg-10-2-26.mp3"), "the MP3 that changed after approval");
+    await addShow("2026-10-02");
+    const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);
+    await pass(convex, okExec());
+    expect(calls.filter((c) => c.file === "ffmpeg")).toHaveLength(1);
+    expect(convex.attachedCalls).toHaveLength(1);
+    expect(convex.attachedCalls[0]!.mp3Sha256).toBe(createHash("sha256").update("fake mp3").digest("hex"));
+    expect(convex.attachedCalls[0]!.mp3Sha256).not.toBe(createHash("sha256").update("the MP3 that changed after approval").digest("hex"));
+    expect(await readdir(preparedDir)).toEqual(["pkg-10-2-26.mp3"]);
+  });
+
   test("a failed encode leaves no partial file and is reported", async () => {
     await addShow("2026-10-02");
     const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);

@@ -233,7 +233,9 @@ export function PackageDecision({
             </p>
           )}
           {!ready && record.status === "preparing_audio" && (
-            <p className="text-[12.5px] text-muted">The audio is still being prepared.</p>
+            <p className="text-[12.5px] text-muted">
+              Building the MP3 from the inbox folder <span className="font-mono">{draft.showDate}</span>. If that folder was removed, copy the two WAVs back.
+            </p>
           )}
           {(changed || notice) && (
             <div role="alert" className="flex flex-wrap items-center gap-3 rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">

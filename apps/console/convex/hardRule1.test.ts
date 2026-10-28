@@ -249,3 +249,25 @@ test("packages.reopen and packages.confirmPosted check the signed-in actor and t
   expect(staffOn).toMatch(/await actorOf\(ctx\)/);
   expect(staffOn).toMatch(/workspaceOf\(actor\) !== "real"/);
 });
+
+test("reopening an audio failure goes to preparing_audio, never approved, and cannot be claimed", async () => {
+  vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
+  vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+  const t = convexTest(schema, modules);
+  const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.mutation(internal.packages.submit, { draft });
+  await t.mutation(api.media.attached, { token: "m".repeat(48), packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 });
+  const staff = t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true });
+  const fp = (await t.run((ctx) => ctx.db.query("packages").first()))!.fingerprint!;
+  await staff.mutation(api.packages.decide, { packageId: draft.id, fingerprint: fp, decision: "approve" });
+  await t.mutation(api.publisher.claim, { token: "p".repeat(48), packageId: draft.id });
+  await t.mutation(api.publisher.result, { token: "p".repeat(48), packageId: draft.id, result: { status: "failed", error: "audio_missing" } });
+  for (const as of [t, t.withIdentity({ subject: "d1", role: "demo" })])
+    expect(await as.mutation(api.packages.reopen, { packageId: draft.id })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  const r = await staff.mutation(api.packages.reopen, { packageId: draft.id });
+  expect(r.ok && r.record.status).toBe("preparing_audio");
+  await expect(t.mutation(api.publisher.claim, { token: "p".repeat(48), packageId: draft.id })).rejects.toThrow(/NOT_READY/);
+  // The old fingerprint cannot approve it either: there is no MP3 to approve until media rebuilds it.
+  expect(await staff.mutation(api.packages.decide, { packageId: draft.id, fingerprint: fp, decision: "approve" })).toMatchObject({ ok: false, code: "NOT_READY" });
+  expect((await t.run((ctx) => ctx.db.query("packages").first()))?.status).toBe("preparing_audio");
+});

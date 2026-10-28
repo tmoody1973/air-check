@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { type PackageDraft, nextToPublish, toMixcloudFields, validateForUpload } from "@aircheck/core";
+import { AUDIO_CHANGED, AUDIO_MISSING, type PackageDraft, nextToPublish, toMixcloudFields, validateForUpload } from "@aircheck/core";
 import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem } from "./convex.js";
 import { timed } from "./log.js";
 import { imageType, MAX_COVER_BYTES, readTokenFile, uploadShow, type UploadOutcome } from "./mixcloud.js";
@@ -112,9 +112,9 @@ async function checkAudio(mp3Path: string, expected: string | undefined): Promis
   try {
     actual = await sha256File(mp3Path);
   } catch {
-    return { error: "audio file missing" };
+    return { error: AUDIO_MISSING };
   }
-  return actual === expected ? {} : { error: "audio changed since approval" };
+  return actual === expected ? {} : { error: AUDIO_CHANGED };
 }
 
 /**
@@ -161,7 +161,7 @@ async function precheck(deps: UploadDeps, p: QueueItem, storageId: string): Prom
   if ("error" in picture && !p.draft.coverStorageId) return { hold: "bad_cover" };
   if (!isOk(picture)) return picture as Fail | Hold;
   const mp3Bytes = await stat(mp3Path).then((st) => st.size, () => null);
-  if (mp3Bytes === null) return { error: "audio file missing" };
+  if (mp3Bytes === null) return { error: AUDIO_MISSING };
   const draft = await timed(deps.log, id, "validate", async () => checkDraft(p.draft, mp3Bytes, (picture as Picture).bytes.length), isOk);
   if ("error" in draft) return draft;
   return { mp3Path, fields: draft.fields, picture: picture as Picture };

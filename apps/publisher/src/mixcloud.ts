@@ -1,5 +1,6 @@
 import { openAsBlob } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { AUDIO_MISSING } from "@aircheck/core";
 
 /** Hard Rule 1: the only file allowed to name Mixcloud's upload endpoint (packages/core/src/boundaries.ts pins it). */
 export const MIXCLOUD_UPLOAD_URL = "https://api.mixcloud.com/upload/";
@@ -69,7 +70,7 @@ export async function uploadShow(i: UploadInput): Promise<UploadOutcome> {
   try {
     form.append("mp3", await openAsBlob(i.mp3Path, { type: "audio/mpeg" }), "show.mp3");
   } catch {
-    return { kind: "failed", code: "audio file missing" }; // nothing was sent yet
+    return { kind: "failed", code: AUDIO_MISSING }; // nothing was sent yet; reopening rebuilds the MP3
   }
   const url = new URL(i.uploadUrl ?? MIXCLOUD_UPLOAD_URL);
   url.searchParams.set("access_token", i.accessToken); // R19: Mixcloud documents only the query form; never logged

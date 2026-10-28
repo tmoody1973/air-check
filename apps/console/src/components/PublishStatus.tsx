@@ -1,4 +1,4 @@
-import type { GateErrorCode, PackageRecord } from "@aircheck/core";
+import { AUDIO_CHANGED, AUDIO_MISSING, type GateErrorCode, type PackageRecord } from "@aircheck/core";
 import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { chicagoTimeLabel, dayKeyLabel } from "../lib/date";
@@ -17,6 +17,15 @@ export type SettleFns = { reopen: () => Promise<SettleResult>; confirmPosted: (u
 const MIXCLOUD = "https://www.mixcloud.com/";
 /** A receipt URL becomes a link only on Mixcloud's own site; anything else is shown as text. */
 export const isMixcloudUrl = (url: string | undefined): url is string => !!url?.startsWith(MIXCLOUD);
+
+/** The publisher's short failure codes in plain words. Anything else (Mixcloud's own code, a validation list) shows as written. */
+const FAILURE: Record<string, string> = {
+  [AUDIO_CHANGED]: "The MP3 changed after approval",
+  [AUDIO_MISSING]: "The prepared MP3 is missing",
+  rate_limited: "Mixcloud asked us to slow down twice, so the upload was not sent",
+  internal_error: "Something went wrong before the upload. Nothing was sent.",
+};
+const isAudioFailure = (error: string | undefined) => error === AUDIO_CHANGED || error === AUDIO_MISSING;
 
 /** Why an approved show is not going up yet, when the publisher said (I3). */
 const PAUSED: Record<string, string> = {
@@ -48,7 +57,7 @@ const ACTION = "min-h-11 rounded-control border border-problem-text px-4 font-me
 /** True for a show's own address on Mixcloud: the prefix and something after it. */
 const isShowUrl = (url: string) => isMixcloudUrl(url) && url.length > MIXCLOUD.length;
 
-function SettleActions({ settle, uncertain }: { settle: SettleFns; uncertain: boolean }) {
+function SettleActions({ settle, uncertain, rebuild = false }: { settle: SettleFns; uncertain: boolean; rebuild?: boolean }) {
   const [pending, setPending] = useState<"reopen" | "confirm" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [url, setUrl] = useState("");
@@ -74,7 +83,7 @@ function SettleActions({ settle, uncertain }: { settle: SettleFns; uncertain: bo
   const busy = pending !== null;
   const reopen = (
     <button type="button" disabled={busy} onClick={() => run("reopen", settle.reopen)} className={ACTION}>
-      {pending === "reopen" ? "Reopening…" : uncertain ? "It isn't — reopen" : "Reopen for review"}
+      {pending === "reopen" ? "Reopening…" : uncertain ? "It isn't — reopen" : rebuild ? "Reopen and rebuild the MP3" : "Reopen for review"}
     </button>
   );
 
@@ -154,9 +163,13 @@ export function PublishStatus({ record, publish, mixcloudAccount, settle }: {
     case "failed":
       return (
         <Banner tone="problem">
-          <p className="font-medium">{result?.error || "The upload failed."}</p>
-          <p className="mt-1">Reopen to review again. You&apos;ll need to approve it again.</p>
-          {settle && <SettleActions settle={settle} uncertain={false} />}
+          <p className="font-medium">{(result?.error && FAILURE[result.error]) || result?.error || "The upload failed."}</p>
+          <p className="mt-1">
+            {isAudioFailure(result?.error)
+              ? "Reopen and rebuild the MP3. You'll review and approve it again."
+              : "Reopen to review again. You'll need to approve it again."}
+          </p>
+          {settle && <SettleActions settle={settle} uncertain={false} rebuild={isAudioFailure(result?.error)} />}
         </Banner>
       );
     case "outcome_unknown":

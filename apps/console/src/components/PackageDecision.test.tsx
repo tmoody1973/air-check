@@ -71,11 +71,13 @@ describe("PackageDecision", () => {
     expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
   });
 
-  it("preparing_audio disables Approve and Skip and says why", () => {
+  it("preparing_audio disables Approve and Skip and says what it waits for", () => {
     setup(record({ status: "preparing_audio", fingerprint: undefined }));
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
-    expect(screen.getByText("The audio is still being prepared.")).toBeInTheDocument();
+    const copy = "Building the MP3 from the inbox folder 2026-10-02. If that folder was removed, copy the two WAVs back.";
+    expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === copy)).toBeInTheDocument();
+    expect(screen.getByText("2026-10-02")).toHaveClass("font-mono"); // the folder name is data (Three Voices)
   });
 
   it("pins the reviewed package; a live change needs Reload and sends the pinned fingerprint", async () => {
@@ -362,7 +364,7 @@ describe("PackageDecision: settling a failed or uncertain upload", () => {
     const ui = (r: PackageRecord) => (
       <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} settle={settle} /></PlayerProvider>
     );
-    const { rerender } = render(ui(withAudio({ status: "failed", result: { error: "audio changed since approval" } })));
+    const { rerender } = render(ui(withAudio({ status: "failed", result: { error: "cover is not a usable image" } })));
     fireEvent.click(screen.getByRole("button", { name: "Reopen for review" }));
     expect(settle.reopen).toHaveBeenCalledTimes(1);
     rerender(ui(withAudio({ status: "awaiting_review", fingerprint: "fp9" })));
@@ -380,7 +382,7 @@ describe("PackageDecision: settling a failed or uncertain upload", () => {
     const { rerender } = render(ui(withAudio()));
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     await act(async () => {});
-    rerender(ui(withAudio({ status: "failed", result: { error: "audio file missing" } })));
+    rerender(ui(withAudio({ status: "failed", result: { error: "cover is not a usable image" } })));
     fireEvent.click(screen.getByRole("button", { name: "Reopen for review" }));
     await act(async () => {});
     rerender(ui(withAudio({ status: "awaiting_review", fingerprint: "fp9" })));
@@ -420,5 +422,31 @@ describe("PackageDecision: settling a failed or uncertain upload", () => {
     real(withAudio({ status: "outcome_unknown" }));
     expect(screen.queryByRole("button", { name: "It isn't — reopen" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Show address on Mixcloud")).not.toBeInTheDocument();
+  });
+});
+
+describe("PackageDecision: audio failures rebuild the MP3", () => {
+  it.each([
+    ["audio_changed", "The MP3 changed after approval"],
+    ["audio_missing", "The prepared MP3 is missing"],
+  ])("%s: plain reason, and the reopen says it rebuilds the MP3", (error, reason) => {
+    const settle = settleFns();
+    real(withAudio({ status: "failed", result: { error } }), { settle });
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    expect(screen.getByText("Reopen and rebuild the MP3. You'll review and approve it again.")).toBeInTheDocument();
+    expect(screen.queryByText("Reopen to review again. You'll need to approve it again.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen and rebuild the MP3" }));
+    expect(settle.reopen).toHaveBeenCalledTimes(1);
+  });
+
+  it("other short codes read as plain sentences; anything else is shown as written", () => {
+    const { unmount } = real(withAudio({ status: "failed", result: { error: "rate_limited" } }));
+    expect(screen.getByText("Mixcloud asked us to slow down twice, so the upload was not sent")).toBeInTheDocument();
+    unmount();
+    const r2 = real(withAudio({ status: "failed", result: { error: "internal_error" } }));
+    expect(screen.getByText("Something went wrong before the upload. Nothing was sent.")).toBeInTheDocument();
+    r2.unmount();
+    real(withAudio({ status: "failed", result: { error: "UploadLimitExceeded" } }));
+    expect(screen.getByText("UploadLimitExceeded")).toBeInTheDocument();
   });
 });

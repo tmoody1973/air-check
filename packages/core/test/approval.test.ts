@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "vitest";
-import { type Actor, ApprovalGate, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
+import { type Actor, ApprovalGate, AUDIO_CHANGED, AUDIO_MISSING, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
 import { goldenDraft } from "./helpers/goldens";
 import { memoryStore } from "./helpers/memory-store";
 
@@ -296,7 +296,7 @@ async function settled(r: "failed" | "outcome_unknown") {
   const { id, fp } = await ready({ id: `pkg-${r}` });
   await gate.decide(id, fp, "approve", tarik);
   await gate.claimForPublish(id);
-  await gate.recordResult(id, r === "failed" ? { status: "failed", error: "audio changed since approval" } : { status: "outcome_unknown" });
+  await gate.recordResult(id, r === "failed" ? { status: "failed", error: "cover is not a usable image" } : { status: "outcome_unknown" });
   return { id, fp };
 }
 
@@ -359,4 +359,32 @@ test("confirmPosted: outcome_unknown -> succeeded with the URL, stamped now (cou
 test("confirmPosted: a failed upload cannot be marked posted (it was refused, so it is not up)", async () => {
   const { id } = await settled("failed");
   expect(await code(gate.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY");
+});
+
+// Follow-up (Tarik's ruling): an audio failure reopens to preparing_audio, so media rebuilds the MP3.
+test("reopen after audio_changed or audio_missing: back to preparing_audio with only the hour ids kept", async () => {
+  for (const error of [AUDIO_CHANGED, AUDIO_MISSING]) {
+    const { id, fp } = await ready({ id: `pkg-${error}` });
+    await gate.decide(id, fp, "approve", tarik);
+    await gate.claimForPublish(id);
+    const failed = await gate.recordResult(id, { status: "failed", error });
+    const back = await gate.reopen(id, tarik);
+    expect(back.status).toBe("preparing_audio");
+    expect(back.draft.audio).toEqual({ hour1Id: failed.draft.audio.hour1Id, hour2Id: failed.draft.audio.hour2Id });
+    expect(back.fingerprint).toBeUndefined();
+    expect(back.result).toBeUndefined();
+    expect(back.decidedBy).toBeUndefined();
+    expect(back.decidedAt).toBeUndefined();
+    expect(transitions.at(-1)).toMatchObject({ id, from: "failed", to: "preparing_audio", by: "tarik@radiomilwaukee.org" });
+    expect(await gate.claimForPublish(id)).toBeNull(); // Hard Rule 1: never approved
+    expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("NOT_READY"); // needs the rebuilt MP3 first
+    const rebuilt = await gate.attachAudio(id, { ...back.draft.audio, mp3Sha256: "d".repeat(64) });
+    expect(rebuilt.status).toBe("awaiting_review");
+    expect(rebuilt.fingerprint).not.toBe(fp);
+  }
+});
+
+test("other failures still reopen to awaiting_review", async () => {
+  const { id } = await settled("failed"); // "cover is not a usable image"
+  expect((await gate.reopen(id, tarik)).status).toBe("awaiting_review");
 });

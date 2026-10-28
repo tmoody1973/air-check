@@ -88,12 +88,12 @@ describe("publishPass: the happy path", () => {
 });
 
 describe("publishPass: refusals before any request is sent", () => {
-  test("hash mismatch: failed 'audio changed since approval', no upload request", async () => {
+  test("hash mismatch: failed audio_changed (reopen rebuilds the MP3), no upload request", async () => {
     const s = await setup();
     await s.ws.addMp3(s.items[0]!.packageId, randomBytes(1000));
     await publishPass(await s.deps());
     expect(s.srv.uploads()).toHaveLength(0);
-    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "audio changed since approval" }]);
+    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "audio_changed" }]);
   });
 
   test("missing MP3: failed, no upload", async () => {
@@ -101,7 +101,7 @@ describe("publishPass: refusals before any request is sent", () => {
     await rm(join(s.ws.preparedDir, `${s.items[0]!.packageId}.mp3`));
     await publishPass(await s.deps());
     expect(s.srv.uploads()).toHaveLength(0);
-    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "audio file missing" }]);
+    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "audio_missing" }]);
   });
 
   test.each([
