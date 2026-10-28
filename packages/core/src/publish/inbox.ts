@@ -24,6 +24,9 @@ export function matchInbox(folder: string, files: string[]): InboxMatch {
   const [n1, n2] = wavs as [string, string];
   const a = { name: n1, key: leadingNumber(n1) };
   const b = { name: n2, key: leadingNumber(n2) };
+  if ((a.key === null) !== (b.key === null)) {
+    return { ok: false, reason: `${folder}: can't tell hour order — name both files with numbers, or neither` };
+  }
   if (a.key !== null && a.key === b.key) {
     return { ok: false, reason: `${folder}: ${a.name} and ${b.name} start with the same number, so the order is unclear` };
   }

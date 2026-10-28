@@ -25,6 +25,11 @@ describe("matchInbox", () => {
   test("equal keys", () => {
     expect(matchInbox("2026-10-02", ["07.wav", "7.wav"])).toMatchObject({ ok: false, reason: expect.stringMatching(/same|equal/i) });
   });
+  test("one name numbered and the other not: refused, never guessed", () => {
+    expect(matchInbox("2026-10-02", ["2.wav", "hour one.wav"])).toEqual({
+      ok: false, reason: "2026-10-02: can't tell hour order — name both files with numbers, or neither",
+    });
+  });
   test("bad folder name", () => {
     expect(matchInbox("oct 2", ["1.wav", "2.wav"])).toMatchObject({ ok: false, reason: expect.stringContaining("oct 2") });
     expect(matchInbox("2026-13-40", ["1.wav", "2.wav"])).toMatchObject({ ok: false });
