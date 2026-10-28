@@ -57,6 +57,17 @@ describe("RunProgressCard", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
   });
 
+  it("labels a step with no search text from its tool name", () => {
+    let state = initialRun("r1");
+    for (const tool of ["mcp__aircheck__package_get", "mcp__aircheck__package_revise"]) {
+      state = applyRunEvent(state, "tool.started", { tool, preview: null }, 1);
+      state = applyRunEvent(state, "tool.completed", { tool, duration: 0.1 }, 2);
+    }
+    render(<RunProgressCard title="t" state={state} totals={{ tracks: 0, closingSkipped: 0 }} status="completed" source="live" onTakeOver={() => {}} />);
+    expect(screen.getByText("Read the package")).toBeInTheDocument();
+    expect(screen.getByText("Proposed a new description")).toBeInTheDocument();
+  });
+
   it("verify chip appears for [verify] previews and sources", () => {
     const state: RunState = {
       runId: "r1", status: "running",

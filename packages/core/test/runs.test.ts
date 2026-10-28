@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import events from "./fixtures/v12-events.json";
-import { applyRunEvent, initialRun } from "../src/runs";
+import { applyRunEvent, initialRun, stepText } from "../src/runs";
 
 describe("applyRunEvent", () => {
   it("V12 replay yields 2 done steps and cancelled", () => {
@@ -38,5 +38,24 @@ describe("applyRunEvent", () => {
     const withMeta = { ...base, steps: [{ id: "r1-0", tool: "t", preview: "p", status: "working" as const, startedAt: 1, label: "H1.4", sources: ["musicbrainz.org"] }] };
     const s = applyRunEvent(withMeta, "tool.completed", { tool: "t" }, 2);
     expect(s.steps[0]).toMatchObject({ status: "done", label: "H1.4", sources: ["musicbrainz.org"] });
+  });
+});
+
+describe("stepText", () => {
+  const started = (tool: string, preview: string | null = null) => applyRunEvent(initialRun("r1"), "tool.started", { tool, preview }, 1).steps[0]!;
+  it.each([
+    ["mcp__aircheck__package_get", "Read the package"],
+    ["mcp__aircheck__package_revise", "Proposed a new description"],
+    ["mcp__aircheck__package_submit", "Submitted the package"],
+    ["package_get", "Read the package"],
+    ["skill_view", "Read a skill"],
+    ["skills_view", "Read a skill"],
+    ["mcp__crate__musicbrainz_search_artist", "musicbrainz search artist"],
+    ["tool_search", "tool search"],
+  ])("a %s step with no search text reads %j", (tool, text) => {
+    expect(stepText(started(tool))).toBe(text);
+  });
+  it("search text wins over the tool name", () => {
+    expect(stepText(started("mcp__crate__musicbrainz_search_artist", "Seun Kuti"))).toBe("Seun Kuti");
   });
 });

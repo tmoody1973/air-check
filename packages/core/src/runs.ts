@@ -20,6 +20,21 @@ export function initialRun(runId: string): RunState {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+const TOOL_TEXT: Record<string, string> = {
+  package_get: "Read the package",
+  package_revise: "Proposed a new description",
+  package_submit: "Submitted the package",
+  skill_view: "Read a skill",
+  skills_view: "Read a skill",
+};
+
+/** What a step row says: its search text, else a phrase for its tool (`mcp__<server>__` dropped, underscores to spaces). */
+export function stepText(step: Pick<RunStep, "tool" | "preview">): string {
+  if (step.preview) return step.preview;
+  const name = step.tool.replace(/^mcp__[^_]+__/, "");
+  return TOOL_TEXT[name] ?? name.replace(/_/g, " ");
+}
+
 // Field names follow spike V12: `tool`, `preview`; `error` and `duration` are tolerated if absent.
 export function applyRunEvent(state: RunState, event: string, data: Record<string, unknown>, at: number): RunState {
   switch (event) {
