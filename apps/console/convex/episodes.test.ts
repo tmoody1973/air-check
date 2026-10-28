@@ -191,3 +191,39 @@ describe("POST /agent/episodes/rerun", () => {
     expect(await t.run((ctx) => ctx.db.query("episodes").collect())).toEqual([]);
   });
 });
+
+describe("Connect Google / Connect Dropbox status (Plan 6 Task 3)", () => {
+  const sourcesOf = async (t: T) => (await t.withIdentity(human).query(api.episodes.sources, {}))!.map(({ source, state, account }) => ({ source, state, account }));
+
+  test("a signed-in real human records connected (with the account label) and not_connected; the row is replaced whole", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.ingest.sourceStatus, { token: INGEST, source: "google", state: "needs_reconnect", lastError: "invalid_grant" });
+    await t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "google", account: "tarik@radiomilwaukee.org" });
+    await t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "dropbox", account: "Dropbox account" });
+    const rows = await t.withIdentity(human).query(api.episodes.sources, {});
+    expect(rows!.find((r) => r.source === "google")).toMatchObject({ state: "connected", account: "tarik@radiomilwaukee.org" });
+    expect(rows!.find((r) => r.source === "google")?.lastError).toBeUndefined();
+    await t.withIdentity(human).mutation(api.episodes.sourceDisconnected, { source: "google" });
+    expect(await sourcesOf(t)).toEqual([
+      { source: "dropbox", state: "connected", account: "Dropbox account" },
+      { source: "google", state: "not_connected", account: undefined },
+    ]);
+  });
+
+  test("demo, anonymous and outside accounts are refused; Box has no button, so it can't be set here", async () => {
+    const t = convexTest(schema, modules);
+    for (const who of [demo, { subject: "x1", email: "someone@gmail.com", emailVerified: true }]) {
+      expect(await errorCode(t.withIdentity(who).mutation(api.episodes.sourceConnected, { source: "google", account: "a" }))).toBe("FORBIDDEN");
+      expect(await errorCode(t.withIdentity(who).mutation(api.episodes.sourceDisconnected, { source: "dropbox" }))).toBe("FORBIDDEN");
+    }
+    expect(await errorCode(t.mutation(api.episodes.sourceConnected, { source: "google", account: "a" }))).toBe("FORBIDDEN");
+    await expect(t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "box" as never, account: "a" })).rejects.toThrow();
+    expect(await t.run((ctx) => ctx.db.query("ingestSources").collect())).toEqual([]);
+  });
+
+  test("the account label is capped and must not be empty", async () => {
+    const t = convexTest(schema, modules);
+    expect(await errorCode(t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "google", account: "" }))).toBe("BAD_INPUT");
+    expect(await errorCode(t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "google", account: "x".repeat(201) }))).toBe("BAD_INPUT");
+  });
+});

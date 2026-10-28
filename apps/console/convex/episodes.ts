@@ -132,6 +132,37 @@ export const sources = query({
   },
 });
 
+type SourceRow = Omit<Doc<"ingestSources">, "_id" | "_creationTime">;
+
+/** The one row per source, replaced whole (so a cleared lastError really clears). Never a credential (Hard Rule 2). */
+export async function writeSource(ctx: MutationCtx, status: SourceRow): Promise<void> {
+  const row = await ctx.db.query("ingestSources").withIndex("by_source", (q) => q.eq("source", status.source)).unique();
+  if (row) await ctx.db.replace(row._id, status);
+  else await ctx.db.insert("ingestSources", status);
+}
+
+// Connect Google Drive / Connect Dropbox in Settings, after the console wrote or deleted the token file. Box has no
+// button (it is a server app), so only these two. A signed-in real human only; the account is a display label.
+const buttonSourceV = v.union(v.literal("google"), v.literal("dropbox"));
+const MAX_ACCOUNT = 200;
+
+export const sourceConnected = mutation({
+  args: { source: buttonSourceV, account: v.string() },
+  handler: async (ctx, { source, account }) => {
+    await requireRealHuman(ctx);
+    if (!account || account.length > MAX_ACCOUNT) throw badInput(`the account label must be 1 to ${MAX_ACCOUNT} characters`);
+    await writeSource(ctx, { source, state: "connected", account, checkedAt: Date.now() });
+  },
+});
+
+export const sourceDisconnected = mutation({
+  args: { source: buttonSourceV },
+  handler: async (ctx, { source }) => {
+    await requireRealHuman(ctx);
+    await writeSource(ctx, { source, state: "not_connected", checkedAt: Date.now() });
+  },
+});
+
 const MAX_ANSWER = 2_000;
 
 /**

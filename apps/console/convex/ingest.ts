@@ -3,7 +3,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { awaitingReviewCount, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage } from "./episodes";
+import { awaitingReviewCount, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, writeSource } from "./episodes";
 import { scannedEpisodeFields, sourceStateV } from "./schema";
 import { queueDraft } from "./tracklist";
 
@@ -128,8 +128,6 @@ export const sourceStatus = mutation({
   handler: async (ctx, { token, source, state, account, lastError }) => {
     requireIngest(token);
     const status = { source, state, checkedAt: Date.now(), ...(account ? { account } : {}), ...(lastError ? { lastError: lastError.slice(0, MAX_ERROR_CHARS) } : {}) };
-    const row = await ctx.db.query("ingestSources").withIndex("by_source", (q) => q.eq("source", source)).unique();
-    if (row) await ctx.db.replace(row._id, status);
-    else await ctx.db.insert("ingestSources", status);
+    await writeSource(ctx, status);
   },
 });

@@ -42,6 +42,8 @@ test("the public writes are exactly the allowlist", async () => {
       // Plan 6: the ingest service (its own token) and the Episodes page (a signed-in real human). None can decide.
       "ingest.upsert", "ingest.setFetch", "ingest.requestDraft", "ingest.sourceStatus",
       "episodes.answer", "episodes.markRerun", "episodes.unmarkRerun",
+      // Plan 6 Task 3: Connect Google / Connect Dropbox record state and an account label only (a signed-in real human).
+      "episodes.sourceConnected", "episodes.sourceDisconnected",
     ].sort(),
   );
   expect(internal.sort()).toEqual(

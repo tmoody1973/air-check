@@ -26,9 +26,11 @@ describe("deploy files", () => {
     expect(web.env_file).toBe("${HOME}/.aircheck/console.env");
   });
 
-  it("console mounts only the Mixcloud token folder (rw) and the prepared audio (ro)", () => {
+  it("console mounts only the Mixcloud and ingest token folders (rw) and the prepared audio (ro)", () => {
     expect(web.read_only).toBe(true);
-    expect(web.volumes).toEqual(["${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/aircheck-audio/prepared:/audio:ro"]);
+    expect(web.volumes).toEqual([
+      "${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/.aircheck/ingest-tokens:/ingest-tokens:rw", "${HOME}/aircheck-audio/prepared:/audio:ro",
+    ]);
   });
 
   it("caddy keeps only the bind capability", () => {
@@ -95,6 +97,7 @@ describe("deploy files", () => {
       "NEXT_PUBLIC_CONVEX_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_APP_URL",
       "CLERK_SECRET_KEY", "AIRCHECK_DEMO_USER_ID", "NEXT_TELEMETRY_DISABLED", "CLERK_TELEMETRY_DISABLED",
       "MIXCLOUD_CLIENT_ID", "MIXCLOUD_CLIENT_SECRET", "MIXCLOUD_TOKEN_FILE",
+      "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "INGEST_TOKEN_DIR",
     ]);
   });
 

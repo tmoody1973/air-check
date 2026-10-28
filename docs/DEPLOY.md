@@ -68,7 +68,19 @@ sudo chown 1000:1001 ~/.aircheck/mixcloud
 sudo chmod 2770 ~/.aircheck/mixcloud   # owner 1000, group 1001; the 2 (setgid) makes new files group 1001
 ```
 
-The console writes `token.json` with mode 640: the console can rewrite it and the publisher (group 1001) can read it, and no one else can. Check after connecting with `ls -ln ~/.aircheck/mixcloud` (expect `-rw-r----- 1000 1001`). "Disconnect" in Settings deletes the file. The container only mounts this folder read-write, plus `~/aircheck-audio/prepared` read-only for the player; the rest of the container stays read-only.
+The console writes `token.json` with mode 640: the console can rewrite it and the publisher (group 1001) can read it, and no one else can. Check after connecting with `ls -ln ~/.aircheck/mixcloud` (expect `-rw-r----- 1000 1001`). "Disconnect" in Settings deletes the file. The container mounts only this folder and the ingest token folder (below) read-write, plus `~/aircheck-audio/prepared` read-only for the player; the rest of the container stays read-only.
+
+### The ingest token folder (Connect Google Drive, Connect Dropbox)
+
+"Connect Google Drive" and "Connect Dropbox" in Settings write a read-only refresh token to `~/.aircheck/ingest-tokens/google.json` and `dropbox.json` (`{refresh_token, account, connectedAt}`; never the access token or the app secret). The ingest service (Plan 6) is the only other thing that reads them; they are never stored in Convex. Same sharing as the Mixcloud folder, created before the first `up`:
+
+```sh
+mkdir -p ~/.aircheck/ingest-tokens
+sudo chown 1000:1001 ~/.aircheck/ingest-tokens
+sudo chmod 2770 ~/.aircheck/ingest-tokens   # owner 1000, group 1001; setgid so new files are group 1001
+```
+
+Each file is written with mode 640 (check with `ls -ln ~/.aircheck/ingest-tokens`, expect `-rw-r----- 1000 1001`). "Disconnect" deletes that provider's file. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DROPBOX_APP_KEY` and `DROPBOX_APP_SECRET` in `console.env` (setup steps: `docs/superpowers/research/2026-10-28-plan-6-api-research.md`, "Owner setup steps"). Redirect URIs: `<NEXT_PUBLIC_APP_URL>/api/google/callback` and `/api/dropbox/callback`. Box has no button: it is a server app configured in the ingest service's own env file.
 
 ## Everyday commands (on the VM)
 
@@ -150,7 +162,7 @@ dc down
 ### Redo from scratch on a new VM
 
 1. Set up Docker and the firewall as in `docs/NEBIUS_SETUP.md`.
-2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above, and the Mixcloud token folder as in "The Mixcloud token folder".
+2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above, the Mixcloud token folder as in "The Mixcloud token folder", and the ingest token folder as in "The ingest token folder".
 3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
 5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:
