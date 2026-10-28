@@ -24,6 +24,7 @@ PROBES=(
   # One probe per sandbox so an alert names which agent lost its tools. Any JSON spacing.
   "Agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes airc mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
   "Demo agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes aircdemo mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
+  "Agent skills|for s in airc aircdemo; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes \"\$s\" skill list 2>/dev/null | grep -q rlr-description-safety || exit 1; done"
 )
 
 down=()

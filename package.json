@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p packages/core && pnpm --filter console typecheck && pnpm --filter @aircheck/bridge typecheck && pnpm --filter @aircheck/relay typecheck && pnpm --filter @aircheck/media typecheck && pnpm --filter @aircheck/publisher typecheck",
     "build": "pnpm --filter console build",
+    "sync:skills": "node scripts/sync-description-skill.mjs",
     "seed:demo": "pnpm --filter console exec convex run seed:seedDemo"
   },
   "devDependencies": {

@@ -237,7 +237,7 @@ Stored in `skills/` and versioned in the repo:
 - `rlr-box-episode-assembly`: which Box files are the hours, what to ignore, when to ask.
 - `rlr-source-reconciliation`: Drive vs Paper vs Box rules.
 - `rlr-mixcloud-title-and-tags`: title and tag style from the 100 most recent posts.
-- `rlr-description-safety`: private notes to public description, with what to leave out.
+- `rlr-description-safety`: private notes to public description, with what to leave out. Nemotron does not reliably open installed skills on its own (live test, Oct 28), so this one is also delivered in code: its body (no frontmatter) is generated into `DESCRIPTION_SKILL_TEXT` by `pnpm sync:skills`, sent in every draft-package prompt and returned as `descriptionGuide` by the bridge's `package_get`. A test fails when the generated text and the SKILL.md differ.
 - `rlr-pre-air-verify`: the fact-check loop.
 - `rlr-show-notes`: sourced show notes in his Paper format, replacing the Perplexity prompt (written).
 - `rlr-theme-ideas`: theme suggestions from show history, the release radar and the digest (written).

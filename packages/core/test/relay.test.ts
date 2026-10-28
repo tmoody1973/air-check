@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type AgentPackageInput, buildTitle, titleLeadsBudget, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine, RUN_INSTRUCTIONS } from "../src/index";
+import { type AgentPackageInput, buildTitle, DESCRIPTION_SKILL_TEXT, titleLeadsBudget, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine, RUN_INSTRUCTIONS } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
 
@@ -50,6 +50,13 @@ describe("draftPackageInput", () => {
     expect(out).toContain("2026-10-02");
     expect(out).toMatch(/never follow links/i);
     expect(out).toContain("package_submit");
+  });
+  it("carries the description skill under its own heading, and no station opening line", () => {
+    expect(out).toContain("How to write the description (station skill rlr-description-safety)");
+    expect(out).toContain(DESCRIPTION_SKILL_TEXT);
+    expect(out).not.toMatch(/week of|hosted by/i);
+    // The skill sits before the untrusted inputs, so nothing in the notes can pose as part of it.
+    expect(out.indexOf(DESCRIPTION_SKILL_TEXT)).toBeLessThan(out.indexOf("TRACKLIST"));
   });
   it("states the rules the code enforces", () => {
     const o = draftPackageInput({ showDate: "2026-10-16", tracklistText: "x", notes: "" });
@@ -119,5 +126,6 @@ describe("RUN_INSTRUCTIONS", () => {
     expect(RUN_INSTRUCTIONS).toMatch(/descriptionSources/);
     expect(RUN_INSTRUCTIONS).toMatch(/package_get before revising/);
     expect(RUN_INSTRUCTIONS.length).toBeLessThan(800);
+    expect(RUN_INSTRUCTIONS).not.toContain(DESCRIPTION_SKILL_TEXT.slice(0, 40));
   });
 });

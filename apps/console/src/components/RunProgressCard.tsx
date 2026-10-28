@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Link from "next/link";
-import type { RunState, RunStep } from "@aircheck/core";
+import { type RunState, type RunStep, stepText } from "@aircheck/core";
 import { SampleTag } from "./SampleTag";
 import { Pill } from "./Pill";
 
@@ -48,7 +48,7 @@ function StepRow({ step, index }: { step: RunStep; index: number }) {
   return (
     <Row label={step.label ?? String(index + 1)} status={word} current={step.status === "working"}>
       <div className="break-words">
-        {step.preview}
+        {stepText(step)}
         {verify && <> <span className={chipClass(true)}>{VERIFY}</span></>}
       </div>
       {!!step.sources?.length && (

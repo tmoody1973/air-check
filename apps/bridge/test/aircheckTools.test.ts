@@ -1,3 +1,4 @@
+import { DESCRIPTION_SKILL_TEXT } from "@aircheck/core";
 import { describe, expect, it } from "vitest";
 import { packageGetTool, packageReviseTool, packageSubmitTool } from "../src/aircheckTools.js";
 
@@ -196,10 +197,16 @@ describe("package_get", () => {
     expect(JSON.parse(s.calls[0]!.init.body as string)).toEqual({ packageId: "pkg-10-2-26" });
   });
 
-  it("200: returns the package as JSON text", async () => {
+  it("200: returns the package as JSON text plus the description guide, and nothing else", async () => {
     const r = await tool(200, pkg).call({ packageId: "pkg-10-2-26" });
     expect(r.isError).toBeFalsy();
-    expect(JSON.parse(textOf(r))).toEqual(pkg);
+    expect(JSON.parse(textOf(r))).toEqual({ ...pkg, descriptionGuide: DESCRIPTION_SKILL_TEXT });
+  });
+
+  it("tells the agent to follow descriptionGuide over the current description's style", () => {
+    expect(tool(200, pkg).tool.description).toContain(
+      "Before writing or revising a description, follow descriptionGuide exactly; it overrides the current description's style.",
+    );
   });
 
   it("404 says no such package; 400 lists the problem; 401/503 not configured without the token", async () => {

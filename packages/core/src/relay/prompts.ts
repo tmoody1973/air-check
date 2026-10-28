@@ -1,3 +1,4 @@
+import { DESCRIPTION_SKILL_TEXT } from "../package/descriptionSkill";
 import { titleLeadsBudget, titlePrefix } from "../package/title";
 
 /**
@@ -27,6 +28,10 @@ export function draftPackageInput(form: PackageDraftForm): string {
     '- hour1Id = "pending-hour-1" and hour2Id = "pending-hour-2". The audio arrives later.',
     "Research only with the Crate tools (MusicBrainz, Wikipedia, Bandcamp search, iTunes). Do not use terminal, code or file tools.",
     "If package_submit is rejected twice, stop and report its problems in one short message. Do not keep retrying.",
+    "",
+    // The model does not reliably open installed skills on its own (live test, Oct 28), so the skill travels in the prompt.
+    "How to write the description (station skill rlr-description-safety). Follow it exactly:",
+    DESCRIPTION_SKILL_TEXT,
     "",
     "TRACKLIST",
     form.tracklistText,
