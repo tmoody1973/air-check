@@ -1,7 +1,11 @@
 // @vitest-environment edge-runtime
 import { readFileSync } from "node:fs";
-import { expect, test } from "vitest";
+import { convexTest } from "convex-test";
+import { afterEach, expect, test, vi } from "vitest";
+import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { api, internal } from "./_generated/api";
 import http from "./http";
+import schema from "./schema";
 
 // Hard Rule 1: no model output reaches publish. Every public write is listed here by name; HTTP actions
 // are public by nature, so any httpAction export counts too (the one allowed is the agent route, pinned below).
@@ -22,7 +26,14 @@ test("the public writes are exactly the allowlist", async () => {
     }
   }
   expect(exposed.sort()).toEqual(
-    ["chat.send", "packages.decide", "relay.activity", "relay.events", "relay.finished", "relay.started", "relay.status", "runs.requestStop", "tracklist.draft"].sort(),
+    [
+      "chat.send", "packages.decide", "relay.activity", "relay.events", "relay.finished", "relay.started", "relay.status", "runs.requestStop", "tracklist.draft",
+      // Plan 5: the cover (signed-in human), the media and publisher services (each with its own token), Mixcloud status.
+      "packages.setCover", "packages.coverUploadUrl",
+      "media.attached", "media.waiting",
+      "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud",
+      "mixcloud.connected",
+    ].sort(),
   );
   expect(internal.sort()).toEqual(
     ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
@@ -86,4 +97,80 @@ test("the agent route files import only what they should and make one ctx.run ca
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
   expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation"]);
+});
+
+// Plan 5: the media and publisher services. Neither can decide; the publisher reaches packages only through the
+// gate's claimForPublish and recordResult (and reads them); Mixcloud status code never touches packages.
+const SERVICE_FILES = ["media", "publisher", "mixcloud"];
+
+test("media, publisher and mixcloud code never call decide", () => {
+  for (const name of SERVICE_FILES) {
+    const text = src(name);
+    expect(text, `${name}.ts mentions decide`).not.toMatch(/\bdecide\b/);
+    for (const banned of ["internal.packages", "api.packages", "ApprovalGate"]) expect(text, `${name}.ts mentions ${banned}`).not.toContain(banned);
+  }
+});
+
+test("the publisher reaches packages only through claimForPublish and recordResult", () => {
+  const text = src("publisher");
+  expect([...new Set([...text.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1]))].sort()).toEqual(["claimForPublish", "recordResult"]);
+  expect(text.match(/gateFor\(/g)).toHaveLength(text.match(/gateFor\(ctx\)\.(?:claimForPublish|recordResult)\(/g)!.length);
+  for (const banned of ["convexPackageStore", "compareAndSwap", "attachAudio", "setCover"]) expect(text, `publisher.ts mentions ${banned}`).not.toContain(banned);
+  // No direct writes at all: Mixcloud status goes through mixcloud.ts's writer.
+  expect(text).not.toMatch(/\.(?:patch|insert|replace|delete)\(/);
+});
+
+test("media and mixcloud code never claim or record a publish result", () => {
+  for (const name of ["media", "mixcloud"]) {
+    for (const banned of ["claimForPublish", "recordResult"]) expect(src(name), `${name}.ts mentions ${banned}`).not.toContain(banned);
+  }
+  expect(src("mixcloud")).not.toMatch(/"packages"|gateFor|convexPackageStore/);
+});
+
+afterEach(() => vi.unstubAllEnvs());
+const modules = import.meta.glob("./**/*.*s");
+
+test("a package never approved through packages.decide cannot be claimed", async () => {
+  vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
+  vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+  const t = convexTest(schema, modules);
+  const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.mutation(internal.packages.submit, { draft });
+  const args = { packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 };
+  await t.mutation(api.media.attached, { token: "m".repeat(48), ...args });
+  await expect(t.mutation(api.publisher.claim, { token: "p".repeat(48), packageId: draft.id })).rejects.toThrow(/NOT_READY/);
+  const doc = await t.run((ctx) => ctx.db.query("packages").first());
+  expect(doc?.status).toBe("awaiting_review");
+});
+
+test("the relay's and the agent's tokens are refused by every media and publisher function", async () => {
+  const RELAY = "r".repeat(48);
+  const AGENT = "a".repeat(48);
+  vi.stubEnv("RELAY_TOKEN", RELAY);
+  vi.stubEnv("AGENT_SUBMIT_TOKEN", AGENT);
+  vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", "d".repeat(48));
+  vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
+  vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+  const t = convexTest(schema, modules);
+  const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.mutation(internal.packages.submit, { draft });
+  const cover = await t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
+  const before = await t.run((ctx) => ctx.db.query("packages").collect());
+  for (const token of [RELAY, AGENT, "d".repeat(48)]) {
+    const id = draft.id;
+    const calls = [
+      t.query(api.media.pending, { token }),
+      t.mutation(api.media.attached, { token, packageId: id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 }),
+      t.mutation(api.media.waiting, { token, items: [] }),
+      t.query(api.media.cleanup, { token }),
+      t.query(api.publisher.queue, { token }),
+      t.mutation(api.publisher.claim, { token, packageId: id }),
+      t.mutation(api.publisher.result, { token, packageId: id, result: { status: "outcome_unknown" } }),
+      t.mutation(api.publisher.reconcile, { token }),
+      t.query(api.publisher.coverUrl, { token, storageId: cover }),
+      t.mutation(api.publisher.setMixcloud, { token, state: "connected" }),
+    ];
+    for (const call of calls) await expect(call).rejects.toThrow(/UNAUTHORIZED/);
+  }
+  expect(await t.run((ctx) => ctx.db.query("packages").collect())).toEqual(before);
 });

@@ -33,8 +33,9 @@ export const listAwaiting = query({
 });
 
 export type DecideResult = { ok: true; record: PackageRecord } | { ok: false; code: GateErrorCode; message: string };
+export type CoverResult = DecideResult | { ok: false; code: "BAD_INPUT"; message: string };
 
-/** The only public mutation on packages (Hard Rule 1). */
+/** The only public mutation that decides a package (Hard Rule 1). */
 export const decide = mutation({
   args: { packageId: v.string(), fingerprint: v.string(), decision: v.union(v.literal("approve"), v.literal("skip")) },
   handler: async (ctx, { packageId, fingerprint, decision }): Promise<DecideResult> => {
@@ -62,6 +63,40 @@ export const decide = mutation({
   },
 });
 
+/**
+ * A signed-in real human picks the cover (or clears it with null) while the package awaits review. The cover goes
+ * public, so the package re-fingerprints and must be approved as it now looks.
+ */
+export const setCover = mutation({
+  args: { packageId: v.string(), storageId: v.union(v.id("_storage"), v.null()) },
+  handler: async (ctx, { packageId, storageId }): Promise<CoverResult> => {
+    const actor = await actorOf(ctx);
+    const forbidden = { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can change the cover" } as const;
+    if (workspaceOf(actor) !== "real") return forbidden;
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    if (doc && doc.workspace !== "real") return forbidden;
+    if (storageId) {
+      const file = await ctx.db.system.get(storageId);
+      if (!file?.contentType?.startsWith("image/")) return { ok: false, code: "BAD_INPUT", message: "The cover must be an image." };
+    }
+    try {
+      return { ok: true, record: await gateFor(ctx).setCover(packageId, storageId, actor!) };
+    } catch (e) {
+      if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
+      throw e;
+    }
+  },
+});
+
+/** A one-time Convex storage upload URL for a cover image. A signed-in real human only. */
+export const coverUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") throw new ConvexError({ code: "FORBIDDEN" });
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
 // Internal: reachable only with the deploy key (Plans 4 and 5).
 export const submit = internalMutation({
   args: { draft: v.any() },
@@ -81,6 +116,7 @@ const audioV = v.object({
   hour2Id: v.string(),
   mp3Sha256: v.string(),
   hour1DurationSec: v.optional(v.number()),
+  mp3Bytes: v.optional(v.number()),
 });
 
 export const attachAudio = internalMutation({

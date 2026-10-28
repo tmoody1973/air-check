@@ -1,4 +1,5 @@
-import { ApprovalGate, type Actor, actorFromIdentity } from "@aircheck/core";
+import { ApprovalGate, type Actor, actorFromIdentity, GateError } from "@aircheck/core";
+import { ConvexError } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { convexPackageStore } from "./packageStore";
 
@@ -46,4 +47,14 @@ export function gateFor(ctx: MutationCtx) {
       });
     },
   });
+}
+
+/** Runs a gate call for a token-gated service. Only ConvexError data reaches a remote caller, so a GateError crosses as {code, message}. */
+export async function viaGate<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (e) {
+    if (e instanceof GateError) throw new ConvexError({ code: e.code, message: e.message });
+    throw e;
+  }
 }
