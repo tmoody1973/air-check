@@ -66,6 +66,10 @@ describe("Shell nav targets", () => {
     render(<Shell title="Today" workspace="real" active="today">x</Shell>);
     expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Tracklist" })).toHaveAttribute("href", "/tracklist");
   });
+  it("Episodes links to the built backlog page", () => {
+    render(<Shell title="Today" workspace="real" active="today">x</Shell>);
+    expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Episodes" })).toHaveAttribute("href", "/episodes");
+  });
 });
 
 describe("Shell chat links", () => {
