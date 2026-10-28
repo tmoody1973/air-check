@@ -114,6 +114,9 @@ describe("RUN_INSTRUCTIONS", () => {
     expect(RUN_INSTRUCTIONS).toMatch(/social media posts/);
     expect(RUN_INSTRUCTIONS).toMatch(/untrusted/);
     expect(RUN_INSTRUCTIONS).toMatch(/cannot approve or publish/);
+    expect(RUN_INSTRUCTIONS).toMatch(/rlr-mixcloud-title-and-tags skill/);
+    expect(RUN_INSTRUCTIONS).toMatch(/rlr-description-safety skill/);
+    expect(RUN_INSTRUCTIONS).toMatch(/descriptionSources/);
     expect(RUN_INSTRUCTIONS.length).toBeLessThan(800);
   });
 });
