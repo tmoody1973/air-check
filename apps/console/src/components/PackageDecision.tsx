@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useState } from "react";
 import { showDateLabel } from "../lib/date";
 import { trackFor } from "../lib/track";
+import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
+import { isMixcloudUrl, PublishStatus, type PublishState } from "./PublishStatus";
 import { SampleTag } from "./SampleTag";
 import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
+export type { CoverChangeFn, PublishState };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -43,12 +46,21 @@ export function PackageDecision({
   workspace,
   decide,
   needsMixcloud = false,
+  cover,
+  publish,
+  mixcloudAccount,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
   decide: DecideFn;
   /** Real workspace with no working Mixcloud connection: Approve still works, the package waits in the queue. */
   needsMixcloud?: boolean;
+  /** Real workspace: the cover's URL (own or standard) and how to replace it. */
+  cover?: { url: string | null; change: CoverChangeFn };
+  /** Real workspace: where an approved package stands in the publisher's queue (packages.publishState). */
+  publish?: PublishState | null;
+  /** The connected Mixcloud account, for the "check your uploads" link. */
+  mixcloudAccount?: string;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
@@ -73,6 +85,17 @@ export function PackageDecision({
   const ready = record.status === "awaiting_review" && !!record.fingerprint;
   const canApprove = ready && !changed;
   const busy = pending !== null || decided;
+  const track = trackFor(workspace, record);
+  // The cover can change only on the version the host is looking at; a stale page reloads first.
+  const changeCover: CoverChangeFn | undefined =
+    record.status === "awaiting_review" && !changed && !busy && cover
+      ? async (file) => {
+          const res = await cover.change(file);
+          // The host picked this cover, so the re-fingerprinted record becomes what they review and approve.
+          if (res.ok) setSnap(res.record);
+          return res;
+        }
+      : undefined;
   const reload = () => {
     setSnap(live);
     setNotice(null);
@@ -101,7 +124,7 @@ export function PackageDecision({
     <div className="mx-auto flex max-w-xl min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="font-mono text-[13px] tracking-wide text-muted uppercase">Show of {showDateLabel(draft.showDate)}</span>
-        {record.status === "succeeded" && record.result?.url ? (
+        {record.status === "succeeded" && isMixcloudUrl(record.result?.url) ? (
           <Link href={record.result.url} className="rounded-full">
             <Pill tone={pill.tone}>{pill.label}</Pill>
           </Link>
@@ -173,7 +196,11 @@ export function PackageDecision({
         )}
       </section>
 
-      <PlayerBar track={trackFor(workspace, draft.title)} />
+      {(track || record.status === "preparing_audio") && <PlayerBar track={track} />}
+
+      {workspace === "real" && cover && <CoverPicker url={cover.url} custom={!!draft.coverStorageId} onChange={changeCover} />}
+
+      {workspace === "real" && !deciding && <PublishStatus record={record} publish={publish} mixcloudAccount={mixcloudAccount} />}
 
       {workspace === "demo" ? (
         <p className="text-[12.5px] text-ink-soft">Demo workspace · Sample data. Publishing to Mixcloud is switched off.</p>

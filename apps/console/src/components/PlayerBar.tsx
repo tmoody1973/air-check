@@ -31,9 +31,9 @@ export function PlayerBar({ track }: { track: PlayerTrack | null }) {
   }
 
   const active = p.track ?? track;
-  const dur = active.durationSec;
-  const pct = Math.min(100, (p.positionSec / dur) * 100);
-  const tick = active.hour2AtSec !== undefined ? (active.hour2AtSec / dur) * 100 : null;
+  const dur = p.mediaDurationSec ?? active.durationSec ?? null;
+  const pct = dur ? Math.min(100, (p.positionSec / dur) * 100) : 0;
+  const tick = dur && active.hour2AtSec !== undefined ? Math.min(100, (active.hour2AtSec / dur) * 100) : null;
 
   return (
     <div className="flex min-h-14 items-center gap-3 rounded-card bg-ink py-1 pr-3 pl-2 text-paper">
@@ -52,7 +52,7 @@ export function PlayerBar({ track }: { track: PlayerTrack | null }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium">{active.title}</div>
         <div className="mt-0.5 whitespace-nowrap font-mono text-[11.5px] leading-tight text-chip">
-          {formatClock(p.positionSec)} / {formatClock(dur)}
+          {formatClock(p.positionSec)} / {dur ? formatClock(dur) : "–:––:––"}
         </div>
         <div className="relative mt-1.5 h-[3px] rounded-[2px] bg-ink-soft" aria-hidden="true">
           <i className="absolute inset-y-0 left-0 rounded-[2px] bg-signal-on-dark" style={{ width: `${pct}%` }} />

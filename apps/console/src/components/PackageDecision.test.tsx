@@ -2,8 +2,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import type { PackageRecord, Track } from "@aircheck/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { PackageDecision, type DecideFn } from "./PackageDecision";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type PublishState } from "./PackageDecision";
 import { PlayerProvider } from "./PlayerProvider";
 
 afterEach(cleanup);
@@ -132,8 +132,8 @@ describe("PackageDecision", () => {
   });
 
   it("status pills and published link", () => {
-    const { unmount } = setup(record({ status: "succeeded", result: { url: "https://mixcloud.com/x" } }));
-    expect(screen.getByRole("link", { name: "Published" })).toHaveAttribute("href", "https://mixcloud.com/x");
+    const { unmount } = setup(record({ status: "succeeded", result: { url: "https://www.mixcloud.com/x" } }));
+    expect(screen.getByRole("link", { name: "Published" })).toHaveAttribute("href", "https://www.mixcloud.com/x");
     unmount();
     setup(record({ status: "outcome_unknown" }));
     expect(screen.getByText("Upload uncertain")).toBeInTheDocument();
@@ -166,7 +166,7 @@ describe("PackageDecision", () => {
       <PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} /></PlayerProvider>
     );
     const { rerender } = render(ui(record({ status: "approved" }, { title: "Title A" })));
-    rerender(ui(record({ status: "succeeded", result: { url: "https://mixcloud.com/x" } }, { title: "Title B" })));
+    rerender(ui(record({ status: "succeeded", result: { url: "https://www.mixcloud.com/x" } }, { title: "Title B" })));
     expect(screen.getByRole("heading", { name: "Title B" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Published" })).toBeInTheDocument();
   });
@@ -179,5 +179,152 @@ describe("PackageDecision", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     rerender(ui(false));
     expect(screen.queryByRole("link", { name: "Connect Mixcloud to publish" })).not.toBeInTheDocument();
+  });
+});
+
+// Task 6: the real MP3, the cover, and where an approved show stands in the Mixcloud queue.
+const HASH = "ab".repeat(32);
+const withAudio = (over: Partial<PackageRecord> = {}) =>
+  record(over, { id: "pkg-10-2-26", audio: { hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: HASH, hour1DurationSec: 3612.5 } });
+const connected: PublishState = { dayOffset: 0, mixcloudState: "connected" };
+const real = (r: PackageRecord, more: Partial<Parameters<typeof PackageDecision>[0]> = {}) =>
+  render(<PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} {...more} /></PlayerProvider>);
+
+describe("PackageDecision: the real MP3", () => {
+  it("plays the prepared MP3 through the audio route; Jump to hour 2 seeks to the hour-1 length", () => {
+    const { container } = real(withAudio());
+    const audio = container.ownerDocument.querySelector("audio")!;
+    expect(audio.getAttribute("src")).toBe(`/api/audio/pkg-10-2-26?v=${HASH.slice(0, 12)}`);
+    fireEvent.click(screen.getByRole("button", { name: "Jump to hour 2" }));
+    expect(audio.currentTime).toBe(3612.5);
+  });
+
+  it("demo keeps the bundled sample and never touches the audio route", () => {
+    const { container } = render(
+      <PlayerProvider><PackageDecision record={withAudio()} workspace="demo" decide={ok} /></PlayerProvider>,
+    );
+    expect(container.ownerDocument.querySelector("audio")!.getAttribute("src")).toBe("/demo/sample-hour.mp3");
+  });
+});
+
+describe("PackageDecision: cover", () => {
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => "blob:preview");
+    URL.revokeObjectURL = vi.fn();
+  });
+  const png = new File([new Uint8Array(10)], "cover.png", { type: "image/png" });
+
+  it("while awaiting review: shows the standard cover; a new image is uploaded, re-fingerprints, and asks for review again", async () => {
+    const decide = vi.fn<DecideFn>(async () => ({ ok: true }));
+    const change = vi.fn<CoverChangeFn>(async () => ({ ok: true, record: withAudio({ fingerprint: "fp2" }) }));
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider>
+        <PackageDecision record={r} workspace="real" decide={decide} cover={{ url: "https://convex.example/std.jpg", change }} />
+      </PlayerProvider>
+    );
+    const { rerender } = render(ui(withAudio()));
+    expect(screen.getByRole("img", { name: "Cover" })).toHaveAttribute("src", "https://convex.example/std.jpg");
+    expect(screen.getByText("Standard cover")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Use a different image"), { target: { files: [png] } });
+    expect(await screen.findByText("Changed: review again")).toBeInTheDocument();
+    expect(change).toHaveBeenCalledWith(png);
+    // Convex delivers the re-fingerprinted record; Approve sends the new fingerprint, not the old one.
+    rerender(ui(withAudio({ fingerprint: "fp2" })));
+    expect(screen.queryByText("This package changed. Open the latest version.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(decide).toHaveBeenCalledWith("approve", "fp2");
+  });
+
+  it("refuses a wrong type before uploading, and shows a refused change", async () => {
+    const change = vi.fn<CoverChangeFn>(async () => ({ ok: false, message: "Something went wrong." }));
+    real(withAudio(), { cover: { url: null, change } });
+    expect(screen.getByText("No cover yet")).toBeInTheDocument();
+    const input = screen.getByLabelText("Use a different image");
+    fireEvent.change(input, { target: { files: [new File(["x"], "a.gif", { type: "image/gif" })] } });
+    expect(await screen.findByText("Use a JPEG, PNG or WebP image.")).toBeInTheDocument();
+    expect(change).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { files: [png] } });
+    expect(await screen.findByText("Something went wrong.")).toBeInTheDocument();
+    expect(screen.queryByText("Changed: review again")).not.toBeInTheDocument();
+  });
+
+  it("after approval the cover is read-only", () => {
+    real(withAudio({ status: "approved" }), { cover: { url: "https://convex.example/own.jpg", change: vi.fn() }, publish: connected });
+    expect(screen.getByRole("img", { name: "Cover" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Use a different image")).not.toBeInTheDocument();
+  });
+
+  it("a custom cover is labelled as your image", () => {
+    real(record({}, { coverStorageId: "st1" }), { cover: { url: "https://convex.example/own.jpg", change: vi.fn() } });
+    expect(screen.getByText("Your image")).toBeInTheDocument();
+  });
+});
+
+describe("PackageDecision: queue and receipt", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("approved and connected: posts today, or on a Milwaukee date (3 a day, oldest first)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T03:00:00Z")); // Oct 27, 10 pm in Milwaukee
+    const { unmount } = real(withAudio({ status: "approved" }), { publish: connected });
+    expect(screen.getByText("Queued: posts today")).toBeInTheDocument();
+    unmount();
+    real(withAudio({ status: "approved" }), { publish: { dayOffset: 2, mixcloudState: "connected" } });
+    expect(screen.getByText("Queued: posts on Oct 29, 2026 (3 a day, oldest first)")).toBeInTheDocument();
+  });
+
+  it("approved but Mixcloud not connected: points to Settings instead of a date", () => {
+    for (const mixcloudState of ["not_connected", "needs_reconnect"] as const) {
+      const { unmount } = real(withAudio({ status: "approved" }), { publish: { dayOffset: 0, mixcloudState } });
+      expect(screen.getByRole("link", { name: "Connect Mixcloud to publish" })).toHaveAttribute("href", "/settings");
+      expect(screen.queryByText("Queued: posts today")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("publishing: uploading", () => {
+    real(withAudio({ status: "publishing" }), { publish: connected });
+    expect(screen.getByText("Uploading to Mixcloud…")).toBeInTheDocument();
+  });
+
+  it("succeeded: a receipt with the Mixcloud link, the time and the fingerprint", () => {
+    const url = "https://www.mixcloud.com/rhythmlab/rlr-10-2-26/";
+    real(withAudio({ status: "succeeded", fingerprint: "0123456789abcdef0123", result: { url, at: "2026-10-28T03:04:00.000Z" } }));
+    expect(screen.getByRole("link", { name: "Open on Mixcloud" })).toHaveAttribute("href", url);
+    expect(screen.getByText(/^Oct 27, 2026, 10:04\sPM$/)).toBeInTheDocument();
+    expect(screen.getByText("0123456789ab")).toHaveAttribute("title", "0123456789abcdef0123");
+  });
+
+  it("a receipt URL off www.mixcloud.com is shown as text, never a link", () => {
+    real(withAudio({ status: "succeeded", result: { url: "javascript:alert(1)", at: "2026-10-28T03:04:00.000Z" } }));
+    expect(screen.queryByRole("link", { name: "Open on Mixcloud" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Published" })).not.toBeInTheDocument();
+    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
+  });
+
+  it("failed: the reason, and approve again after fixing", () => {
+    real(withAudio({ status: "failed", result: { error: "Mixcloud refused the cover image", at: "2026-10-28T03:04:00.000Z" } }));
+    expect(screen.getByText("Mixcloud refused the cover image")).toBeInTheDocument();
+    expect(screen.getByText("Approve again after fixing.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("outcome unknown: check Mixcloud first, with a link to the account's uploads", () => {
+    const { unmount } = real(withAudio({ status: "outcome_unknown" }), { mixcloudAccount: "rhythm lab" });
+    expect(screen.getByText("We don't know if it posted. Check Mixcloud before doing anything.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Your Mixcloud uploads" })).toHaveAttribute("href", "https://www.mixcloud.com/rhythm%20lab/");
+    unmount();
+    real(withAudio({ status: "outcome_unknown" }));
+    expect(screen.getByText("We don't know if it posted. Check Mixcloud before doing anything.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Your Mixcloud uploads" })).not.toBeInTheDocument();
+  });
+
+  it("demo shows none of the queue states", () => {
+    render(
+      <PlayerProvider>
+        <PackageDecision record={record({ status: "approved" }, { workspace: "demo" })} workspace="demo" decide={ok} publish={connected} />
+      </PlayerProvider>,
+    );
+    expect(screen.queryByText(/Queued/)).not.toBeInTheDocument();
   });
 });

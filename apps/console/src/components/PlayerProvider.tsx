@@ -5,7 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 export interface PlayerTrack {
   src: string;
   title: string;
-  durationSec: number;
+  /** Known up front for the demo sample; a real MP3's length comes from the browser once it reads the file. */
+  durationSec?: number;
   hour2AtSec?: number;
 }
 
@@ -13,6 +14,8 @@ export interface PlayerState {
   track: PlayerTrack | null;
   playing: boolean;
   positionSec: number;
+  /** The loaded file's length as the browser reports it; null until it has read the metadata. */
+  mediaDurationSec: number | null;
   load(t: PlayerTrack): void;
   toggle(): void;
   seek(sec: number): void;
@@ -38,6 +41,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [track, setTrack] = useState<PlayerTrack | null>(null);
   const [playing, setPlaying] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
+  const [mediaDurationSec, setMediaDurationSec] = useState<number | null>(null);
   const bars = useRef(0);
 
   const load = useCallback((t: PlayerTrack) => {
@@ -45,6 +49,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (cur?.src === t.src) return cur.title === t.title ? cur : { ...cur, title: t.title }; // same audio: keep position
       setPositionSec(0);
       setPlaying(false);
+      setMediaDurationSec(null);
       return t;
     });
   }, []);
@@ -86,8 +91,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [toggle]);
 
   const value = useMemo(
-    () => ({ track, playing, positionSec, load, toggle, seek, jumpToHour2, register }),
-    [track, playing, positionSec, load, toggle, seek, jumpToHour2, register],
+    () => ({ track, playing, positionSec, mediaDurationSec, load, toggle, seek, jumpToHour2, register }),
+    [track, playing, positionSec, mediaDurationSec, load, toggle, seek, jumpToHour2, register],
   );
 
   return (
@@ -101,6 +106,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         onTimeUpdate={(e) => setPositionSec(e.currentTarget.currentTime)}
+        onDurationChange={(e) => {
+          const d = e.currentTarget.duration;
+          setMediaDurationSec(Number.isFinite(d) && d > 0 ? d : null);
+        }}
       />
     </PlayerContext.Provider>
   );
