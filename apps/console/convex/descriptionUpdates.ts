@@ -19,11 +19,14 @@ export type UpdateResult =
   | { ok: true; id: Id<"descriptionUpdates">; replaced: boolean }
   | { ok: false; code: "FORBIDDEN" | "NOT_FOUND" | "NOT_READY" | "BAD_INPUT" | "PACKAGE_CHANGED"; message: string };
 
-const updatesOf = (ctx: QueryCtx, packageId: string) =>
+export const updatesOf = (ctx: QueryCtx, packageId: string) =>
   ctx.db.query("descriptionUpdates").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).collect(); // oldest first
 
+/** Proposed, approved or pushing: not finished yet. At most one per package. */
+export const isOpen = (u: Update) => (OPEN as readonly string[]).includes(u.status);
+
 /** What Mixcloud shows now: the latest pushed update, else the description the show went up with. */
-function liveOf(pkg: Doc<"packages">, updates: Update[]) {
+export function liveOf(pkg: Doc<"packages">, updates: Update[]) {
   const pushed = updates.filter((u) => u.status === "pushed").at(-1);
   if (pushed) return { description: pushed.description, ...(pushed.descriptionSources && { descriptionSources: pushed.descriptionSources }), ...(pushed.pushedAt && { updatedAt: pushed.pushedAt }) };
   const draft = pkg.draft as PackageDraft;
@@ -47,7 +50,7 @@ export async function proposeUpdate(
   const updates = await updatesOf(ctx, pkg.packageId);
   const live = liveOf(pkg, updates);
   if (description === live.description) return { ok: false, code: "BAD_INPUT", message: "That is already the description on Mixcloud." };
-  const open = updates.filter((u) => (OPEN as readonly string[]).includes(u.status));
+  const open = updates.filter(isOpen);
   if (open.some((u) => u.status !== "proposed"))
     return { ok: false, code: "NOT_READY", message: "an approved update is being sent to Mixcloud; propose again once it finishes" };
   const replacing = open.at(-1);

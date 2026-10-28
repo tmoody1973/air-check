@@ -81,12 +81,12 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP routes are the agent's submit and revise", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/packages", "POST"], ["/agent/packages/revise", "POST"]]);
+test("the only HTTP routes are the agent's submit, revise and read-only get", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"]]);
 });
 
-test("the agent routes reach only internal.packages.submit and internal.packages.revise", () => {
-  const allowed = ["internal.packages.submit", "internal.packages.revise"];
+test("the agent routes reach only internal.packages.submit, internal.packages.revise and internal.packages.agentGet", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
@@ -178,7 +178,20 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery"]);
+});
+
+// The agent reads a package before it revises one. Read-only: an internal query (Convex gives it no writer), and its
+// source never writes, never reaches the gate, and never returns the cover, audio, receipt URL or who decided.
+test("packages.agentGet is a read-only internal query that returns only the rewrite fields", async () => {
+  const mod = (await import("./packages")) as unknown as Record<string, { isQuery?: boolean; isInternal?: boolean }>;
+  expect(mod.agentGet?.isQuery && mod.agentGet.isInternal).toBe(true);
+  expect(src("packages")).toContain("export const agentGet = internalQuery(");
+  const fn = fnBody(src("packages"), "export const agentGet = internalQuery(");
+  expect(fn).not.toMatch(/\b(?:insert|patch|replace|delete|gateFor|proposeUpdate|runMutation|scheduler)\b/);
+  expect(fn).not.toMatch(/coverStorageId|audio|fingerprint|decidedBy|result/);
+  const route = fnBody(readFileSync(new URL("./http.ts", import.meta.url), "utf8"), "const getPackage = httpAction(");
+  expect(route.match(/ctx\.\w+/g)).toEqual(["ctx.runQuery"]);
 });
 
 // Plan 5: the media and publisher services. Neither can decide; the publisher reaches packages only through the

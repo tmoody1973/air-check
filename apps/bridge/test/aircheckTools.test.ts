@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { packageReviseTool, packageSubmitTool } from "../src/aircheckTools.js";
+import { packageGetTool, packageReviseTool, packageSubmitTool } from "../src/aircheckTools.js";
 
 const token = "t".repeat(40);
 const input = {
@@ -167,5 +167,61 @@ describe("package_revise", () => {
     const r = await packageReviseTool({ siteUrl: "https://x.convex.site", token, fetch }).call(rev);
     expect(r.isError).toBe(true);
     expect(textOf(r)).not.toMatch(/approved/i);
+  });
+});
+
+// Final-review fix: the chat agent reads a package (tracklist, current description) before it revises it. Read-only.
+describe("package_get", () => {
+  const pkg = { packageId: "pkg-10-2-26", showDate: "2026-10-02", status: "awaiting_review", title: "T", tags: ["Soul"], tracklistText: "Hour 1\nA - B", description: "d" };
+  const tool = (status: number, body: unknown) => {
+    const s = stub(status, body);
+    return { s, ...packageGetTool({ siteUrl: "https://x.convex.site/", token, fetch: s.fetch }) };
+  };
+
+  it("takes only the package id, says it is read-only, and never mentions approve", () => {
+    const { tool: t } = tool(200, pkg);
+    expect(t.name).toBe("package_get");
+    expect(Object.keys(t.inputSchema.properties ?? {})).toEqual(["packageId"]);
+    expect(t.inputSchema.required).toEqual(["packageId"]);
+    expect(t.description).toMatch(/read-only/i);
+    expect(t.description).not.toMatch(/approv/i);
+  });
+
+  it("sends only the package id with the bearer token to the get route", async () => {
+    const { s, call } = tool(200, pkg);
+    await call({ packageId: "pkg-10-2-26", workspace: "real", status: "approved" });
+    expect(s.calls).toHaveLength(1);
+    expect(s.calls[0]!.url).toBe("https://x.convex.site/agent/packages/get");
+    expect(new Headers(s.calls[0]!.init.headers).get("authorization")).toBe(`Bearer ${token}`);
+    expect(JSON.parse(s.calls[0]!.init.body as string)).toEqual({ packageId: "pkg-10-2-26" });
+  });
+
+  it("200: returns the package as JSON text", async () => {
+    const r = await tool(200, pkg).call({ packageId: "pkg-10-2-26" });
+    expect(r.isError).toBeFalsy();
+    expect(JSON.parse(textOf(r))).toEqual(pkg);
+  });
+
+  it("404 says no such package; 400 lists the problem; 401/503 not configured without the token", async () => {
+    const missing = await tool(404, { error: "NOT_FOUND" }).call({ packageId: "pkg-1-1-26" });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toMatch(/no package pkg-1-1-26/i);
+    const bad = await tool(400, { problems: ["body must be packageId"] }).call({});
+    expect(bad.isError).toBe(true);
+    expect(textOf(bad)).toContain("body must be packageId");
+    for (const status of [401, 503]) {
+      const r = await tool(status, {}).call({ packageId: "x" });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/not configured/);
+      expect(textOf(r)).not.toContain(token);
+    }
+  });
+
+  it("network failure: an error result, not a throw", async () => {
+    const fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof globalThis.fetch;
+    const r = await packageGetTool({ siteUrl: "https://x.convex.site", token, fetch }).call({ packageId: "x" });
+    expect(r.isError).toBe(true);
   });
 });

@@ -1,11 +1,12 @@
 import {
-  checkDescriptionChange, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
+  checkDescriptionChange, GateError, publishDayOffset, toSections, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
+  type Track,
 } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { privateTerms } from "./agentSubmit";
-import { proposeUpdate } from "./descriptionUpdates";
+import { isOpen, liveOf, proposeUpdate, updatesOf } from "./descriptionUpdates";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
@@ -266,6 +267,36 @@ export const revise = internalMutation({
       if (e instanceof GateError) return { ok: false, code: e.code === "PACKAGE_CHANGED" ? "PACKAGE_CHANGED" : "NOT_READY", message: e.message };
       throw e;
     }
+  },
+});
+
+/** Both hours as plain lines in the package's own spellings (the Mixcloud sections); parses back to the same tracks. */
+const tracklistText = (tracks: Track[]) =>
+  ([1, 2] as const)
+    .map((h) => [`Hour ${h}`, ...toSections(tracks.filter((t) => t.hour === h)).map((s) => `${s.artist} - ${s.song}`)].join("\n"))
+    .join("\n\n");
+
+/**
+ * Internal (the agent's /agent/packages/get): what the agent needs to rewrite a description, read-only, in its token's
+ * workspace only. For a show on Mixcloud the description is the live one (R10) and the open update's status is named.
+ * Only the listed fields leave: never the cover, the MP3 or hour ids, the receipt, the hash or who decided.
+ */
+export const agentGet = internalQuery({
+  args: { workspace: v.union(v.literal("real"), v.literal("demo")), packageId: v.string() },
+  handler: async (ctx, { workspace, packageId }) => {
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    const draft = doc && asDraft(doc.draft);
+    // The other workspace's package answers exactly like a missing one, so a token cannot probe for ids.
+    if (!doc || !draft || draft.workspace !== workspace) return null;
+    const updates = doc.status === "succeeded" ? await updatesOf(ctx, packageId) : [];
+    const live = doc.status === "succeeded" ? liveOf(doc, updates) : draft;
+    const open = updates.find(isOpen);
+    return {
+      packageId: doc.packageId, showDate: draft.showDate, status: doc.status, title: draft.title, tags: draft.tags,
+      tracklistText: tracklistText(draft.tracks), description: live.description,
+      ...(live.descriptionSources?.length && { descriptionSources: live.descriptionSources }),
+      ...(open && { openUpdate: open.status }),
+    };
   },
 });
 

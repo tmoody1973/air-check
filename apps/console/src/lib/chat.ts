@@ -8,6 +8,7 @@ const STEP_NAMES: readonly (readonly [string, string])[] = [
   ["itunes_", "Searching iTunes"],
   ["package_submit", "Submitting the package"],
   ["package_revise", "Revising the description"],
+  ["package_get", "Reading the package"],
 ];
 
 export function stepName(tool: string): string {

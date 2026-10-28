@@ -30,6 +30,7 @@ beforeAll(async () => {
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       convexHits.push({ auth: req.headers.authorization, body, url: req.url });
+      if (req.url === "/agent/packages/get") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", status: "awaiting_review" }));
       const revise = req.url === "/agent/packages/revise";
       res.writeHead(revise ? 200 : 201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", ...(revise && { status: "awaiting_review" }) }));
     });
@@ -150,9 +151,9 @@ describe("bridge HTTPS server", () => {
     expect(r.status).toBe(400);
   });
 
-  it("/aircheck/mcp lists package_submit and package_revise only", async () => {
+  it("/aircheck/mcp lists package_submit, package_revise and package_get only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
-    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise"]);
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get"]);
   });
 
   it("/aircheck/mcp refuses an unknown tool name", async () => {
@@ -196,9 +197,24 @@ describe("bridge HTTPS server", () => {
     expect(JSON.parse(convexHits[0]!.body)).toEqual({ packageId: "pkg-stub", description: "d" });
   });
 
+  it("/aircheck/mcp package_get reaches the Convex get route with the submit token and returns the package", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck/mcp", {
+      method: "POST",
+      token: aircheckToken,
+      body: rpc("tools/call", { name: "package_get", arguments: { packageId: "pkg-stub" } }),
+    });
+    const out = JSON.parse(r.body).result;
+    expect(out.isError).toBe(false);
+    expect(JSON.parse(out.content[0].text)).toMatchObject({ packageId: "pkg-stub" });
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.url).toBe("/agent/packages/get");
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
+  });
+
   it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
     const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
-    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise"]);
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get"]);
     convexHits.length = 0;
     const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
     const r = await send("/aircheck-demo/mcp", {

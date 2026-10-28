@@ -10,6 +10,7 @@ describe("stepName", () => {
     ["mcp__crate__itunes_lookup", "Searching iTunes"],
     ["mcp__aircheck__package_submit", "Submitting the package"],
     ["mcp__aircheck__package_revise", "Revising the description"],
+    ["mcp__aircheck__package_get", "Reading the package"],
     ["something_else", "Working"],
     ["", "Working"],
   ])("%s -> %s", (tool, label) => expect(stepName(tool)).toBe(label));

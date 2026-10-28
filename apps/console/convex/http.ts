@@ -63,7 +63,19 @@ const revisePackage = httpAction(async (ctx, req) => {
   return r.code === "NOT_FOUND" ? json(404, { error: "NOT_FOUND" }) : json(409, { error: r.message });
 });
 
+// Read-only: the agent reads a package in its token's workspace before it rewrites the description (it never saw the
+// tracklist otherwise). The only function this route may call is internal.packages.agentGet, a query: it cannot write.
+const getPackage = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const packageId = (got.body as { packageId?: unknown } | null)?.packageId;
+  if (typeof packageId !== "string" || !packageId.trim()) return json(400, { problems: ["body must be packageId"] });
+  const pkg = await ctx.runQuery(internal.packages.agentGet, { workspace: got.workspace, packageId });
+  return pkg ? json(200, pkg) : json(404, { error: "NOT_FOUND" });
+});
+
 const http = httpRouter();
 http.route({ path: "/agent/packages", method: "POST", handler: submitPackage });
 http.route({ path: "/agent/packages/revise", method: "POST", handler: revisePackage });
+http.route({ path: "/agent/packages/get", method: "POST", handler: getPackage });
 export default http;

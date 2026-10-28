@@ -143,3 +143,40 @@ export function packageReviseTool(opts: { siteUrl: string; token: string; fetch?
     },
   };
 }
+
+/**
+ * `package_get`: read-only. The package's tracklist, title, tags and current description (for a show on Mixcloud, the
+ * live one and any open update's status), so the agent can rewrite a description it never saw. It changes nothing.
+ */
+export function packageGetTool(opts: { siteUrl: string; token: string; fetch?: typeof fetch }): PackageSubmitTool {
+  const doFetch = opts.fetch ?? fetch;
+  const url = new URL("/agent/packages/get", opts.siteUrl).toString();
+
+  return {
+    tool: {
+      name: "package_get",
+      description:
+        "Read-only: read a package's tracklist, title, tags and current public description, e.g. before rewriting it with package_revise. It changes nothing.",
+      inputSchema: { type: "object", properties: { packageId: str("The package id, e.g. pkg-10-2-26") }, required: ["packageId"], additionalProperties: false },
+    },
+
+    async call(args) {
+      const res = await postFields(doFetch, url, opts.token, ["packageId"], args);
+      if (!res) return result("Could not reach Air Check to read the package. Try again later.", true);
+      const id = String((args as { packageId?: unknown } | null)?.packageId ?? "the package");
+      switch (res.status) {
+        case 200:
+          return result(JSON.stringify(res.data, null, 2));
+        case 400:
+          return result(["Not read:", ...problemList(res.data).map((p) => `- ${p}`)].join("\n"), true);
+        case 404:
+          return result(`No package ${id} in this workspace.`, true);
+        case 401:
+        case 503:
+          return result("Package read is not configured on the bridge. Tell the operator; do not retry.", true);
+        default:
+          return result(`Read failed (HTTP ${res.status}). Try again later.`, true);
+      }
+    },
+  };
+}

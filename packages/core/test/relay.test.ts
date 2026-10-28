@@ -117,6 +117,7 @@ describe("RUN_INSTRUCTIONS", () => {
     expect(RUN_INSTRUCTIONS).toMatch(/rlr-mixcloud-title-and-tags skill/);
     expect(RUN_INSTRUCTIONS).toMatch(/rlr-description-safety skill/);
     expect(RUN_INSTRUCTIONS).toMatch(/descriptionSources/);
+    expect(RUN_INSTRUCTIONS).toMatch(/package_get before revising/);
     expect(RUN_INSTRUCTIONS.length).toBeLessThan(800);
   });
 });
