@@ -49,15 +49,16 @@ const submitPackage = httpAction(async (ctx, req) => {
 });
 
 // Hard Rule 1: the agent rewrites the description of a package awaiting review, in its token's workspace only. It goes
-// back to review with a new fingerprint, so only a human's Approve of the new text publishes it. The only function
-// this route may call is internal.packages.revise.
+// back to review with a new fingerprint, so only a human's Approve of the new text publishes it. On a package already
+// on Mixcloud it only proposes an update (201), which waits for a human's Approve update. The only function this route
+// may call is internal.packages.revise.
 const revisePackage = httpAction(async (ctx, req) => {
   const got = await agentRequest(req);
   if (got instanceof Response) return got;
   const input = pickRevision(got.body);
   if (!input) return json(400, { problems: ["body must be packageId and description, with optional descriptionSources"] });
   const r = await ctx.runMutation(internal.packages.revise, { workspace: got.workspace, ...input });
-  if (r.ok) return json(200, { packageId: input.packageId, status: r.status });
+  if (r.ok) return "updateId" in r ? json(201, { packageId: input.packageId, updateId: r.updateId, status: r.status }) : json(200, { packageId: input.packageId, status: r.status });
   if (r.code === "BAD_INPUT") return json(400, { problems: r.problems });
   return r.code === "NOT_FOUND" ? json(404, { error: "NOT_FOUND" }) : json(409, { error: r.message });
 });

@@ -2,6 +2,7 @@ import { chicagoDayKey, type PackageDraft } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
+import { requeueStuckUpdates } from "./descriptionUpdates";
 import { gateFor, viaGate } from "./gate";
 import { writeMixcloudStatus } from "./mixcloud";
 import { mixcloudStatusFields } from "./schema";
@@ -10,7 +11,7 @@ import { mixcloudStatusFields } from "./schema";
 // time, and fails closed when it is unset or shorter than 32 characters.
 // Hard Rule 1: packages are read here, and changed only through the gate's claimForPublish, recordResult and unclaim.
 // Equal MEDIA_TOKEN and PUBLISHER_TOKEN would let either service act as the other: refuse everything (M7).
-function requirePublisher(token: string): void {
+export function requirePublisher(token: string): void {
   const { MEDIA_TOKEN, PUBLISHER_TOKEN } = process.env;
   if (MEDIA_TOKEN === PUBLISHER_TOKEN || !sameToken(token, PUBLISHER_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
@@ -99,7 +100,8 @@ export const awaitingReview = query({
 
 /**
  * Run on publisher start (Review Focus 1). A package still `publishing` means the last run stopped mid-upload, so
- * nobody knows whether it posted: it becomes outcome_unknown for Tarik to check, never approved again.
+ * nobody knows whether it posted: it becomes outcome_unknown for Tarik to check, never approved again. Description
+ * updates left pushing go back to approved (Plan 5c Task 4).
  */
 export const reconcile = mutation({
   args: { token: v.string() },
@@ -107,6 +109,8 @@ export const reconcile = mutation({
     requirePublisher(token);
     const stuck = await ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", "publishing")).collect();
     for (const d of stuck) await viaGate(() => gateFor(ctx).recordResult(d.packageId, { status: "outcome_unknown" }));
+    // A description edit is idempotent, so an update left pushing is simply tried again (the try counted).
+    await requeueStuckUpdates(ctx);
     return { reconciled: stuck.map((d) => d.packageId) };
   },
 });

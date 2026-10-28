@@ -97,8 +97,9 @@ const REVISE_FIELDS = ["packageId", "description", "descriptionSources"] as cons
 
 /**
  * `package_revise`: a new public description (and its private sources) for a package waiting for review. Air Check
- * checks it like a submit and the package goes back to review with a new fingerprint. It drafts; it can never
- * approve (Hard Rule 1): only a signed-in person's Approve of the new text publishes it.
+ * checks it like a submit and the package goes back to review with a new fingerprint. On a show already on Mixcloud it
+ * proposes an update instead (201). It drafts; it can never approve (Hard Rule 1): only a signed-in person's Approve
+ * of the new text publishes it.
  */
 export function packageReviseTool(opts: { siteUrl: string; token: string; fetch?: typeof fetch }): PackageSubmitTool {
   const doFetch = opts.fetch ?? fetch;
@@ -108,7 +109,7 @@ export function packageReviseTool(opts: { siteUrl: string; token: string; fetch?
     tool: {
       name: "package_revise",
       description:
-        "Rewrite the public description of a package waiting for review, with the sources for its facts. Air Check checks it; a person reviews the new text in the console.",
+        "Rewrite the public description of a package waiting for review, or propose a new one for a show already on Mixcloud, with the sources for its facts. Air Check checks it; a person reviews the new text in the console.",
       inputSchema: {
         type: "object",
         properties: { packageId: str("The package id, e.g. pkg-10-2-26"), description: str("New public description, under 1,000 characters"), descriptionSources: sourcesSchema },
@@ -125,6 +126,8 @@ export function packageReviseTool(opts: { siteUrl: string; token: string; fetch?
       switch (res.status) {
         case 200:
           return result(`Revised ${id}: back in review. A person reviews the new description in the console.`);
+        case 201:
+          return result(`Proposed a new description for ${id}, which is already on Mixcloud. Nothing changes there until a person reviews it in the console.`);
         case 400:
           return result(["Not revised. Fix these problems and revise again:", ...problemList(data).map((p) => `- ${p}`)].join("\n"), true);
         case 404:

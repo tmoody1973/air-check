@@ -129,13 +129,10 @@ describe("POST /agent/packages/revise", () => {
     expect((await revise(t, { packageId: demoPkg.id, description: "Words." }, `Bearer ${DEMO}`)).status).toBe(200);
   });
 
-  test("published is 409 with a plain reason; so is anything not awaiting review", async () => {
+  // A published package gets a proposed update instead (Task 4, descriptionUpdates.test.ts).
+  test("anything else not awaiting review is 409 with a plain reason", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t);
-    await setStatus(t, id, "succeeded");
-    const pub = await revise(t, { packageId: id, description: "Words." });
-    expect(pub.status).toBe(409);
-    expect(await pub.json()).toEqual({ error: "already published — propose an update instead" });
     for (const status of ["approved", "publishing", "skipped", "failed", "outcome_unknown", "preparing_audio"]) {
       await setStatus(t, id, status);
       const r = await revise(t, { packageId: id, description: "Words." });

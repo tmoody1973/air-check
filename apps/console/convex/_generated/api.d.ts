@@ -15,6 +15,7 @@ import type * as chat from "../chat.js";
 import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as demoLimits from "../demoLimits.js";
+import type * as descriptionUpdates from "../descriptionUpdates.js";
 import type * as enqueue from "../enqueue.js";
 import type * as gate from "../gate.js";
 import type * as http from "../http.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   cutoff: typeof cutoff;
   demoLimits: typeof demoLimits;
+  descriptionUpdates: typeof descriptionUpdates;
   enqueue: typeof enqueue;
   gate: typeof gate;
   http: typeof http;

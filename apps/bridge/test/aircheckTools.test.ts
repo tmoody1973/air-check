@@ -127,6 +127,20 @@ describe("package_revise", () => {
     expect(textOf(r)).not.toMatch(/approved/i);
   });
 
+  // Plan 5c Task 4: on a show already on Mixcloud the route only proposes an update; a person must approve it.
+  it("201: an update proposed for the live show, waiting for a person; never says it changed on Mixcloud", async () => {
+    const r = await tool(201, { packageId: "pkg-10-2-26", updateId: "u1", status: "proposed" }).call(rev);
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).toContain("pkg-10-2-26");
+    expect(textOf(r)).toMatch(/proposed/i);
+    expect(textOf(r)).toMatch(/console/);
+    expect(textOf(r)).not.toMatch(/\bupdated\b|\bchanged\b|approved/i);
+  });
+
+  it("the tool says it also proposes updates for published shows", () => {
+    expect(tool(200, {}).tool.description).toMatch(/already on Mixcloud/);
+  });
+
   it("400 lists the problems; 404 says no such package; 409 relays the plain reason", async () => {
     const bad = await tool(400, { problems: ["description has a time-relative phrase: \"today\""] }).call(rev);
     expect(bad.isError).toBe(true);

@@ -5,6 +5,7 @@ import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { privateTerms } from "./agentSubmit";
+import { proposeUpdate } from "./descriptionUpdates";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
@@ -220,9 +221,8 @@ export const submit = internalMutation({
   },
 });
 
-/** Why the agent cannot revise a package now, in plain words (R3). */
-const NOT_REVISABLE: Record<Exclude<PackageStatus, "awaiting_review">, string> = {
-  succeeded: "already published — propose an update instead",
+/** Why the agent cannot revise a package now, in plain words (R3). A published one gets a proposed update instead. */
+const NOT_REVISABLE: Record<Exclude<PackageStatus, "awaiting_review" | "succeeded">, string> = {
   preparing_audio: "the MP3 is still being prepared; revise it once the package is waiting for review",
   approved: "already approved; it can no longer change",
   publishing: "being published now; it can no longer change",
@@ -233,13 +233,15 @@ const NOT_REVISABLE: Record<Exclude<PackageStatus, "awaiting_review">, string> =
 
 export type ReviseResult =
   | { ok: true; status: PackageStatus }
+  | { ok: true; status: "proposed"; updateId: string }
   | { ok: false; code: "BAD_INPUT"; problems: string[] }
   | { ok: false; code: "NOT_FOUND" | "NOT_READY" | "PACKAGE_CHANGED"; message: string };
 
 /**
  * Internal (the agent's /agent/packages/revise): a new description and sources for a package awaiting review in the
  * token's workspace. Checked like a submit, then the gate's revise with the record's own draft, so hour ids, the MP3,
- * title and tracks are unchanged; it re-fingerprints and stays in review.
+ * title and tracks are unchanged; it re-fingerprints and stays in review. On a package already on Mixcloud it proposes
+ * a description update instead (Task 4), which a signed-in human must approve before the publisher sends it.
  */
 export const revise = internalMutation({
   args: { workspace: v.union(v.literal("real"), v.literal("demo")), packageId: v.string(), description: v.string(), descriptionSources: v.optional(v.any()) },
@@ -248,6 +250,11 @@ export const revise = internalMutation({
     const cur = doc && toRecord(doc);
     // The other workspace's package answers exactly like a missing one, so a token cannot probe for ids.
     if (!cur || cur.draft.workspace !== workspace) return { ok: false, code: "NOT_FOUND", message: "no such package" };
+    if (cur.status === "succeeded") {
+      const r = await proposeUpdate(ctx, doc!, description, descriptionSources ?? [], "agent");
+      if (r.ok) return { ok: true, status: "proposed", updateId: r.id };
+      return r.code === "BAD_INPUT" ? { ok: false, code: "BAD_INPUT", problems: r.message.split("; ") } : { ok: false, code: "NOT_READY", message: r.message };
+    }
     if (cur.status !== "awaiting_review") return { ok: false, code: "NOT_READY", message: NOT_REVISABLE[cur.status] };
     const problems = checkDescriptionChange(cur.draft, description, descriptionSources, privateTerms());
     if (problems.length) return { ok: false, code: "BAD_INPUT", problems };
