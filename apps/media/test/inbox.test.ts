@@ -1,11 +1,11 @@
-import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Attached, MediaConvex, PendingPackage, WaitingItem } from "../src/convex.js";
 import type { Exec } from "../src/encode.js";
-import { RETRY_BACKOFF_MS, runPass, type PassDeps } from "../src/inbox.js";
+import { QUIET_MS, RETRY_BACKOFF_MS, runPass, type PassDeps } from "../src/inbox.js";
 
 let root: string, inboxDir: string, preparedDir: string;
 beforeEach(async () => {
@@ -16,16 +16,30 @@ beforeEach(async () => {
 });
 afterEach(() => rm(root, { recursive: true, force: true }));
 
-const addShow = async (date: string, files = ["1-hour.wav", "2-hour.wav"]) => {
+/** A complete WAV: RIFF header whose size field + 8 is the file's length, then `body` bytes of audio. */
+const wav = (body = 32) => {
+  const b = Buffer.alloc(44 + body);
+  b.write("RIFF", 0, "ascii");
+  b.writeUInt32LE(b.length - 8, 4);
+  b.write("WAVEfmt ", 8, "ascii");
+  return b;
+};
+/** Written 10 minutes ago, so the copy is long finished. */
+const settledAt = () => new Date(Date.now() - 10 * 60_000);
+const addShow = async (date: string, files = ["1-hour.wav", "2-hour.wav"], content: (f: string) => Buffer | string = () => wav()) => {
   await mkdir(join(inboxDir, date), { recursive: true });
-  for (const f of files) await writeFile(join(inboxDir, date, f), "wav");
+  for (const f of files) {
+    await writeFile(join(inboxDir, date, f), content(f));
+    await utimes(join(inboxDir, date, f), settledAt(), settledAt());
+  }
 };
 
 interface Fake extends MediaConvex { attachedCalls: Attached[]; waitingCalls: WaitingItem[][] }
-function fakeConvex(pending: PendingPackage[], cleanup: string[] = []): Fake {
+function fakeConvex(pending: PendingPackage[], cleanup: string[] = [], status: Record<string, string> = {}): Fake {
   const f: Fake = {
     attachedCalls: [], waitingCalls: [],
     pending: async () => pending, cleanup: async () => cleanup,
+    statuses: async (ids) => ids.flatMap((packageId) => (status[packageId] ? [{ packageId, status: status[packageId]! }] : [])),
     attached: async (a) => void f.attachedCalls.push(a),
     waiting: async (items) => void f.waitingCalls.push(items),
   };
@@ -64,14 +78,29 @@ describe("runPass", () => {
     expect(convex.waitingCalls).toEqual([[]]);
   });
 
-  test("a 4th package waits while 3 MP3s are prepared", async () => {
+  test("a 4th package waits while 3 MP3s are prepared, and the reason names what holds them", async () => {
     await mkdir(preparedDir);
-    for (const n of ["a", "b", "c"]) await writeFile(join(preparedDir, `pkg-${n}.mp3`), "x");
+    for (const n of ["pkg-10-2-26", "pkg-9-25-26", "pkg-9-18-26"]) await writeFile(join(preparedDir, `${n}.mp3`), "x");
     await addShow("2026-10-09");
-    const convex = fakeConvex([{ packageId: "pkg-10-9-26", showDate: "2026-10-09" }]);
+    const convex = fakeConvex([{ packageId: "pkg-10-9-26", showDate: "2026-10-09" }], [], {
+      "pkg-10-2-26": "failed", "pkg-9-25-26": "awaiting_review", // pkg-9-18-26 has no package any more
+    });
     await pass(convex, okExec());
     expect(calls).toHaveLength(0);
-    expect(convex.waitingCalls[0]).toEqual([{ showDate: "2026-10-09", reason: "2026-10-09 waits: 3 prepared shows are already waiting for review" }]);
+    expect(convex.waitingCalls[0]).toEqual([{
+      showDate: "2026-10-09",
+      reason: "2026-10-09 waits: 3 prepared MP3s are held by pkg-10-2-26 (failed), pkg-9-18-26 (no package), pkg-9-25-26 (awaiting review)",
+    }]);
+  });
+
+  test("if the statuses can't be read, the slots are still named", async () => {
+    await mkdir(preparedDir);
+    for (const n of ["pkg-a", "pkg-b", "pkg-c"]) await writeFile(join(preparedDir, `${n}.mp3`), "x");
+    await addShow("2026-10-09");
+    const convex = fakeConvex([{ packageId: "pkg-10-9-26", showDate: "2026-10-09" }]);
+    convex.statuses = async () => { throw new Error("convex down"); };
+    await pass(convex, okExec());
+    expect(convex.waitingCalls[0]![0]!.reason).toBe("2026-10-09 waits: 3 prepared MP3s are held by pkg-a, pkg-b, pkg-c");
   });
 
   test("its own existing MP3 does not count, and is re-encoded over", async () => {
@@ -130,9 +159,15 @@ describe("runPass", () => {
     await mkdir(preparedDir);
     await writeFile(join(preparedDir, "pkg-10-2-26.mp3"), "x");
     const convex = fakeConvex([], ["pkg-10-2-26", "pkg-1-5-27", "../../etc", "pkg-10-2-26"]);
-    await pass(convex, okExec());
+    const lines: string[] = [];
+    await pass(convex, okExec(), (l) => lines.push(l));
     expect(await readdir(preparedDir)).toEqual([]);
     expect(await readdir(inboxDir)).toEqual([]);
+    // M1: logged once, for the removal that happened; ids with nothing on disk (every later pass) log nothing.
+    expect(lines.filter((l) => l.includes("step=cleanup"))).toHaveLength(1);
+    lines.length = 0;
+    await pass(convex, okExec(), (l) => lines.push(l));
+    expect(lines.filter((l) => l.includes("step=cleanup"))).toEqual([]);
   });
 
   test("logs carry no token, paths or titles", async () => {
@@ -150,7 +185,7 @@ describe("runPass", () => {
 
     test("a failed attach is not re-encoded next pass, keeps its reason, and retries after the backoff", async () => {
       await addShow("2026-10-02");
-      let t = 1_000, failAttach = true;
+      let t = Date.now(), failAttach = true;
       const convex = fakeConvex(pkg);
       convex.attached = async (a) => { if (failAttach) throw new Error("convex down"); convex.attachedCalls.push(a); };
       const extra = { failedAt: new Map<string, number>(), now: () => t };
@@ -171,7 +206,7 @@ describe("runPass", () => {
 
     test("a failed encode backs off too", async () => {
       await addShow("2026-10-02");
-      let t = 0;
+      let t = Date.now();
       const extra = { failedAt: new Map<string, number>(), now: () => t };
       const convex = fakeConvex(pkg);
       await pass(convex, okExec(true), undefined, extra);
@@ -197,10 +232,53 @@ describe("runPass", () => {
   test("a timed-out ffmpeg is an ordinary encode failure with backoff", async () => {
     await addShow("2026-10-02");
     const timedOut: Exec = async () => { throw Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL" }); };
-    const extra = { failedAt: new Map<string, number>(), now: () => 0 };
+    const extra = { failedAt: new Map<string, number>(), now: () => Date.now() };
     const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);
     await pass(convex, timedOut, undefined, extra);
     expect(convex.waitingCalls[0]).toEqual([{ showDate: "2026-10-02", reason: "Encoding failed for 2026-10-02; will retry" }]);
     expect(extra.failedAt.has("pkg-10-2-26")).toBe(true);
+  });
+
+  // C1: a WAV still being copied (or a copy that died) must never be encoded into a short public show.
+  describe("a WAV that is not completely copied", () => {
+    const pkg = [{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }];
+    const copying = [{ showDate: "2026-10-02", reason: "2026-10-02 is still copying (or the copy is incomplete)" }];
+
+    test("a WAV cut off after its header is never encoded", async () => {
+      await addShow("2026-10-02", undefined, (f) => (f.startsWith("2") ? wav(4096).subarray(0, 44) : wav()));
+      const convex = fakeConvex(pkg);
+      await pass(convex, okExec());
+      expect(calls).toHaveLength(0);
+      expect(convex.attachedCalls).toEqual([]);
+      expect(convex.waitingCalls[0]).toEqual(copying);
+    });
+
+    test.each([
+      ["not RIFF", () => Buffer.concat([Buffer.from("JUNK"), wav().subarray(4)])],
+      ["not WAVE", () => { const b = wav(); b.write("AVI ", 8, "ascii"); return b; }],
+      ["shorter than a header", () => Buffer.from("RIFF")],
+      ["empty", () => Buffer.alloc(0)],
+    ])("%s: waits, never encoded", async (_n, bad) => {
+      await addShow("2026-10-02", undefined, (f) => (f.startsWith("1") ? bad() : wav()));
+      const convex = fakeConvex(pkg);
+      await pass(convex, okExec());
+      expect(calls).toHaveLength(0);
+      expect(convex.waitingCalls[0]).toEqual(copying);
+    });
+
+    test("a complete WAV written in the last 2 minutes waits; once quiet, the pair encodes", async () => {
+      await addShow("2026-10-02");
+      const fresh = new Date();
+      await utimes(join(inboxDir, "2026-10-02", "1-hour.wav"), fresh, fresh);
+      let t = fresh.getTime() + QUIET_MS - 1_000;
+      const convex = fakeConvex(pkg);
+      await pass(convex, okExec(), undefined, { now: () => t });
+      expect(calls).toHaveLength(0);
+      expect(convex.waitingCalls[0]).toEqual(copying);
+      t = fresh.getTime() + QUIET_MS + 1_000;
+      await pass(convex, okExec(), undefined, { now: () => t });
+      expect(convex.attachedCalls).toHaveLength(1);
+      expect(convex.waitingCalls.at(-1)).toEqual([]);
+    });
   });
 });

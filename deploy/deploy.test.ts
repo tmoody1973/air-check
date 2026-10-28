@@ -137,4 +137,18 @@ describe("deploy files", () => {
     for (const l of execs) expect(l).toMatch(/^Exec\w+=-/);
     expect(execs.join("\n")).not.toMatch(/\bairc\b(?!demo)/);
   });
+
+  it("the media unit creates its audio folders before the sandbox needs them (M4)", () => {
+    const unit = read("media/aircheck-media.service");
+    expect(unit).toMatch(
+      /^ExecStartPre=\+\/usr\/bin\/install -d -m 0755 -o user -g user \/home\/user\/aircheck-audio \/home\/user\/aircheck-audio\/inbox \/home\/user\/aircheck-audio\/prepared$/m,
+    );
+    expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
+  });
+
+  it("DEPLOY copies WAVs under a temporary name so a half-copied file is never an inbox WAV (C1)", () => {
+    const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
+    expect(doc).toMatch(/cat > [^\n']*\.wav\.part && mv [^\n']*\.wav\.part [^\n']*\.wav/);
+    expect(doc).toMatch(/mkdir -p [^\n]*~\/aircheck-audio\/inbox/);
+  });
 });
