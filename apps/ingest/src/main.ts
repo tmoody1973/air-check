@@ -42,7 +42,7 @@ function main(): void {
     dropbox: dropbox ? (rt) => dropboxClient(realHttp, dropbox, rt) : null,
   };
   const fetchDeps = { convex, log, box: boxSide?.client ?? null, inboxDir: config.inboxDir, preparedDir: config.preparedDir, failedAt: new Map<string, number>() };
-  const draftDeps = { convex, log, last: { key: "" } };
+  const draftDeps = { convex, log, last: { key: "" }, scan: scanDeps.memory };
   log("ingest step=start ok=true");
   const timers = [
     every(config.scanMs, "scan", () => runScan(scanDeps)),

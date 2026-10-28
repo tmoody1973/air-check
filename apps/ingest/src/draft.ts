@@ -6,6 +6,8 @@ export interface DraftDeps {
   convex: IngestConvex; log: (line: string) => void;
   /** The last outcome logged: the same "drafting" answer every minute is said once. */
   last: { key: string };
+  /** R14: nothing is drafted on half-read data: only after a scan that read every connected source. */
+  scan: { lastScanComplete: boolean };
 }
 
 /**
@@ -13,6 +15,7 @@ export interface DraftDeps {
  * failed drafts at most); this only picks the candidate, so two passes or two scans never queue two runs.
  */
 export async function draftPass(deps: DraftDeps): Promise<void> {
+  if (!deps.scan.lastScanComplete) return;
   const { episodes, awaitingReview } = await deps.convex.list();
   const next = nextToDraft(episodes.map((r) => factsOf(r)), awaitingReview);
   if (!next) return;

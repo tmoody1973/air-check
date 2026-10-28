@@ -128,7 +128,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
 describe("draft: one show at a time (Review Focus 4)", () => {
   test("two scans and two passes in a row queue exactly one draft run", async () => {
     const w = await make();
-    const deps = { convex: w.cv.convex, log: w.deps.log, last: { key: "" } };
+    const deps = { convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory };
     await draftPass(deps);
     await runScan(w.deps);
     await draftPass(deps);
@@ -144,7 +144,7 @@ describe("draft: one show at a time (Review Focus 4)", () => {
 
   test("no request while 3 packages await review; a draft-failed show (R10) is passed over for the next", async () => {
     const w = await make();
-    const deps = { convex: w.cv.convex, log: w.deps.log, last: { key: "" } };
+    const deps = { convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory };
     w.cv.setAwaiting(3);
     await draftPass(deps);
     expect(w.cv.draftCalls).toEqual([]);
@@ -157,7 +157,7 @@ describe("draft: one show at a time (Review Focus 4)", () => {
   test("the notes go only into the upsert (draft input), never into a log, a fetch record or a draft request", async () => {
     const w = await make();
     await fetchPass(fetchDeps(w));
-    await draftPass({ convex: w.cv.convex, log: w.deps.log, last: { key: "" } });
+    await draftPass({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
     const outside = JSON.stringify([w.logs, w.cv.fetches, w.cv.draftCalls, w.cv.sources, await w.cv.convex.list()]);
     expect(outside).not.toContain(NOTES_SECRET);
     // Hard Rule 8: every line is key=value with plain values: no names, titles, URLs or JSON can ride along.

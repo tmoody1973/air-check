@@ -15,8 +15,17 @@ export interface SourceMemory {
   refused: Map<string, string>;
   /** The last status sent per source; a status is sent only when it changes. */
   reported: Map<SourceName, string>;
+  /** R14: each source's last good read (Paper text included), standing in when a connected source fails a scan. */
+  lastGood: { box?: Map<string, BoxFolder[]>; drive?: Map<string, DriveDoc[]>; paper?: Map<string, PaperDoc[]> };
+  /** R14: the last scan read every connected source. Until it has (and from process start), nothing is drafted. */
+  lastScanComplete: boolean;
 }
-export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map() });
+export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map(), lastGood: {}, lastScanComplete: false });
+
+/** R14: a source that is not connected (no token file, not configured): its column is missing for every show. */
+const ABSENT = "absent" as const;
+/** A read: the source's data, ABSENT, or null when a connected source failed this scan. */
+type Read<T> = Map<string, T[]> | typeof ABSENT | null;
 
 export interface ScanDeps {
   convex: IngestConvex; log: (line: string) => void; memory: SourceMemory;
@@ -78,17 +87,18 @@ async function guarded<T>(deps: ScanDeps, source: SourceName, key: string | null
 
 /** A Connect-button source's token file, or the status that explains why there is none (R13). */
 async function tokenFor(deps: ScanDeps, source: "google" | "dropbox", configured: boolean) {
-  if (!configured) return void (await report(deps, { source, state: "not_connected", lastError: "not_configured" }));
+  if (!configured) return (await report(deps, { source, state: "not_connected", lastError: "not_configured" }), ABSENT);
   const t = await readTokenFile(join(deps.tokenDir, `${source}.json`));
-  if (t.kind === "missing") return void (await report(deps, { source, state: "not_connected", lastError: "no_token" }));
-  if (t.kind === "invalid") return void (await report(deps, { source, state: "needs_reconnect", lastError: "invalid_token_file" }));
+  if (t.kind === "missing") return (await report(deps, { source, state: "not_connected", lastError: "no_token" }), ABSENT);
+  // A half-written file is a connected source that failed (needs_reconnect), not a disconnected one.
+  if (t.kind === "invalid") return (await report(deps, { source, state: "needs_reconnect", lastError: "invalid_token_file" }), null);
   return { ...t, key: refusalKey(source, t.refreshToken, t.connectedAt ?? null) };
 }
 
-async function readBox(deps: ScanDeps): Promise<Map<string, BoxFolder[]> | null> {
+async function readBox(deps: ScanDeps): Promise<Read<BoxFolder>> {
   if (!deps.box) {
     await report(deps, { source: "box", state: "not_connected", lastError: "not_configured" });
-    return null;
+    return ABSENT;
   }
   const { client, folderId } = deps.box;
   // Box has no Reconnect button: the fix is an admin authorising the app, with the same credentials. So a refusal is
@@ -105,9 +115,9 @@ async function readBox(deps: ScanDeps): Promise<Map<string, BoxFolder[]> | null>
   });
 }
 
-async function readDrive(deps: ScanDeps): Promise<Map<string, DriveDoc[]> | null> {
+async function readDrive(deps: ScanDeps): Promise<Read<DriveDoc>> {
   const t = await tokenFor(deps, "google", !!deps.google);
-  if (!t) return null;
+  if (t === ABSENT || t === null) return t;
   return guarded(deps, "google", t.key, t.account, async () => {
     const drive = deps.google!(t.refreshToken);
     const byDate = new Map<string, DriveDoc[]>();
@@ -119,9 +129,9 @@ async function readDrive(deps: ScanDeps): Promise<Map<string, DriveDoc[]> | null
   });
 }
 
-async function readPaper(deps: ScanDeps): Promise<Map<string, PaperDoc[]> | null> {
+async function readPaper(deps: ScanDeps): Promise<Read<PaperDoc>> {
   const t = await tokenFor(deps, "dropbox", !!deps.dropbox);
-  if (!t) return null;
+  if (t === ABSENT || t === null) return t;
   return guarded(deps, "dropbox", t.key, t.account, async () => {
     const dbx = deps.dropbox!(t.refreshToken);
     const byDate = new Map<string, PaperDoc[]>();
@@ -135,24 +145,46 @@ async function readPaper(deps: ScanDeps): Promise<Map<string, PaperDoc[]> | null
 }
 
 /**
- * One scan (hourly). Every source is read and its status reported. Episodes are stored only when all three were read:
- * a scan missing one would replace good facts with gaps (no audio, no tracklist, no notes) and could let a show be
- * drafted without its notes. So a down source holds the backlog where it was until it is back.
+ * One scan (hourly). Every source is read and its status reported (R14):
+ * - not connected: that column is missing for every show; shows still store and can still be drafted (missing notes is
+ *   a gap; missing audio or tracklist already blocks drafting in core);
+ * - connected but failing this scan (down, refused, half-written token file): its last good read stands in, so stored
+ *   facts are not overwritten with gaps, and nothing is drafted until a scan reads every connected source again.
  */
 export async function runScan(deps: ScanDeps): Promise<void> {
   const t0 = Date.now();
-  const box = await readBox(deps);
-  const drive = await readDrive(deps);
-  const paper = await readPaper(deps);
-  if (!box || !drive || !paper) {
-    const down = [!box && "box", !drive && "google", !paper && "dropbox"].filter(Boolean).join("_");
-    deps.log(`ingest step=scan ok=false reason=${down}_unavailable stored=0`);
-    return;
-  }
+  const mem = deps.memory.lastGood;
+  const failed: SourceName[] = [];
+  let uncached = false;
+  const use = <T>(name: SourceName, key: keyof typeof mem, r: Read<T>): Map<string, T[]> => {
+    if (r === ABSENT) {
+      delete mem[key];
+      return new Map();
+    }
+    if (r) {
+      (mem as Record<string, unknown>)[key] = r;
+      return r;
+    }
+    failed.push(name);
+    const prev = mem[key] as Map<string, T[]> | undefined;
+    if (!prev) uncached = true;
+    return prev ?? new Map();
+  };
+  const box = use("box", "box", await readBox(deps));
+  const drive = use("google", "drive", await readDrive(deps));
+  const paper = use("dropbox", "paper", await readPaper(deps));
+  deps.memory.lastScanComplete = failed.length === 0;
+
   const [{ episodes: stored }, disk] = await Promise.all([deps.convex.list(), onDisk(deps.inboxDir, deps.preparedDir)]);
+  let episodes = buildEpisodes({ box, drive, paper }, stored, disk.complete);
+  // ponytail: a failed source with no earlier read in this process (just restarted) can't be merged column by column
+  // (list never returns the notes text), so shows already stored keep all their facts until a good scan.
+  if (uncached) {
+    const known = new Set(stored.map((r) => r.showDate));
+    episodes = episodes.filter((e) => !known.has(e.showDate));
+  }
   let ok = 0;
   let questions = 0;
-  const episodes = buildEpisodes({ box, drive, paper }, stored, disk.complete);
   for (const e of episodes) {
     questions += e.questions.length;
     try {
@@ -162,5 +194,6 @@ export async function runScan(deps: ScanDeps): Promise<void> {
       deps.log(`ingest date=${e.showDate} step=upsert ok=false`);
     }
   }
-  deps.log(`ingest step=scan ok=${ok === episodes.length} stored=${ok} questions=${questions} ms=${Date.now() - t0}`);
+  const partial = failed.length ? ` failed=${failed.join("_")}` : "";
+  deps.log(`ingest step=scan ok=${ok === episodes.length && !failed.length} stored=${ok} questions=${questions}${partial} ms=${Date.now() - t0}`);
 }

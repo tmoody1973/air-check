@@ -44,7 +44,7 @@ export const PAPER_DOCS: Record<string, { name: string; options: string[]; text:
   "id:px": { name: "Shopping list 1-2-26.paper", options: ["markdown"], text: "milk" },
 };
 
-export interface WorldOptions { googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler> }
+export interface WorldOptions { googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler>; dropboxList?: () => boolean }
 
 export async function world(o: WorldOptions = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ingest-"));
@@ -83,7 +83,7 @@ export async function world(o: WorldOptions = {}) {
   });
   const dropbox = await fakeServer({
     "POST /oauth2/token": o.dropboxTokenRoute ?? ((_, res) => json(res, 200, { access_token: "d-access", expires_in: 14400 })),
-    "POST /2/files/list_folder": (_, res) =>
+    "POST /2/files/list_folder": (_, res) => (o.dropboxList && !o.dropboxList()) ? json(res, 500, {}) :
       json(res, 200, { entries: [...Object.entries(PAPER_DOCS).map(([id, d]) => ({ ".tag": "file", id, name: d.name })), { ".tag": "folder", id: "id:f", name: "Show notes" }], has_more: false, cursor: "c" }),
     "POST /2/files/get_metadata": (req, res) => json(res, 200, { id: JSON.parse(req.body).path, export_info: { export_options: PAPER_DOCS[JSON.parse(req.body).path]!.options } }),
     "POST /2/files/export": (req, res) => { res.writeHead(200); res.end(PAPER_DOCS[JSON.parse(String(req.headers["dropbox-api-arg"])).path]!.text); },

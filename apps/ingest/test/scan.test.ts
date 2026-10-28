@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { runScan } from "../src/scan.js";
+import { draftPass } from "../src/draft.js";
+import { newMemory, runScan } from "../src/scan.js";
 import { json } from "./fakes.js";
 import { NOTES_SECRET, world } from "./world.js";
 
@@ -83,16 +84,17 @@ describe("scan: Box + Drive + Paper → one episode per 2026 show date", () => {
 });
 
 describe("scan: a source that is missing, expired or revoked (Review Focus 3, R13)", () => {
-  test.each(["google", "dropbox"] as const)("%s token file missing → not_connected; the other sources are still read; nothing is stored", async (p) => {
+  test.each(["google", "dropbox"] as const)("%s token file missing → not_connected; the other sources are still read; shows are stored with that column missing (R14)", async (p) => {
     const w = await make({ [`${p}Token`]: undefined });
     await runScan(w.deps);
     expect(w.cv.lastSource(p)).toEqual({ source: p, state: "not_connected", lastError: "no_token" });
     expect(w.cv.lastSource("box")!.state).toBe("connected");
     expect(w.cv.lastSource(p === "google" ? "dropbox" : "google")!.state).toBe("connected");
     expect(w.box.calls("GET /2.0/folders/123/items")).toHaveLength(1);
-    // A scan without all three sources would overwrite good facts with gaps: it stores nothing.
-    expect(w.cv.upserts).toEqual([]);
-    expect(w.logs).toContain(`ingest step=scan ok=false reason=${p}_unavailable stored=0`);
+    expect(w.cv.upserts).toHaveLength(5);
+    for (const e of w.cv.upserts) expect(p === "google" ? e.tracklist : e.notes).toEqual({ status: "missing" });
+    expect(w.deps.memory.lastScanComplete).toBe(true); // not connected is not a failure: drafting goes on
+    expect(w.logs.some((l) => /^ingest step=scan ok=true stored=5 /.test(l))).toBe(true);
   });
 
   test.each(["google", "dropbox"] as const)("%s refuses the refresh (invalid_grant) → needs_reconnect, tried once, retried only after a Reconnect", async (p) => {
@@ -106,7 +108,10 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     await runScan(w.deps);
     expect(server.calls(tokenKey)).toHaveLength(1); // no loop: the refused token is remembered (by hash)
     expect(w.cv.sources.filter((s) => s.source === p)).toHaveLength(1);
-    expect(w.cv.upserts).toEqual([]);
+    // R14: a connected source failing. First scan (nothing stored yet): the new shows are stored; later scans leave
+    // them alone (no earlier good read to merge), and nothing is drafted meanwhile.
+    expect(w.cv.upserts).toHaveLength(5);
+    expect(w.deps.memory.lastScanComplete).toBe(false);
     expect(w.box.calls("GET /2.0/folders/123/items")).toHaveLength(3); // Box is still scanned every time
 
     await w.write(`${p}.json`, { refresh_token: "new-refresh", account: "x", connectedAt: 2 }); // Reconnect in Settings
@@ -124,7 +129,8 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     const w = await make({ box: false });
     await runScan(w.deps);
     expect(w.cv.lastSource("box")).toEqual({ source: "box", state: "not_connected", lastError: "not_configured" });
-    expect(w.cv.upserts).toEqual([]);
+    expect(w.cv.upserts).toHaveLength(4); // 2026-01-16 exists only as a Box folder
+    for (const e of w.cv.upserts) expect(e.audio).toEqual({ status: "none", flags: [] });
 
     const v = await make({ boxToken: (_, res) => json(res, 400, { error: "invalid_client" }) });
     await runScan(v.deps);
@@ -139,7 +145,7 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     const w = await make({ dropboxTokenRoute: (_, res) => json(res, 503, {}) });
     await runScan(w.deps);
     expect(w.cv.lastSource("dropbox")).toBeUndefined();
-    expect(w.cv.upserts).toEqual([]);
+    expect(w.deps.memory.lastScanComplete).toBe(false);
     expect(w.logs).toContain("ingest step=scan source=dropbox ok=false error=http_503");
   });
 });
@@ -153,5 +159,65 @@ describe("Hard Rule 8 / 12: logs", () => {
     for (const secret of [NOTES_SECRET, "Alfa Mist", "Rhythm Lab Radio", "9125.wav", "g-refresh", "d-refresh", "box-access", "g-access", "bsecret", "http://", "id:p1"])
       expect(all, secret).not.toContain(secret);
     for (const line of w.logs) expect(line).toMatch(/^ingest( date=\d{4}-\d{2}-\d{2})?( [a-z_]+=[\w.-]+)+$/);
+  });
+});
+
+describe("R14: a source not connected is missing; a connected source that fails keeps its previous facts", () => {
+  const draftDeps = (w: Awaited<ReturnType<typeof world>>) => ({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+
+  test("Dropbox not connected → every episode stored with notes missing, and a ready show is still drafted", async () => {
+    const w = await make({ dropboxToken: undefined });
+    await runScan(w.deps);
+    const eps = byDate(w);
+    expect(Object.keys(eps).sort()).toEqual(["2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30"]);
+    for (const e of Object.values(eps)) expect(e.notes).toEqual({ status: "missing" });
+    expect(eps["2026-01-02"]!.tracklist.status).toBe("found");
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-02", true]]);
+  });
+
+  test("Dropbox connected but its list 500s → previous notes kept on upsert, no draft this pass; the next good scan resumes drafting", async () => {
+    let listOk = true;
+    const w = await make({ dropboxList: () => listOk });
+    await runScan(w.deps);
+    w.cv.upserts.length = 0;
+    listOk = false;
+    await runScan(w.deps);
+    const jan2 = byDate(w)["2026-01-02"]!;
+    expect(jan2.notes).toMatchObject({ status: "found", docId: "id:p1" });
+    expect(jan2.notes.text).toContain(NOTES_SECRET);
+    expect(jan2.tracklist.tracks!.map((t) => t.status)).toEqual(["confirmed", "closing-track", "confirmed", "closing-track"]);
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toEqual([]);
+    expect(w.logs).toContain("ingest step=scan source=dropbox ok=false error=http_500");
+
+    listOk = true;
+    await runScan(w.deps);
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls.map((c) => c.showDate)).toEqual(["2026-01-02"]);
+  });
+
+  test("after a restart (nothing remembered), a failing source leaves stored shows untouched and drafting paused", async () => {
+    let listOk = true;
+    const w = await make({ dropboxList: () => listOk });
+    await runScan(w.deps);
+    w.cv.upserts.length = 0;
+    listOk = false;
+    w.deps.memory = newMemory();
+    await runScan(w.deps);
+    expect(w.cv.upserts).toEqual([]);
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toEqual([]);
+  });
+
+  test("a fresh process drafts nothing before its first complete scan", async () => {
+    const w = await make();
+    await runScan(w.deps); // shows stored by the last process
+    w.deps.memory = newMemory(); // restart
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toEqual([]);
+    await runScan(w.deps);
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toHaveLength(1);
   });
 });
