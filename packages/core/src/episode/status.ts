@@ -31,7 +31,8 @@ export type EpisodeStatus =
   | "approved"
   | "published"
   | "failed"
-  | "outcome-unknown";
+  | "outcome-unknown"
+  | "skipped";
 
 export interface EpisodeStatusResult {
   status: EpisodeStatus;
@@ -47,6 +48,7 @@ const FROM_PACKAGE: Partial<Record<LinkedPackageStatus, EpisodeStatus>> = {
   succeeded: "published",
   failed: "failed",
   outcome_unknown: "outcome-unknown",
+  skipped: "skipped",
 };
 
 export function episodeStatus(e: EpisodeFacts): EpisodeStatusResult {

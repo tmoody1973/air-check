@@ -53,7 +53,7 @@ test("status: package status wins", () => {
   expect(s("succeeded")).toBe("published");
   expect(s("failed")).toBe("failed");
   expect(s("outcome_unknown")).toBe("outcome-unknown");
-  expect(s("skipped")).toBe("ready-to-draft");
+  expect(s("skipped")).toBe("skipped");
 });
 
 test("nextAudioToFetch: oldest first, stops at max, skips questions and ask/incomplete", () => {
@@ -173,4 +173,11 @@ test("paper: track lines before any hour heading are ignored", () => {
 test("paper: non-empty doc with zero tracks is flagged; empty is not", () => {
   expect(parsePaperExport("Just some prose, no hours.")).toEqual({ tracks: [], unreadable: true });
   expect(parsePaperExport("  \n")).toEqual({ tracks: [], unreadable: false });
+});
+
+test("skipped episodes are never picked for audio or drafting", () => {
+  const eps = [ep("2026-01-01", { packageStatus: "skipped" })];
+  expect(nextAudioToFetch(eps, 0)).toBeNull();
+  expect(nextToDraft(eps, 0)).toBeNull();
+  expect(nextToDraft([...eps, ep("2026-02-01")], 0)?.showDate).toBe("2026-02-01");
 });
