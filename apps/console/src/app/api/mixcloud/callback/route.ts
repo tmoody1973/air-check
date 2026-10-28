@@ -27,6 +27,7 @@ export async function GET(request: Request) {
   // `state`, so it is compared (in constant time) only when it comes back.
   const expected = readCookie(request.headers.get("cookie"), STATE_COOKIE);
   const echoed = params.get("state");
+  // TODO(R21): require state once Mixcloud is confirmed to echo it
   if (!expected || (echoed !== null && !statesMatch(expected, echoed))) return fail("state");
 
   const code = params.get("code");

@@ -6,6 +6,13 @@ import { MixcloudConnection, noticeFrom } from "./MixcloudConnection";
 
 afterEach(cleanup);
 
+// Connect and Disconnect are same-origin POST forms (CSRF: a cross-site link can't start or end a connection).
+function expectPostForm(name: string, action: string) {
+  const form = screen.getByRole("button", { name }).closest("form");
+  expect(form).toHaveAttribute("method", "post");
+  expect(form).toHaveAttribute("action", action);
+}
+
 // 2026-10-28 03:00 UTC is still Oct 27 in Milwaukee.
 const AT = Date.UTC(2026, 9, 28, 3, 0);
 
@@ -13,23 +20,22 @@ describe("MixcloudConnection", () => {
   it("connected: account and date, Reconnect and Disconnect", () => {
     render(<MixcloudConnection status={{ state: "connected", account: "rhythmlab", connectedAt: AT }} workspace="real" />);
     expect(screen.getByText("Connected as rhythmlab · since Oct 27, 2026")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reconnect" })).toHaveAttribute("href", "/api/mixcloud/authorize");
-    const disconnect = screen.getByRole("button", { name: "Disconnect" });
-    expect(disconnect.closest("form")).toHaveAttribute("action", "/api/mixcloud/disconnect");
-    expect(disconnect.closest("form")).toHaveAttribute("method", "post");
+    expectPostForm("Reconnect", "/api/mixcloud/authorize");
+    expectPostForm("Disconnect", "/api/mixcloud/disconnect");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("not connected: Connect only", () => {
     render(<MixcloudConnection status={{ state: "not_connected" }} workspace="real" />);
     expect(screen.getByText("Not connected")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect Mixcloud" })).toHaveAttribute("href", "/api/mixcloud/authorize");
+    expectPostForm("Connect Mixcloud", "/api/mixcloud/authorize");
     expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
   });
 
   it("needs reconnect: says why, offers Reconnect and Disconnect", () => {
     render(<MixcloudConnection status={{ state: "needs_reconnect", account: "rhythmlab", lastError: "invalid_token" }} workspace="real" />);
     expect(screen.getByText("Reconnect needed: Mixcloud says the permission was revoked")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reconnect" })).toBeInTheDocument();
+    expectPostForm("Reconnect", "/api/mixcloud/authorize");
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
     expect(screen.queryByText(/invalid_token/)).not.toBeInTheDocument();
   });

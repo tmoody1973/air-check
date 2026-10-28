@@ -47,12 +47,20 @@ afterEach(async () => {
 
 const setCookies = (res: Response) => res.headers.getSetCookie();
 
-describe("GET /api/mixcloud/authorize", () => {
-  const call = async () => (await import("./authorize/route")).GET();
+describe("POST /api/mixcloud/authorize", () => {
+  const call = async (origin: string | null = "https://air.example") => {
+    const mod = (await import("./authorize/route")) as Record<string, unknown>;
+    const POST = mod.POST as (r: Request) => Promise<Response>;
+    return POST(new Request("http://internal:3000/api/mixcloud/authorize", { method: "POST", headers: origin ? { origin } : {} }));
+  };
 
-  it("redirects a signed-in staff member to Mixcloud with a fresh state cookie", async () => {
+  it("GET is not served, so a cross-site link can't start a connect", async () => {
+    expect(Object.keys(await import("./authorize/route"))).toEqual(["POST"]);
+  });
+
+  it("a same-origin POST by a staff member → 303 to Mixcloud with a fresh state cookie", async () => {
     const res = await call();
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(303);
     const [cookie] = setCookies(res);
     expect(cookie).toMatch(new RegExp(`^${STATE_COOKIE}=[A-Za-z0-9_-]{43}; HttpOnly; Secure; SameSite=Lax; Path=/api/mixcloud; Max-Age=600$`));
     const state = cookie!.split(";")[0]!.split("=")[1];
@@ -62,8 +70,14 @@ describe("GET /api/mixcloud/authorize", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it.each([["no Origin", null], ["a foreign Origin", "https://evil.example"]])("%s → 403 and no cookie", async (_l, origin) => {
+    const res = await call(origin);
+    expect(res.status).toBe(403);
+    expect(setCookies(res)).toEqual([]);
+  });
+
   it.each([["demo", DEMO], ["an outside account", OUTSIDER], ["an unverified email", UNVERIFIED], ["signed out", null]])(
-    "%s gets 403 and no cookie",
+    "%s (same origin) gets 403 and no cookie",
     async (_label, who) => {
       session.current = who;
       const res = await call();
@@ -75,7 +89,9 @@ describe("GET /api/mixcloud/authorize", () => {
   it("missing Mixcloud settings redirect with reason=config", async () => {
     vi.stubEnv("MIXCLOUD_CLIENT_SECRET", "");
     const res = await call();
+    expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/settings?mixcloud=error&reason=config");
+    expect(setCookies(res)).toEqual([]);
   });
 });
 

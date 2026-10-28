@@ -1,16 +1,18 @@
-import { authorizeUrl, errorLocation, logStep, mixcloudConfig, newState, stateCookie } from "@/lib/mixcloudOAuth";
+import { authorizeUrl, errorLocation, logStep, mixcloudConfig, newState, sameOrigin, stateCookie } from "@/lib/mixcloudOAuth";
 import { realHumanSession } from "@/lib/session";
 
-// Starts Connect Mixcloud. Signed-in real human only; the state cookie is our CSRF guard for the callback.
-export async function GET() {
+// Starts Connect Mixcloud from the Settings form. POST only, same origin only: a cross-site link or page must not be
+// able to plant a state cookie (login CSRF). The state cookie then guards the callback.
+const see = (location: string, extra: Record<string, string> = {}) =>
+  new Response(null, { status: 303, headers: { Location: location, "Cache-Control": "no-store", ...extra } });
+
+export async function POST(request: Request) {
+  if (!sameOrigin(request)) return new Response("Forbidden", { status: 403 });
   if (!(await realHumanSession())) return new Response("Forbidden", { status: 403 });
   const cfg = mixcloudConfig();
   logStep("authorize", !!cfg);
   // Relative Location for our own pages: behind Caddy, request.url is the internal origin.
-  if (!cfg) return new Response(null, { status: 302, headers: { Location: errorLocation("config") } });
+  if (!cfg) return see(errorLocation("config"));
   const state = newState();
-  return new Response(null, {
-    status: 302,
-    headers: { Location: authorizeUrl(cfg, state), "Set-Cookie": stateCookie(state), "Cache-Control": "no-store" },
-  });
+  return see(authorizeUrl(cfg, state), { "Set-Cookie": stateCookie(state) });
 }

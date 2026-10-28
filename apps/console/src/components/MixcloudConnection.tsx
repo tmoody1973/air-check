@@ -98,10 +98,12 @@ export function MixcloudConnection({
         </div>
         {status && (
           <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
-            {/* A plain link, not next/link: this is a full navigation to a route handler that leaves the site. */}
-            <a href="/api/mixcloud/authorize" className={`${BTN} border-signal bg-signal text-white hover:bg-signal-deep`}>
-              {status.state === "not_connected" ? "Connect Mixcloud" : "Reconnect"}
-            </a>
+            {/* Same-origin POST forms, not links: a cross-site page can't start or end a connection. */}
+            <form method="post" action="/api/mixcloud/authorize">
+              <button type="submit" className={`${BTN} border-signal bg-signal text-white hover:bg-signal-deep`}>
+                {status.state === "not_connected" ? "Connect Mixcloud" : "Reconnect"}
+              </button>
+            </form>
             {status.state !== "not_connected" && (
               <form method="post" action="/api/mixcloud/disconnect">
                 <button type="submit" className={`${BTN} border-line-strong bg-surface text-ink hover:bg-chip`}>
