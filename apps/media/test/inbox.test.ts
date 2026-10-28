@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Attached, MediaConvex, PendingPackage, WaitingItem } from "../src/convex.js";
 import type { Exec } from "../src/encode.js";
-import { runPass } from "../src/inbox.js";
+import { RETRY_BACKOFF_MS, runPass, type PassDeps } from "../src/inbox.js";
 
 let root: string, inboxDir: string, preparedDir: string;
 beforeEach(async () => {
@@ -43,8 +43,8 @@ const okExec = (failEncode = false): Exec => async (file, args) => {
 };
 beforeEach(() => void (calls.length = 0));
 
-const pass = (convex: MediaConvex, exec: Exec, log: (l: string) => void = () => {}) =>
-  runPass({ convex, exec, log, inboxDir, preparedDir, maxPrepared: 3 });
+const pass = (convex: MediaConvex, exec: Exec, log: (l: string) => void = () => {}, extra: Partial<PassDeps> = {}) =>
+  runPass({ convex, exec, log, inboxDir, preparedDir, maxPrepared: 3, ...extra });
 
 describe("runPass", () => {
   test("encodes a matched folder in hour order and attaches it", async () => {
@@ -142,5 +142,43 @@ describe("runPass", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const l of lines) expect(l).toMatch(/^media date=\S+ package=\S+ step=\w+ ok=(true|false) ms=\d+$/);
     expect(lines.join("\n")).not.toMatch(/SECRET|\/|token/i);
+  });
+
+  describe("retry backoff", () => {
+    const pkg = [{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }];
+    const reason = [{ showDate: "2026-10-02", reason: "Encoding failed for 2026-10-02; will retry" }];
+
+    test("a failed attach is not re-encoded next pass, keeps its reason, and retries after the backoff", async () => {
+      await addShow("2026-10-02");
+      let t = 1_000, failAttach = true;
+      const convex = fakeConvex(pkg);
+      convex.attached = async (a) => { if (failAttach) throw new Error("convex down"); convex.attachedCalls.push(a); };
+      const extra = { failedAt: new Map<string, number>(), now: () => t };
+      await pass(convex, okExec(), undefined, extra);
+      const encodes = () => calls.filter((c) => c.file === "ffmpeg").length;
+      expect(encodes()).toBe(1);
+      t += 30_000;
+      await pass(convex, okExec(), undefined, extra);
+      expect(encodes()).toBe(1);
+      expect(convex.waitingCalls.at(-1)).toEqual(reason);
+      failAttach = false;
+      t += RETRY_BACKOFF_MS;
+      await pass(convex, okExec(), undefined, extra);
+      expect(encodes()).toBe(2);
+      expect(convex.attachedCalls).toHaveLength(1);
+      expect(convex.waitingCalls.at(-1)).toEqual([]);
+    });
+
+    test("a failed encode backs off too", async () => {
+      await addShow("2026-10-02");
+      let t = 0;
+      const extra = { failedAt: new Map<string, number>(), now: () => t };
+      const convex = fakeConvex(pkg);
+      await pass(convex, okExec(true), undefined, extra);
+      t += 60_000;
+      await pass(convex, okExec(true), undefined, extra);
+      expect(calls.filter((c) => c.file === "ffmpeg")).toHaveLength(1);
+      expect(convex.waitingCalls.at(-1)).toEqual(reason);
+    });
   });
 });

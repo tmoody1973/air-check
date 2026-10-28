@@ -14,7 +14,7 @@ function main(): void {
     console.error(`aircheck-media: ${e instanceof Error ? e.message : "bad config"}`);
     process.exit(1);
   }
-  const deps = { convex: connectConvex(config.convexUrl, config.mediaToken), exec: realExec, log, inboxDir: config.inboxDir, preparedDir: config.preparedDir, maxPrepared: config.maxPrepared };
+  const deps = { convex: connectConvex(config.convexUrl, config.mediaToken), exec: realExec, log, inboxDir: config.inboxDir, preparedDir: config.preparedDir, maxPrepared: config.maxPrepared, failedAt: new Map<string, number>() };
   let running = false; // one pass (so one encode) at a time
   const tick = async () => {
     if (running) return;

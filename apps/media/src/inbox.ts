@@ -7,7 +7,13 @@ import { encodeMp3, probeSeconds, sha256File, type Exec } from "./encode.js";
 export interface PassDeps {
   convex: MediaConvex; exec: Exec; log: (line: string) => void;
   inboxDir: string; preparedDir: string; maxPrepared: number;
+  /** When each package last failed. Pass the same map every pass (in memory only) to get the backoff. */
+  failedAt?: Map<string, number>;
+  now?: () => number;
 }
+
+/** After a failed encode or attach, leave that package alone this long. */
+export const RETRY_BACKOFF_MS = 10 * 60_000;
 
 const CLEANUP_ID = /^pkg-(\d{1,2})-(\d{1,2})-(\d{2})$/;
 const pad = (n: string) => n.padStart(2, "0");
@@ -72,6 +78,7 @@ export async function runPass(deps: PassDeps): Promise<void> {
   const pending = await deps.convex.pending();
   const folders = await readdir(deps.inboxDir, { withFileTypes: true }).catch(() => []);
   const waiting: WaitingItem[] = [];
+  const now = deps.now ?? Date.now;
   for (const entry of folders.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const date = entry.name;
     const dir = join(deps.inboxDir, date);
@@ -88,10 +95,15 @@ export async function runPass(deps: PassDeps): Promise<void> {
       waiting.push({ showDate: date, reason: `${date} waits: ${deps.maxPrepared} prepared shows are already waiting for review` });
       continue;
     }
+    const failedReason = { showDate: date, reason: `Encoding failed for ${date}; will retry` };
+    const failed = deps.failedAt?.get(pkg);
+    if (failed !== undefined && now() - failed < RETRY_BACKOFF_MS) { waiting.push(failedReason); continue; }
     try {
       await prepare(deps, date, pkg, dir, m.hour1, m.hour2);
+      deps.failedAt?.delete(pkg);
     } catch {
-      waiting.push({ showDate: date, reason: `Encoding failed for ${date}; will retry` });
+      deps.failedAt?.set(pkg, now());
+      waiting.push(failedReason);
     }
   }
   await deps.convex.waiting(waiting);
