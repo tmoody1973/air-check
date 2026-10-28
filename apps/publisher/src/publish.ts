@@ -4,8 +4,8 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { AUDIO_CHANGED, AUDIO_MISSING, type PackageDraft, nextToPublish, toMixcloudFields, validateForUpload } from "@aircheck/core";
 import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem } from "./convex.js";
-import { timed } from "./log.js";
-import { imageType, MAX_COVER_BYTES, readTokenFile, uploadShow, type UploadOutcome } from "./mixcloud.js";
+import { timed, whoTag, type Who } from "./log.js";
+import { editDescription, imageType, MAX_COVER_BYTES, readTokenFile, showEditUrl, uploadShow, type EditOutcome, type UploadOutcome } from "./mixcloud.js";
 import type { StateBox } from "./state.js";
 import { RECONNECT_ALERT } from "./telegram.js";
 
@@ -39,10 +39,10 @@ const notReady = (e: unknown) => (e as { data?: { code?: string } })?.data?.code
  * its answer was lost. If it still fails, exit: systemd restarts the service and reconcile turns the package
  * outcome_unknown, rather than it sitting in `publishing` (uncounted by the pacing) forever.
  */
-async function settle(deps: PublishDeps, id: string, step: string, write: () => Promise<void>): Promise<void> {
+async function settle(deps: PublishDeps, who: Who, step: string, write: () => Promise<void>): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await timed(deps.log, id, step, write);
+      return await timed(deps.log, who, step, write);
     } catch (e) {
       if (notReady(e)) return;
       const backoff = WRITE_BACKOFF_MS[attempt];
@@ -50,7 +50,7 @@ async function settle(deps: PublishDeps, id: string, step: string, write: () => 
       await (deps.sleep ?? wait)(backoff);
     }
   }
-  deps.log(`publish package=${id} step=record ok=false ms=0`);
+  deps.log(`publish ${whoTag(who)} step=record ok=false ms=0`);
   (deps.exit ?? ((code: number) => process.exit(code)))(1);
 }
 
@@ -243,6 +243,47 @@ export async function publishPass(deps: PublishDeps): Promise<void> {
     : { status: "outcome_unknown" }; // never retried (Review Focus 1)
   await settle(deps, id, "result", () => deps.convex.result(id, result));
   await deps.report(out.kind === "failed" && out.code === "rate_limited" ? { ...status, lastError: "rate_limited" } : status);
+}
+
+/**
+ * Plan 5c Task 4: at most one approved description update per pass, pushed with Mixcloud's edit endpoint. Hard Rule 1:
+ * Convex hands out only updates a signed-in human approved. Not paced: an edit is not a new show (3-a-day is uploads).
+ */
+export async function updatePass(deps: PublishDeps): Promise<void> {
+  const conn = await connection(deps);
+  if (!conn.ok) return; // publishPass reports the token file's state; a refused key is never tried again
+  // Not timed: an empty claim every 30 s would be a log line every 30 s. A throw reaches main's `step=pass` line.
+  const u = await deps.convex.claimUpdate();
+  if (!u) return;
+  const who = { update: u.id, package: u.packageId };
+  // Review Focus 3: the show to edit comes only from the package's own receipt; anything odd sends nothing.
+  const editUrl = showEditUrl(u.showUrl, deps.uploadUrl);
+  let out: EditOutcome;
+  try {
+    out = editUrl
+      ? await timed(deps.log, who, "edit", () => editDescription({ accessToken: conn.accessToken, editUrl, description: u.description, timeoutMs: deps.uploadTimeoutMs }), (o) => o.kind === "pushed")
+      : { kind: "failed", code: "bad_show_url" };
+  } catch {
+    out = { kind: "retry" }; // idempotent: trying again is safe
+  }
+  if (out.kind === "invalid_token") {
+    // Same as an upload: remember the refused key, say so once, give the update back (nothing was changed).
+    await deps.state.update((s) => ({ ...s, rejectedToken: conn.rejectKey })).catch(() => deps.log(`publish ${whoTag(who)} step=state ok=false ms=0`));
+    await timed(deps.log, who, "alert", () => deps.alert(RECONNECT_ALERT), (ok) => ok).catch(() => false);
+    await settle(deps, who, "update_record", () => deps.convex.recordUpdate(u.id, { status: "unclaim" }));
+    return deps.report({ ...conn.status, state: "needs_reconnect", lastError: "invalid_token" });
+  }
+  const outcome = out.kind === "pushed" ? { status: "pushed" as const } : out.kind === "failed" ? { status: "failed" as const, error: out.code } : { status: "retry" as const };
+  await settle(deps, who, "update_record", () => deps.convex.recordUpdate(u.id, outcome));
+}
+
+/** One loop tick: the publish step, then the update step, which runs even if the publish step throws (single-flight). */
+export async function fullPass(deps: PublishDeps): Promise<void> {
+  try {
+    await publishPass(deps);
+  } finally {
+    await updatePass(deps);
+  }
 }
 
 /**

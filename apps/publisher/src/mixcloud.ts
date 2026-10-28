@@ -4,6 +4,8 @@ import { AUDIO_MISSING } from "@aircheck/core";
 
 /** Hard Rule 1: the only file allowed to name Mixcloud's upload endpoint (packages/core/src/boundaries.ts pins it). */
 export const MIXCLOUD_UPLOAD_URL = "https://api.mixcloud.com/upload/";
+/** A description edit needs no audio; a minute is plenty. */
+export const EDIT_TIMEOUT_MS = 60_000;
 const SHOW_BASE = "https://www.mixcloud.com";
 /** About 140 MB has to cross the VM's uplink. */
 export const UPLOAD_TIMEOUT_MS = 30 * 60_000;
@@ -107,4 +109,51 @@ export function classify(status: number, retryAfter: string | null, text: string
   if (status === 403 && (retryAfter !== null || type === "RateLimitException")) return { kind: "rate_limited", retryAfterSec: retryAfterSeconds(retryAfter) };
   if (type === "OAuthException" || /invalid access token/i.test(message)) return { kind: "invalid_token" };
   return { kind: "failed", code: /^\w{1,40}$/.test(type) ? type : `http_${status}` };
+}
+
+/** A show's own address on Mixcloud: exactly https://www.mixcloud.com/<user>/<slug>/, plain path characters only. */
+const SHOW_URL = /^https:\/\/www\.mixcloud\.com\/([A-Za-z0-9_-]{1,100})\/([A-Za-z0-9_-]{1,200})\/$/;
+
+/**
+ * Plan 5c Task 4 (Review Focus 3): the edit endpoint for a show, built only from the package's own receipt URL.
+ * Anything that is not exactly a show address (other host, extra segments, dots, escapes, a query) is null, so no
+ * request is ever sent. ponytail: slugs with non-ASCII (percent-escaped) characters are refused too; widen if one appears.
+ */
+export function showEditUrl(showUrl: string, base: string = MIXCLOUD_UPLOAD_URL): string | null {
+  const m = SHOW_URL.exec(showUrl);
+  return m ? `${base}${m[1]}/${m[2]}/edit/` : null;
+}
+
+export type EditOutcome = { kind: "pushed" } | { kind: "retry" } | { kind: "invalid_token" } | { kind: "failed"; code: string };
+
+/**
+ * One multipart POST with only `description`: Mixcloud changes name, picture and description only when posted, and
+ * replaces tags, sections and hosts wholesale if any of them is posted, so nothing else is sent. An edit is idempotent,
+ * so anything short of a clear answer (no answer, a timeout, a 5xx, a rate limit) is `retry`.
+ */
+export async function editDescription(i: { accessToken: string; editUrl: string; description: string; timeoutMs?: number }): Promise<EditOutcome> {
+  const form = new FormData();
+  form.append("description", i.description);
+  const url = new URL(i.editUrl);
+  url.searchParams.set("access_token", i.accessToken); // never logged
+  try {
+    const res = await fetch(url, { method: "POST", body: form, redirect: "manual", signal: AbortSignal.timeout(i.timeoutMs ?? EDIT_TIMEOUT_MS) });
+    return classifyEdit(res.status, res.headers.get("retry-after"), await res.text());
+  } catch {
+    return { kind: "retry" };
+  }
+}
+
+/** Only a 2xx with `success: true` is pushed; a refused key and other 4xx are final; everything else is tried again. */
+export function classifyEdit(status: number, retryAfter: string | null, text: string): EditOutcome {
+  if (status >= 200 && status < 300) {
+    let success: unknown;
+    try {
+      success = (JSON.parse(text) as { result?: { success?: unknown } } | null)?.result?.success;
+    } catch { /* not JSON: no proof it changed */ }
+    return success === true ? { kind: "pushed" } : { kind: "retry" };
+  }
+  if (status === 408 || status === 429) return { kind: "retry" };
+  const o = classify(status, retryAfter, text);
+  return o.kind === "invalid_token" || o.kind === "failed" ? o : { kind: "retry" };
 }

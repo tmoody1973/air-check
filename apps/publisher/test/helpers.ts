@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PackageDraft } from "@aircheck/core";
 import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
-import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem, ReviewItem } from "../src/convex.js";
+import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem, ReviewItem, UpdateClaim, UpdateOutcome } from "../src/convex.js";
 
 export const ACCESS_TOKEN = "mc-access-token-SECRET-1234567890";
 export const BOT_TOKEN = "123456:telegram-bot-SECRET";
@@ -35,10 +35,12 @@ export const reply = json;
  * A fake for every outside service on 127.0.0.1: the Mixcloud upload (`/upload/`), covers (`/cover/<id>`) and
  * Telegram (`/bot<token>/sendMessage`). `upload` handlers run in order, one per upload request; the last repeats.
  */
-export async function fakeServer(opts: { upload?: Handler[]; cover?: Buffer } = {}) {
+export async function fakeServer(opts: { upload?: Handler[]; cover?: Buffer; edit?: Handler[] } = {}) {
   const seen: Seen[] = [];
   const uploads = opts.upload ?? [];
+  const edits = opts.edit ?? [];
   let n = 0;
+  let e = 0;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const base = { method: req.method ?? "", path: url.pathname, query: url.searchParams, headers: req.headers };
@@ -46,6 +48,8 @@ export async function fakeServer(opts: { upload?: Handler[]; cover?: Buffer } = 
       const handler = uploads[Math.min(n++, uploads.length - 1)] ?? okUpload;
       return handler(req, res, seen);
     }
+    // A description edit (Plan 5c Task 4): /upload/<user>/<slug>/edit/
+    if (/^\/upload\/.+\/edit\/$/.test(url.pathname)) return (edits[Math.min(e++, edits.length - 1)] ?? okEdit)(req, res, seen);
     const body = await readBody(req);
     seen.push({ ...base, body });
     if (url.pathname.startsWith("/cover/")) {
@@ -65,6 +69,9 @@ export async function fakeServer(opts: { upload?: Handler[]; cover?: Buffer } = 
     uploads: () => seen.filter((s) => s.path === "/upload/"),
     /** Every request that reached /upload/, whatever its handler did with it. */
     uploadRequests: () => n,
+    /** Description edits whose body was read and parsed, and every request that reached an edit path. */
+    edits: () => seen.filter((s) => s.path.endsWith("/edit/")),
+    editRequests: () => e,
     close: () => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }),
   };
 }
@@ -79,10 +86,13 @@ export const recordUpload = (status: number, body: unknown, headers: Record<stri
     json(res, status, body, headers);
   };
 export const okUpload = recordUpload(200, SUCCESS);
+export const okEdit = recordUpload(200, { result: { success: true, message: "Cloudcast updated" } });
 
 /** A fake Convex that keeps package statuses like the gate does, and records every call. */
-export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; coverBase?: string; review?: ReviewItem[] } = {}) {
+export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; coverBase?: string; review?: ReviewItem[]; updates?: UpdateClaim[] } = {}) {
   const status = new Map<string, string>(items.map((p) => [p.packageId, "approved"]));
+  const updates = opts.updates ?? [];
+  const updateStatus = new Map<string, string>(updates.map((u) => [u.id, "approved"]));
   const calls: Array<[string, ...unknown[]]> = [];
   const move = (id: string, from: string, to: string) => {
     if (status.get(id) !== from) throw new Error(`NOT_READY ${id}`);
@@ -105,8 +115,19 @@ export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; 
     async coverUrl(storageId) { calls.push(["coverUrl", storageId]); return `${opts.coverBase}/cover/${storageId}`; },
     async setMixcloud(s: MixcloudStatus) { calls.push(["setMixcloud", s]); },
     async awaitingReview() { calls.push(["awaitingReview"]); return opts.review ?? []; },
+    async claimUpdate() {
+      calls.push(["claimUpdate"]);
+      const u = updates.find((x) => updateStatus.get(x.id) === "approved");
+      if (u) updateStatus.set(u.id, "pushing");
+      return u ?? null;
+    },
+    async recordUpdate(id, outcome: UpdateOutcome) {
+      calls.push(["recordUpdate", id, outcome]);
+      if (updateStatus.get(id) !== "pushing") throw new Error(`NOT_READY ${id}`);
+      updateStatus.set(id, outcome.status === "unclaim" || outcome.status === "retry" ? "approved" : outcome.status);
+    },
   };
-  return { convex, calls, status, names: () => calls.map((c) => c[0]) };
+  return { convex, calls, status, updateStatus, names: () => calls.map((c) => c[0]) };
 }
 
 /** A temp dir holding the prepared MP3, the token file and the state file. */
