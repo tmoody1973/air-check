@@ -13,6 +13,7 @@ export default defineConfig({
       "apps/bridge",
       "apps/relay",
       "apps/media",
+      "apps/publisher",
     ],
   },
 });

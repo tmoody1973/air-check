@@ -122,6 +122,7 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
 - `unlisted: true` allows a safe end-to-end test on Tarik's real account without a separate test account.
 - **Tracklist implication:** the description limit means the tracklist goes in `sections`. The Mixcloud docs list `start_time` as an option, not a requirement, and the Rhythm Lab web app already sends sections with artist and song only (no times). **(verify with an unlisted test upload whether Mixcloud accepts and displays sections without times.)** Tarik does not need per-track times (decided Oct 19). If sections without times do not display, fall back to a short artist list in the description.
 - Records the Mixcloud URL back into the corpus so the backlog list updates.
+- Built as `apps/publisher` (a host systemd service, `aircheck-publisher`). At most 3 uploads per America/Chicago day, oldest show first; the MP3 is re-hashed against the approved fingerprint and streamed from disk. A crash, timeout, 5xx or unreadable answer leaves the package `outcome_unknown`: never retried, Tarik checks Mixcloud. A refused access token is the one case that puts a package back to `approved` (Mixcloud checks the key before it takes audio); the refused key is never tried again and Tarik gets one Telegram alert to reconnect.
 
 ### 3.6 Interfaces
 - **Telegram:** the digest and package cards that link to the console's package page (no approve buttons, design spec 5.1), pre-air reports, questions.

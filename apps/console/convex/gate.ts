@@ -35,12 +35,15 @@ const ACTIVITY: Record<string, ActivitySpec> = {
   outcome_unknown: { kind: "waiting", result: "needs_you", title: (_t, id) => `Publish outcome unknown for package ${id}` },
 };
 
+// publisher.unclaim (publishing -> approved) is not an approval: Mixcloud refused the key, so the package waits.
+const UNCLAIMED: ActivitySpec = { kind: "waiting", result: "needs_you", title: (_t, id) => `Mixcloud refused the key: package ${id} waits for Reconnect` };
+
 /** A gate whose transitions write their activity row in the same mutation. preparing_audio writes none. */
 export function gateFor(ctx: MutationCtx) {
   const store = convexPackageStore(ctx);
   return new ApprovalGate(store, {
     onTransition: async (t) => {
-      const spec = ACTIVITY[t.to];
+      const spec = t.from === "publishing" && t.to === "approved" ? UNCLAIMED : ACTIVITY[t.to];
       const rec = await store.get(t.id);
       if (!spec || !rec) return;
       await ctx.db.insert("activity", {

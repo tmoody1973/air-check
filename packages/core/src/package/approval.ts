@@ -212,6 +212,18 @@ export class ApprovalGate {
     return next;
   }
 
+  /**
+   * publishing -> approved, the one way back to approved. Only for `invalid_token`: Mixcloud rejects the access
+   * token before it takes any audio, so nothing was posted and the package can safely wait for a reconnect.
+   */
+  async unclaim(id: string, reason: "invalid_token"): Promise<PackageRecord> {
+    void reason;
+    const next = await this.store.compareAndSwap(id, { status: "publishing" }, { status: "approved" });
+    if (!next) throw new GateError("NOT_READY", `package ${id} is not publishing`);
+    await this.emit(id, "publishing", "approved", "publisher");
+    return next;
+  }
+
   async recordResult(id: string, r: PublishResult): Promise<PackageRecord> {
     const at = this.now().toISOString();
     const result = r.status === "succeeded" ? { url: r.url, at } : r.status === "failed" ? { error: r.error, at } : { at };

@@ -31,7 +31,7 @@ test("the public writes are exactly the allowlist", async () => {
       // Plan 5: the cover (signed-in human), the media and publisher services (each with its own token), Mixcloud status.
       "packages.setCover", "packages.coverUploadUrl",
       "media.attached", "media.waiting",
-      "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud",
+      "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud", "publisher.unclaim",
       "mixcloud.connected", "mixcloud.disconnected",
     ].sort(),
   );
@@ -111,10 +111,12 @@ test("media, publisher and mixcloud code never call decide", () => {
   }
 });
 
-test("the publisher reaches packages only through claimForPublish and recordResult", () => {
+test("the publisher reaches packages only through claimForPublish, recordResult and unclaim", () => {
   const text = src("publisher");
-  expect([...new Set([...text.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1]))].sort()).toEqual(["claimForPublish", "recordResult"]);
-  expect(text.match(/gateFor\(/g)).toHaveLength(text.match(/gateFor\(ctx\)\.(?:claimForPublish|recordResult)\(/g)!.length);
+  expect([...new Set([...text.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1]))].sort()).toEqual(["claimForPublish", "recordResult", "unclaim"]);
+  expect(text.match(/gateFor\(/g)).toHaveLength(text.match(/gateFor\(ctx\)\.(?:claimForPublish|recordResult|unclaim)\(/g)!.length);
+  // unclaim is only ever the invalid-token case (R23): Mixcloud refused the key before taking any audio.
+  expect([...text.matchAll(/\.unclaim\(([^)]*)\)/g)].map((m) => m[1])).toEqual([`packageId, "invalid_token"`]);
   for (const banned of ["convexPackageStore", "compareAndSwap", "attachAudio", "setCover"]) expect(text, `publisher.ts mentions ${banned}`).not.toContain(banned);
   // No direct writes at all: Mixcloud status goes through mixcloud.ts's writer.
   expect(text).not.toMatch(/\.(?:patch|insert|replace|delete)\(/);
@@ -122,7 +124,7 @@ test("the publisher reaches packages only through claimForPublish and recordResu
 
 test("media and mixcloud code never claim or record a publish result", () => {
   for (const name of ["media", "mixcloud"]) {
-    for (const banned of ["claimForPublish", "recordResult"]) expect(src(name), `${name}.ts mentions ${banned}`).not.toContain(banned);
+    for (const banned of ["claimForPublish", "recordResult", "unclaim"]) expect(src(name), `${name}.ts mentions ${banned}`).not.toContain(banned);
   }
   expect(src("mixcloud")).not.toMatch(/"packages"|gateFor|convexPackageStore/);
 });
@@ -187,6 +189,8 @@ test("the relay's and the agent's tokens are refused by every media and publishe
       t.mutation(api.publisher.reconcile, { token }),
       t.query(api.publisher.coverUrl, { token, storageId: cover }),
       t.mutation(api.publisher.setMixcloud, { token, state: "connected" }),
+      t.mutation(api.publisher.unclaim, { token, packageId: id }),
+      t.query(api.publisher.awaitingReview, { token }),
     ];
     for (const call of calls) await expect(call).rejects.toThrow(/UNAUTHORIZED/);
   }

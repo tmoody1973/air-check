@@ -238,6 +238,53 @@ describe("publisher.setMixcloud", () => {
   });
 });
 
+describe("publisher.unclaim", () => {
+  test("publishing -> approved after Mixcloud refused the key; writes a needs-you row without the title", async () => {
+    const t = convexTest(schema, modules);
+    const id = await approved(t);
+    const fp = (await pkg(t, id))!.fingerprint;
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    const before = (await t.run((ctx) => ctx.db.query("activity").collect())).length;
+    await t.mutation(api.publisher.unclaim, { token: PUB, packageId: id });
+    const doc = (await pkg(t, id))!;
+    expect(doc.status).toBe("approved");
+    expect(doc.fingerprint).toBe(fp);
+    const rows = (await t.run((ctx) => ctx.db.query("activity").collect())).slice(before);
+    expect(rows.map(({ workspace, kind, result, title, packageId }) => ({ workspace, kind, result, title, packageId }))).toEqual([
+      { workspace: "real", kind: "waiting", result: "needs_you", title: `Mixcloud refused the key: package ${id} waits for Reconnect`, packageId: id },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain(doc.draft.title as string);
+    expect((await t.query(api.publisher.queue, { token: PUB })).packages.map((p) => p.packageId)).toEqual([id]);
+  });
+
+  test("valid only from publishing: never from approved, review or a result", async () => {
+    const t = convexTest(schema, modules);
+    const waiting = await approved(t, { id: "pkg-w" });
+    const review = await reviewable(t, { id: "pkg-r" });
+    const done = await approved(t, { id: "pkg-d" });
+    await published(t, done);
+    for (const id of [waiting, review, done, "pkg-missing"]) {
+      const before = await pkg(t, id);
+      expect(await errorCode(t.mutation(api.publisher.unclaim, { token: PUB, packageId: id }))).toBe("NOT_READY");
+      expect(await pkg(t, id)).toEqual(before);
+    }
+  });
+});
+
+describe("publisher.awaitingReview", () => {
+  test("real awaiting_review packages with track and flag counts; never demo, never other statuses", async () => {
+    const t = convexTest(schema, modules);
+    const id = await reviewable(t, { flags: ["check spelling", "embargo"] });
+    await reviewable(t, { id: "demo-10-2-26", workspace: "demo" });
+    await approved(t, { id: "pkg-10-9-26", showDate: "2026-10-09" });
+    await t.mutation(internal.packages.submit, { draft: goldenDraft({ id: "pkg-prep", audio: { hour1Id: "pending", hour2Id: "pending" } }) });
+    const draft = (await pkg(t, id))!.draft;
+    expect(await t.query(api.publisher.awaitingReview, { token: PUB })).toEqual([
+      { packageId: id, title: draft.title, trackCount: 31, flagCount: 2 },
+    ]);
+  });
+});
+
 describe("fail closed", () => {
   const snapshot = (t: T) => t.run(async (ctx) => [await ctx.db.query("packages").collect(), await ctx.db.query("mixcloudStatus").collect()]);
   const calls = async (t: T, token: string, id: string) => {
@@ -249,6 +296,8 @@ describe("fail closed", () => {
       t.mutation(api.publisher.reconcile, { token }),
       t.query(api.publisher.coverUrl, { token, storageId: cover }),
       t.mutation(api.publisher.setMixcloud, { token, state: "connected", account: "rhythmlab" }),
+      t.mutation(api.publisher.unclaim, { token, packageId: id }),
+      t.query(api.publisher.awaitingReview, { token }),
     ];
   };
 

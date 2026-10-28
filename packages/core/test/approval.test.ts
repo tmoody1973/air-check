@@ -273,3 +273,19 @@ test("recordResult stamps when the result arrived", async () => {
   const done = await timed.recordResult(rec.draft.id, { status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/x/" });
   expect(done.result).toEqual({ url: "https://www.mixcloud.com/rhythmlab/x/", at: at.toISOString() });
 });
+
+test("unclaim: publishing -> approved only, after Mixcloud refused the key (nothing was posted)", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // awaiting review
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // approved, never claimed
+  await gate.claimForPublish(id);
+  const back = await gate.unclaim(id, "invalid_token");
+  expect(back.status).toBe("approved");
+  expect(back.fingerprint).toBe(fp); // still the version Tarik approved
+  expect(transitions.at(-1)).toMatchObject({ id, from: "publishing", to: "approved", by: "publisher" });
+  expect(await gate.claimForPublish(id)).not.toBeNull(); // queued again once reconnected
+  await gate.recordResult(id, { status: "outcome_unknown" });
+  expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // a result is final
+  expect(await code(gate.unclaim("nope", "invalid_token"))).toBe("NOT_READY");
+});

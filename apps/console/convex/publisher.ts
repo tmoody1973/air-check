@@ -8,7 +8,7 @@ import { mixcloudStatusFields } from "./schema";
 
 // The publisher service on the VM is the only caller. Every function checks PUBLISHER_TOKEN first, in constant
 // time, and fails closed when it is unset or shorter than 32 characters.
-// Hard Rule 1: packages are read here, and changed only through the gate's claimForPublish and recordResult.
+// Hard Rule 1: packages are read here, and changed only through the gate's claimForPublish, recordResult and unclaim.
 function requirePublisher(token: string): void {
   if (!sameToken(token, process.env.PUBLISHER_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
@@ -60,6 +60,31 @@ export const result = mutation({
   handler: async (ctx, { token, packageId, result }) => {
     requirePublisher(token);
     return viaGate(() => gateFor(ctx).recordResult(packageId, result));
+  },
+});
+
+/**
+ * publishing -> approved, only after Mixcloud refused the access token (R23). Mixcloud checks the token before it
+ * takes any audio, so nothing was posted; the package waits, still approved, until Tarik reconnects.
+ */
+export const unclaim = mutation({
+  args: { token: v.string(), packageId: v.string() },
+  handler: async (ctx, { token, packageId }) => {
+    requirePublisher(token);
+    return viaGate(() => gateFor(ctx).unclaim(packageId, "invalid_token"));
+  },
+});
+
+/** Real packages waiting for review, for the Telegram "ready" card (R22). Title and counts only; never demo. */
+export const awaitingReview = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    requirePublisher(token);
+    const docs = await ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", "awaiting_review")).collect();
+    return docs.map((d) => {
+      const draft = d.draft as PackageDraft;
+      return { packageId: d.packageId, title: draft.title, trackCount: draft.tracks.length, flagCount: draft.flags?.length ?? 0 };
+    });
   },
 });
 
