@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { type AgentPackageInput, buildPackageDraft } from "../src/index";
+import { type AgentPackageInput, buildPackageDraft, checkDescriptionChange } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf, readFixture } from "./helpers/fixtures";
 import { formatTrack } from "../src/index";
 import { goldenDraft, goldenTitles, goldenTracks } from "./helpers/goldens";
@@ -139,5 +139,21 @@ describe("buildPackageDraft", () => {
       const max = { claim: "c".repeat(300), source: "s".repeat(300) };
       expect(build(Array.from({ length: 12 }, () => max)).ok).toBe(true);
     });
+  });
+});
+
+// Final-review fix: a blank description is a problem on every path: submit (buildPackageDraft) and the edit, revise and
+// propose paths (all through checkDescriptionChange).
+describe("an empty description", () => {
+  test.each(["", "   ", "\n\t "])("submit refuses %j", (description) => {
+    const r = buildPackageDraft(input({ tracklistText: reconciledText(), description }), opts);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problems).toContain("description is empty");
+  });
+  test.each(["", "   ", "\n\t "])("edit, revise and propose refuse %j", (description) => {
+    expect(checkDescriptionChange(goldenDraft(), description, undefined, [])).toContain("description is empty");
+  });
+  test("a real description passes", () => {
+    expect(checkDescriptionChange(goldenDraft(), "Warm, patient soul.", undefined, [])).toEqual([]);
   });
 });

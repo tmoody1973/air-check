@@ -54,8 +54,13 @@ export function describeIssue(i: DescriptionIssue): string {
  * a pasted tracklist, and the sources (when given) have the submit shape. Plain messages; empty when fine.
  */
 export function checkDescriptionChange(draft: PackageDraft, description: string, sources: unknown, privateTerms: string[]): string[] {
-  const issues = checkDescription(description, { trackTitles: draft.tracks.map((t) => t.title), privateTerms });
-  return [...issues.map(describeIssue), ...checkSources(sources)];
+  return [...descriptionProblems(description, draft.tracks.map((t) => t.title), privateTerms), ...checkSources(sources)];
+}
+
+/** A public description's problems in plain words: blank first (every path: submit, edit, revise, propose), then the checker's. */
+function descriptionProblems(text: string, trackTitles: string[], privateTerms: string[]): string[] {
+  if (!text.trim()) return ["description is empty"];
+  return checkDescription(text, { trackTitles, privateTerms }).map(describeIssue);
 }
 
 /**
@@ -82,11 +87,7 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   });
   for (const lead of checkTitleArtists(input.leads, tracks)) problems.push(`title artist not in the tracklist: ${lead}`);
   for (const p of checkTags(input.tags)) problems.push(`tags: ${p}`);
-  for (const i of checkDescription(input.description, {
-    trackTitles: tracks.map((t) => t.title),
-    privateTerms: opts.privateTerms,
-  }))
-    problems.push(describeIssue(i));
+  problems.push(...descriptionProblems(input.description, tracks.map((t) => t.title), opts.privateTerms));
 
   problems.push(...checkSources(input.descriptionSources));
 

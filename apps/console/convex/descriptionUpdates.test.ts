@@ -184,6 +184,18 @@ describe("the agent's revise route on a published package (R3)", () => {
     expect(await rows(t)).toEqual([]);
   });
 
+  test("an empty or whitespace-only description is 400 'description is empty' (agent and human), nothing is proposed", async () => {
+    const t = convexTest(schema, modules);
+    const pid = await published(t);
+    for (const description of ["", "   \n\t"]) {
+      const r = await revise(t, { packageId: pid, description });
+      expect(r.status, JSON.stringify(description)).toBe(400);
+      expect(((await r.json()) as { problems: string[] }).problems).toContain("description is empty");
+      expect(await propose(t, pid, description)).toMatchObject({ ok: false, code: "BAD_INPUT", message: expect.stringMatching(/description is empty/) });
+    }
+    expect(await rows(t)).toEqual([]);
+  });
+
   test("an approved update being sent refuses a new agent proposal (409); a proposed one is replaced", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
