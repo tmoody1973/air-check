@@ -127,6 +127,24 @@ test("media and mixcloud code never claim or record a publish result", () => {
   expect(src("mixcloud")).not.toMatch(/"packages"|gateFor|convexPackageStore/);
 });
 
+// media.attached holds the one raw package write outside the gate (R3: swapping the agent's placeholder hour ids
+// for the real filenames). Pin it so it can only ever touch a package still preparing audio, and only its draft.
+test("media's only raw package write is preparing_audio -> { draft }, and it reaches the gate only through attachAudio", () => {
+  const text = src("media");
+  const cas = [...text.matchAll(/compareAndSwap\(([^)]*)\)/g)];
+  expect(cas, "media.ts compareAndSwap calls").toHaveLength(1);
+  expect(cas[0]![1]!.replace(/\s+/g, " ").trim()).toBe(`packageId, { status: "preparing_audio" }, { draft }`);
+  for (const banned of [`"approved"`, `"publishing"`, ".patch(", ".replace(", "put("]) expect(text, `media.ts mentions ${banned}`).not.toContain(banned);
+  expect([...text.matchAll(/\.insert\(\s*"(\w+)"/g)].map((m) => m[1])).toEqual(["audioIssues"]);
+  expect(text.match(/\.insert\(/g)).toHaveLength(1);
+  // The one delete clears the audioIssues set row by row.
+  expect(text.match(/\.delete\(/g)).toHaveLength(1);
+  expect(text).toMatch(/for \(const row of await ctx\.db\.query\("audioIssues"\)\.collect\(\)\) await ctx\.db\.delete\(row\._id\);/);
+  expect([...text.matchAll(/from "(\.[^"]*)"/g)].map((m) => m[1]).sort()).toEqual(["./_generated/server", "./agentSubmit", "./gate", "./packageStore"]);
+  expect([...new Set([...text.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1]))]).toEqual(["attachAudio"]);
+  expect(text.match(/gateFor\(/g)).toHaveLength(text.match(/gateFor\(ctx\)\.attachAudio\(/g)!.length);
+});
+
 afterEach(() => vi.unstubAllEnvs());
 const modules = import.meta.glob("./**/*.*s");
 
