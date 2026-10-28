@@ -1,5 +1,7 @@
 # 004: Join and encode show audio as a Nebius Serverless Job
 
+**Superseded by 014** (Tarik's call, Oct 27): ffmpeg runs on the VM instead.
+
 **Decision:** The step that joins the two hour-long WAV files into one MP3 runs as a Nebius Serverless Job (a task that starts only when needed and then shuts down), not on the main server.
 
 **Why this came up:** The hackathon's Personal AI Track names Nebius Serverless as one of its tools, and the original plan barely used it.
