@@ -134,6 +134,31 @@ describe("episodes.markRerun / unmarkRerun", () => {
     expect(await statusOf(t)).toBe("ready-to-draft");
   });
 
+  test("R12: Undo on a detected rerun means 'not a rerun': it declines, so the scan never asks again", async () => {
+    const t = convexTest(schema, modules);
+    const q: Q = { id: "rerun", text: "Is 2026-07-17 a rerun of 2026-03-13?", kind: "rerun", rerunOf: "2026-03-13" };
+    await upsert(t, episode("2026-07-17", [q]));
+    const h = t.withIdentity(human);
+    await h.mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "rerun", answer: "Yes" });
+    await h.mutation(api.episodes.unmarkRerun, { showDate: "2026-07-17" });
+    const r = (await row(t))!;
+    expect(r.rerunOf).toBeUndefined();
+    expect(r.rerunSource).toBeUndefined();
+    expect(r.rerunDeclined).toBe(true);
+    await upsert(t, episode("2026-07-17", [q]));
+    expect((await row(t))!.questions).toEqual([]);
+    expect(await statusOf(t)).toBe("ready-to-draft");
+  });
+
+  test("Undo on a chat or Episodes mark just clears it (a later detection may still ask)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    const h = t.withIdentity(human);
+    await h.mutation(api.episodes.markRerun, { showDate: "2026-07-17", rerunOf: "2026-03-13" });
+    await h.mutation(api.episodes.unmarkRerun, { showDate: "2026-07-17" });
+    expect((await row(t))!.rerunDeclined).toBeUndefined();
+  });
+
   test("demo and anonymous callers cannot mark or unmark; bad dates and a later original are refused", async () => {
     const t = convexTest(schema, modules);
     await upsert(t, episode());

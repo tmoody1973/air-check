@@ -211,7 +211,10 @@ export const markRerun = mutation({
   },
 });
 
-/** Undo on an Episodes row: back to the normal pipeline. A No to the rerun question stays (R9). */
+/**
+ * Undo on an Episodes row: back to the normal pipeline. A No to the rerun question stays (R9). R12: undoing a mark that
+ * came from answering Yes to the scan's question means "not a rerun", so it also declines (never asked again).
+ */
 export const unmarkRerun = mutation({
   args: { showDate: v.string() },
   handler: async (ctx, { showDate }) => {
@@ -220,7 +223,8 @@ export const unmarkRerun = mutation({
     if (!row) throw notFound("no such show");
     // A bare row made by an ahead-of-time mark holds nothing else.
     if (row.scannedAt === 0) await ctx.db.delete(row._id);
-    else await ctx.db.patch(row._id, { rerunOf: undefined, rerunSource: undefined });
+    else
+      await ctx.db.patch(row._id, { rerunOf: undefined, rerunSource: undefined, ...(row.rerunSource === "detected" && { rerunDeclined: true as const }) });
   },
 });
 
