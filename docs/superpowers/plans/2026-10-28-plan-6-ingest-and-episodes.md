@@ -23,6 +23,7 @@
 - Google Drive via a **Connect Google** button (read-only), Dropbox Paper via a **Connect Dropbox** button (read-only).
 - Backlog audio is fetched **on demand**, about 3 shows on disk at a time.
 - The Episodes page is the full backlog table (no interim list).
+- **Reruns are not posted** (Tarik, 16:56). A Friday whose tracklist matches an earlier 2026 show (≥ 80% of tracks) or whose files/doc point to an older date raises one question, "Is <date> a rerun of <date>?". Yes → listed as "Rerun of <date>" linked to the original; no package, no audio download, no draft. No → normal pipeline.
 
 ## Global Constraints
 - **Hard Rule 2.** Box, Google and Dropbox credentials live only in the ingest service's env file and the two token files; never in Convex, the agent, the relay or logs.
