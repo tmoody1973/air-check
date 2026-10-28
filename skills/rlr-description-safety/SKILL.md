@@ -11,7 +11,7 @@ The show notes are private prep. The Mixcloud description is public and permanen
 1. No opening line about the show, the station or the date. Start in the music.
 2. One short paragraph per hour. Name 4 to 8 artists per hour.
 3. Name 2 or 3 highlight songs per hour as Artist’s “Song”, each with one vivid, accurate phrase. Style words are fine: smooth, emotive, powerful, cinematic jazz-funk, Afrobeat pulse. Never name more than 5 songs in total: 6 or more reads as a pasted tracklist and is rejected.
-4. Never pick a closing track (the last track of each hour) as a highlight.
+4. Never pick a closing track (the last track of each hour) as a highlight, and never research it.
 5. Bridge into the second hour: "Hour two…" or "The second hour…".
 6. End on what the whole set does: "crafting a seamless flow of discovery and depth".
 7. Under 1,000 characters. Count before submitting; cut extra adjectives and artists first.

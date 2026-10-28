@@ -35,6 +35,10 @@ describe("rlr-description-safety skill examples", () => {
     expect(named.length).toBeLessThan(6);
   });
 
+  it("Hard Rule 10: a closing track is never a highlight and never researched", () => {
+    expect(skill).toMatch(/Never pick a closing track \(the last track of each hour\) as a highlight, and never research it\./);
+  });
+
   it("no longer requires the station opening line and keeps its install name", () => {
     expect(skill).not.toMatch(/Rhythm Lab Radio, week of/);
     expect(skill).toMatch(/^---\nname: rlr-description-safety\ndescription: .+\n---/);
