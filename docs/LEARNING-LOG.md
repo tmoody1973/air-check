@@ -21,3 +21,23 @@ In my words:
 **What do we now believe?** Before testing any end-to-end path, list every hop and confirm each one points at the same deployment. A test is only as contained as its least-contained step.
 
 In my words:
+
+## 2026-10-28: Installed is not the same as used
+
+**What did we expect?** That installing Tarik's description skill in the agent's sandbox, and naming it in the agent's standing instructions, would make the agent write descriptions in his voice. The skill was installed in both sandboxes, the install script checked it, and the watchdog would alert if it disappeared.
+
+**What happened?** At 14:42 CDT Tarik asked the agent in Chat to rewrite the 10-2-26 description. It came back as a near-copy of the plain text already on Mixcloud, opening line and all. The logs showed why: the agent read the package, wrote the revision and read the package again, and Hermes's own usage file had no entry for the skill. It had never opened it. Tarik said not to approve that proposal and to build a fix. The fix stopped relying on the agent to go and look: the skill's text is now part of Air Check's code and is sent with every draft request and every package read, so the model sees it every time, and a test keeps that copy identical to the skill file. After the fix was deployed at 15:45, the retry at 15:51 came out in Tarik's voice: one paragraph per hour, 4 named songs, no opening line. Tarik approved it, and it was live on Mixcloud at 15:52.
+
+**What do we now believe?** "Installed" and "available" are not "used". When a rule matters, put it where the model cannot skip it, and check what the agent actually did (its usage records and tool calls), not what it was given. The cost is real (about 8,000 extra characters on every run), and the agent now leans on the skill's example wording, so the voice needs watching rather than trusting.
+
+In my words:
+
+## 2026-10-28: The first show went public before the safety test
+
+**What did we expect?** That the first upload would be an unlisted test: a copy only people with the link can see, uploaded by a one-off command with the publisher stopped, so Tarik could check the title, tags, cover and tracklist on Mixcloud and delete it before anything went public.
+
+**What happened?** Tarik connected Mixcloud and approved 10-2-26 from the console at 12:31 CDT. The publisher was running, so it did its job: it claimed the show, checked the MP3, uploaded it in 21 seconds and posted it publicly, with the plain description the agent had written. The unlisted test never ran. The public post answered the test's main question anyway: the tracklist without times shows exactly like Tarik's manual posts. It also showed the description was not good enough, which led to Plan 5c and a way to update a live show's description (used twice that afternoon).
+
+**What do we now believe?** A safety step that depends on doing things in the right order is only as strong as the order. Approve is the real gate, and it worked as built: nothing went up without Tarik pressing it. If a dry run matters, the service that publishes has to be stopped before anyone can press Approve, not after.
+
+In my words:
