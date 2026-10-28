@@ -163,6 +163,8 @@ dc down
    - `~/.aircheck/bridge.env` (mode 600) from `deploy/bridge/bridge.env.example`.
    - The ufw rule that lets only the sandbox network reach port 8443.
    - Both `nemohermes airc mcp add` commands (crate and aircheck).
+   - The station skills: `deploy/hermes/install-skills.sh` (see "Agent skills").
+   - ffmpeg (`sudo apt-get install -y ffmpeg`), then the media service and the publisher, each as in its own section below.
 
 ## The Hermes sandbox
 
@@ -172,6 +174,7 @@ Hermes is the AI agent that drafts show material. It runs inside a NemoClaw sand
 
 - **Linger is on.** The gateway is a systemd *user* service (systemd is Ubuntu's service manager), `nemoclaw-openshell-gateway.service`. Ubuntu only runs user services while someone is logged in over SSH, unless "linger" is on. It was off, so after a VM stop and start nothing launched the gateway and the sandbox went to phase `Error`. The fix, already applied: `sudo loginctl enable-linger user`. Do not undo it (`disable-linger` would bring the outage back).
 - **A boot unit.** `/etc/systemd/system/aircheck-hermes.service` (a copy lives in the repo at `deploy/hermes/aircheck-hermes.service`) runs `nemohermes airc start` at boot. Then it retries `nemohermes airc recover` every 15 seconds for up to 5 minutes. Both are needed: `start` does not bring back the forwarded port 8642 that the console talks to, and `recover` does, but only once the sandbox is up.
+- **Re-wiring the agent's tools.** After `recover`, the unit runs `nemohermes airc mcp restart`, wrapped in `timeout 120` so a hung re-wire cannot use up the unit's start time. Why: on Oct 28, after the Oct 27 restarts, `airc`'s two registered tool servers (`aircheck` and `crate`) showed "mismatch" (registered but not wired to the agent), so a live draft failed with "package_submit not available" until `mcp restart` was run by hand. It is harmless when the tools are already wired. `aircheck-hermes-demo.service` does the same for `aircdemo`. The reboot test on Oct 28 (20:58 UTC) showed "Reloaded MCP server" in the boot log and both sandboxes back with all three tools, with no hand repair.
 - **A clean shutdown.** When the VM stops, the unit runs `openshell sandbox stop airc` before Docker and the gateway stop. It is an `ExecStopPost` step, so it also runs when a shutdown interrupts the boot retries or the start times out (systemd skips a plain `ExecStop` in both cases). Without it, Docker kills the container first, the gateway records an unexpected exit, and the sandbox lands in `Error` instead of `Stopped`.
 
 Check it:
@@ -191,6 +194,7 @@ systemctl status aircheck-hermes            # expect active (exited)
 1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`.
 2. Run `~/.aircheck/reonboard.sh`.
 3. Register the two bridge tools again with the `mcp add` commands under "Registering the bridge with Hermes". Unverified: whether onboarding keeps the earlier registration. Re-running is safe either way.
+4. Install the station skills again: `~/air-check/deploy/hermes/install-skills.sh` (see "Agent skills"). A destroy removes them.
 
 **Hermes loses its memory when this runs.** A copy of the Hermes home from before the outage is at `~/.aircheck/hermes-backup-2026-10-27/` on the VM. It holds keys tied to that machine, so never copy it off the VM.
 
@@ -234,14 +238,19 @@ All of these run on prod, after the merge and a console redeploy:
 
 ## The watchdog
 
-A timer checks every five minutes that Hermes, the bridge and the relay are up, and texts Tarik on Telegram when one is not.
+A timer checks every five minutes that the agent side is up, and texts Tarik on Telegram when something is not.
 
 - `/etc/systemd/system/aircheck-watchdog.timer` runs `~/.aircheck/watchdog.sh` (repo copy: `deploy/hermes/watchdog.sh`) 3 minutes after boot and then every 5 minutes.
-- It probes Hermes at `http://127.0.0.1:8642/health`, the demo Hermes at `http://127.0.0.1:8643/health` and the bridge at `https://10.104.0.41:8443/healthz`. A fourth probe, named `Relay`, runs `systemctl is-active --quiet aircheck-relay`.
-- The relay probe was added with Plan 4b. The previous copy of the script is kept on the VM as `~/.aircheck/watchdog.sh.pre-4b`.
-- When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing.
+- It runs nine probes (since Plan 5c, Oct 28):
+  - `Hermes` and `Demo Hermes`: `http://127.0.0.1:8642/health` and `http://127.0.0.1:8643/health`.
+  - `Crate bridge`: `https://10.104.0.41:8443/healthz`.
+  - `Relay`, `Media` and `Publisher`: `systemctl is-active` on each service.
+  - `Agent tools` and `Demo agent tools`: `nemohermes <sandbox> mcp status` for `aircheck` and `crate` must say registered. This catches the "mismatch" problem described under "The Hermes sandbox".
+  - `Agent skills`: `nemohermes <sandbox> skill list` must include `rlr-description-safety` in both sandboxes.
+- Earlier copies of the script are kept on the VM as `~/.aircheck/watchdog.sh.pre-4b`, `watchdog.sh.pre-plan5` and `watchdog.sh.pre-5c`.
+- When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing. During the Oct 28 reboot test it reported Demo Hermes and both tool probes down while the sandboxes booted, then "everything is back up at 21:02" (UTC on the VM clock), which is expected.
 - It remembers what it last saw in `~/.aircheck/watchdog.state`. Messages that could not be sent wait in `~/.aircheck/watchdog.pending` and go out with the next successful send.
-- To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send.
+- To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send. Run it after every change to the script: the first version of the `Agent tools` probe crashed the script on the VM for a few minutes (see `docs/FRICTION_LOG.md`, Oct 28).
 
 ## The bridge
 
@@ -252,7 +261,7 @@ The bridge is a small program that sits between Hermes and two things Hermes may
 - **Code:** `apps/bridge` in this repo, running from `~/aircheck-bridge` on the VM. The research tools come from `crate-cli`, cloned at `~/crate-cli` (commit `37f4ec2`, built with `npm ci && npm run build`). It has no LICENSE, so we call it and never copy it into this repo.
 - **Service:** `/etc/systemd/system/aircheck-bridge.service` (repo copy: `deploy/bridge/aircheck-bridge.service`). Logs: `journalctl -u aircheck-bridge`. It logs one line per call, such as `tool=<name> ok=<bool> ms=<n>`, and never the arguments.
 - **Settings:** `~/.aircheck/bridge.env` (mode 600). The variable names are in `deploy/bridge/bridge.env.example`.
-- **Address:** it listens only on the VM's private address `10.104.0.41`, port 8443. The endpoints are `/crate/mcp` (16 tools), `/aircheck/mcp` (one tool, `package_submit`) and `/healthz`.
+- **Address:** it listens only on the VM's private address `10.104.0.41`, port 8443. The endpoints are `/crate/mcp` (16 tools), `/aircheck/mcp` (three tools: `package_submit`, `package_revise` and the read-only `package_get`; since Plan 5c, Oct 28) and `/healthz`. The demo route `/aircheck-demo/mcp` has the same three, writing only to the demo workspace.
 - **Which Crate tools Hermes gets:** MusicBrainz (6), Wikipedia (3), Bandcamp (3: `search_bandcamp`, `discover_music`, `get_tag_info`) and iTunes (4). `bandcamp_get_fan_collection` is blocked by name (Hard Rule 13). The four Bandcamp tools that take a page URL (`bandcamp_get_artist_page`, `bandcamp_get_album`, `bandcamp_get_artist_tracks`, `bandcamp_get_bandcamp_editorial`) are blocked too (Hard Rule 5: enrich by artist and title, never by following URLs). Relaxing this needs Tarik to record an exception in decision 006, ARCHITECTURE 3.7 and Hard Rule 5. Crate ships with built-in keys, so Discogs, Last.fm and Ticketmaster would work too, but the bridge's allow-list hides them. Tarik chose keyless sources only for now. Widening is a one-line change to the allow-list.
 - **Links are limited (defence in depth).** Any `url` argument must be https on `bandcamp.com` or `*.bandcamp.com`. Crate makes those fetches from the host, outside the sandbox's network rules, so the bridge has to enforce this itself.
 
@@ -317,7 +326,7 @@ Re-run both `mcp add` commands after any re-onboard (see the Hermes section for 
 
 ### Where the agent's submit goes
 
-Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. The bridge pointed at the **dev** Convex deployment (`optimistic-lobster-654`) until 2026-10-27, when it moved to prod. The dev checks: Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.
+Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. Since Plan 5c the same token also reaches two more routes: `POST /agent/packages/revise` (`package_revise`: a new description for a package waiting for review, or a proposed update for a show already on Mixcloud) and `POST /agent/packages/get` (`package_get`: read a package; changes nothing). Neither can approve or publish (decision 011's update note, and decision 015). The bridge pointed at the **dev** Convex deployment (`optimistic-lobster-654`) until 2026-10-27, when it moved to prod. The dev checks: Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.
 
 ## The relay
 
@@ -380,6 +389,125 @@ ssh user@<the VM's static IP> 'mkdir -p ~/aircheck-audio/inbox/2026-10-02 && cd 
 ```
 
 The `mv` runs only if `cat` finished (`&&`). A dropped connection leaves a `.part` file, which the service ignores; copy again. As a second guard, the service also waits until a WAV's header says the whole file is there and nothing has written to it for 2 minutes. Until then the Today page says "<date> is still copying (or the copy is incomplete)". Why: ffmpeg turns a cut-off WAV into a short MP3 without complaint, and that short show would have gone up.
+
+### Files, settings and limits
+
+- Code: `~/aircheck-media/dist/main.js`, built on the Mac with `pnpm --filter @aircheck/media build` (one esbuild file, like the relay). Service: `aircheck-media.service` (repo copy: `deploy/media/aircheck-media.service`). Logs: `journalctl -u aircheck-media`.
+- Settings: `~/.aircheck/media.env` (mode 600), names in `deploy/media/media.env.example`: `CONVEX_URL`, `MEDIA_TOKEN` (must equal the Convex env var of the same name, at least 32 characters), `INBOX_DIR`, `PREPARED_DIR`, and the optional `POLL_MS` (default 30 seconds between scans).
+- ffmpeg must be on the VM (`sudo apt-get install -y ffmpeg`; 6.1.1 was installed on Oct 28).
+- At most 3 prepared MP3s wait on disk at once (`MAX_PREPARED`). A fourth show waits, and the Today page names what holds the slots. An MP3 and its inbox folder are deleted once the show is on Mixcloud.
+- If an encode fails, the service waits 10 minutes before trying that show again, so a bad file cannot keep the VM busy re-encoding two hours of audio.
+- The first real show (10-2-26, Oct 28) took 99 seconds to encode: 171.6 MB at 192 kbps, 7150.08 seconds long (3585.14 + 3564.90).
+
+## The publisher
+
+The publisher (`apps/publisher`, unit `deploy/publisher/aircheck-publisher.service`) is the only program that uploads to Mixcloud. Decision 014 has the reasoning.
+
+What it does:
+
+- Every 30 seconds it reads the queue of packages Tarik approved, and uploads the oldest show first, at most 3 per America/Chicago day. A 4th approved show waits for the next day; the package page says when it will post.
+- Before uploading it re-hashes the MP3 and compares it with the one Tarik approved. If the file changed or is missing, it uploads nothing and marks the package failed (`audio_changed` or `audio_missing`).
+- It streams the MP3 from disk, with the title, tags, description, tracklist (as Mixcloud "sections": artist and song only, no times) and the cover: the package's own cover if Tarik picked one, else the station's standard cover (`STANDARD_COVER_STORAGE_ID` in Convex).
+- It never retries an upload whose outcome it cannot know (see "When a publish goes wrong"). A Mixcloud rate limit before anything was accepted is waited out and retried once.
+- It sends Tarik a Telegram "ready to review" card for each package waiting for review. The card is only a link to the package page; it cannot approve anything.
+- It pushes approved description updates to shows already on Mixcloud (see "Description updates" below).
+
+It logs package ids, step names, `ok=true/false` and timings, never descriptions or tokens: `journalctl -u aircheck-publisher`.
+
+### Files and settings
+
+- Code: `~/aircheck-publisher/dist/main.js`, built on the Mac with `pnpm --filter @aircheck/publisher build` (one esbuild file). The bundle is a modern (ESM) module, so like the relay it needs `~/aircheck-publisher/package.json` containing `{"type":"module"}`.
+- Settings: `~/.aircheck/publisher.env` (mode 600), names in `deploy/publisher/publisher.env.example`:
+  - `CONVEX_URL`, and `PUBLISHER_TOKEN` (must equal the Convex env var of the same name, at least 32 characters; a different value from `MEDIA_TOKEN`).
+  - `APP_URL`: the console's public address, for the Telegram card's link.
+  - Optional, with defaults: `MIXCLOUD_TOKEN_FILE` (`~/.aircheck/mixcloud/token.json`), `PREPARED_DIR` (`~/aircheck-audio/prepared`), `STATE_FILE` (`~/.aircheck/publisher/state.json`), `AIRC_SECRETS_FILE` (`~/.airc/secrets.env`, where it reads only the Telegram bot token and Tarik's chat id) and `POLL_MS` (30 seconds).
+- On Convex prod: `PUBLISHER_TOKEN`, `MEDIA_TOKEN` and `STANDARD_COVER_STORAGE_ID` (the standard cover, uploaded to Convex storage on Oct 28: Tarik's `3-red-rings.png`, 3000 by 3000 pixels).
+- What it may touch: the unit makes the whole disk read-only to it except one folder, `~/.aircheck/publisher`, where it keeps a small state file (which Telegram cards it already sent, and a hash of a Mixcloud key that was refused). It reads, but cannot change, the prepared MP3s, the Mixcloud token file and `~/.airc/secrets.env`. It cannot write anywhere else in `~/.aircheck`, which holds every service's settings and the bridge's private CA key.
+
+### Install (first time)
+
+1. On a new VM, create the state folder once by hand: `install -d -m 0700 ~/.aircheck/publisher`. (The unit also creates it before each start, but see the lesson below.)
+2. `mkdir -p ~/aircheck-publisher/dist`, write the `package.json` above, and copy the bundle with ssh and `cat` as for the relay: `ssh user@<the VM's static IP> 'cat > ~/aircheck-publisher/dist/main.js' < apps/publisher/dist/main.js`
+3. Create `~/.aircheck/publisher.env` (mode 600) from the example.
+4. `sudo cp aircheck-publisher.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now aircheck-publisher`
+5. Connect Mixcloud from the console's Settings page (see "The Mixcloud token folder"). Until then the publisher reports "not connected" and approved shows wait.
+
+**The `-` in `ReadWritePaths` is load-bearing.** The unit's `ReadWritePaths=-/home/user/.aircheck/publisher` starts with a dash. On Oct 28 the publisher's first start failed with status `226/NAMESPACE`: systemd builds the service's private view of the disk before running any start step, and that fails if a folder named in `ReadWritePaths` does not exist yet. The `ExecStartPre=+…install -d…` line that creates the folder runs only after that, so it could not help. The dash tells systemd to skip a missing folder instead of failing. The media unit has the same dash for `~/aircheck-audio`. Keep the dash in both, and create the folders by hand on a new VM anyway.
+
+### The unlisted test (`--unlisted-test`)
+
+`node dist/main.js --unlisted-test <packageId>` uploads one approved package to Mixcloud as unlisted (only people with the link can see it), outside the queue. It reads only packages already approved, forces unlisted, never marks the package as published, and refuses a package that is not in the approved queue. Any other arguments (a typo such as `--unlisted-test=<id>`) print the usage and exit before anything starts, so a typo cannot start the full service.
+
+It does not stop the service for you. **Stop the service first**, or the service may upload the same package publicly at the same time:
+
+```sh
+sudo systemctl stop aircheck-publisher
+cd ~/aircheck-publisher && ( set -a; . ~/.aircheck/publisher.env; set +a; node dist/main.js --unlisted-test pkg-M-D-YY )
+```
+
+Check the show on Mixcloud. When the service starts again it uploads the same package publicly (the test did not mark it published), so delete the unlisted copy on Mixcloud. This test was built but not run: on Oct 28 Tarik approved 10-2-26 before the test, and it went straight out publicly (`docs/SPIKES.md`, V5).
+
+### When a publish goes wrong
+
+The package page says what happened and offers the next step. The states:
+
+- **`outcome_unknown`: "We don't know if it posted. Check Mixcloud before doing anything."** The upload was cut off (the service stopped or crashed, a timeout, a Mixcloud server error, or a reply Air Check could not read). It is never retried on its own, because a retry could post the show twice. Look on Mixcloud (the page links to the account's profile), then either:
+  - **It's on Mixcloud:** paste the show's address (it must start `https://www.mixcloud.com/`) and press "It's on Mixcloud". The package becomes published with that address as its receipt. Paste the exact show address: description updates later use it.
+  - **It isn't:** press "It isn't — reopen". The package goes back to review; Tarik approves it again.
+  An unknown outcome counts toward the day's 3 uploads, in case it did post.
+- **`failed`:** nothing was sent, or Mixcloud refused it. The page names the reason (for example "The MP3 changed after approval" or "Mixcloud asked us to slow down twice"). Press "Reopen for review" and approve again. For an MP3 problem the button is "Reopen and rebuild the MP3": the package goes back to waiting for audio and the media service rebuilds the MP3 from the inbox folder, which is still there because nothing posted.
+- **`needs_reconnect`:** Mixcloud refused the access token. Mixcloud checks the token before it accepts any audio, so nothing was posted: the package goes back to approved and waits. The refused token is never tried again, and Tarik gets one Telegram message. Fix: Settings, then Connect Mixcloud again. `invalid_token_file` means the token file could not be read; reconnecting rewrites it.
+- **Not connected (`no_token`):** no token file. Approved shows wait until Mixcloud is connected.
+- **Publishing paused (`cover_unavailable`, `bad_cover`):** the cover could not be fetched (it tries again by itself) or the standard cover is not an image Mixcloud takes (replace it).
+
+Restarting the publisher during an upload is what produces `outcome_unknown`: on start, every package still marked "publishing" becomes `outcome_unknown`, never back to approved. So restart or update it only when nothing is publishing (see "Deploy order").
+
+### Description updates (shows already on Mixcloud)
+
+From Plan 5c (Oct 28) a published show's description can be changed. Only the description changes; the title, tags, cover and tracklist stay as they are. Decision 015 has the reasoning.
+
+1. Tarik proposes a new text on the package page ("Update the description on Mixcloud"), or asks the agent in Chat, which proposes one with `package_revise`. Proposing changes nothing on Mixcloud. A package has at most one open proposal; a new one replaces it.
+2. Tarik approves the exact text (signed in). If the proposal changed since he opened it, Approve is refused and he opens the latest.
+3. The publisher sends the description alone to Mixcloud's edit address, `https://api.mixcloud.com/upload/<account>/<show>/edit/`. The address is built only from the show's own receipt link. A receipt link that is not exactly a Mixcloud show address (for example one with non-English letters in it) is refused as `bad_show_url` and nothing is sent.
+
+The outcomes on the package page:
+
+- **Pushed:** the new text is live. Both live edits on Oct 28 (14:41 and 15:52 CDT) logged `step=edit ok=true` and left the name, tags, length, cover and tracklist unchanged.
+- **`retries_exhausted`:** Mixcloud did not answer after 3 tries (an edit is safe to resend). The old description is probably still up. Propose and approve again.
+- **`unconfirmed`:** Mixcloud accepted the request without confirming it. The new description may already be live: check the show page before proposing again.
+- **`not_published`:** the package is no longer marked as on Mixcloud. Nothing was sent.
+- A refused Mixcloud token works as for uploads: the update goes back to approved, nothing was changed, and Tarik reconnects.
+
+**An approved update cannot be withdrawn while Mixcloud is disconnected.** It waits, and goes out as soon as Mixcloud is connected again. To stop it, propose and approve a different text before reconnecting.
+
+### Updating the publisher
+
+1. Make sure nothing is publishing: no package page shows "Uploading to Mixcloud…" or "Updating on Mixcloud…", and `journalctl -u aircheck-publisher -n 20` shows no step in progress.
+2. On the Mac: `pnpm --filter @aircheck/publisher build`.
+3. On the VM, keep the old bundle: `cp ~/aircheck-publisher/dist/main.js ~/aircheck-publisher/dist/main.js.pre-<change>`.
+4. Copy the new one with ssh and `cat` (as in Install), and check its size matches the Mac's (`wc -c`).
+5. `sudo systemctl restart aircheck-publisher`, then `journalctl -u aircheck-publisher -n 20`.
+
+## Agent skills
+
+The station skills in `skills/` are instruction files the agent (Hermes) can load. Two are installed in both sandboxes: `rlr-description-safety` (how to write the public description, in Tarik's voice) and `rlr-mixcloud-title-and-tags`.
+
+- **Install or refresh:** `~/air-check/deploy/hermes/install-skills.sh` on the VM (an optional first argument is the repo folder; default `~/air-check`). For each sandbox and each skill it removes the old copy and installs the repo copy, because `nemohermes <sandbox> skill install` refuses to replace a skill with the same name. It ends with `skill list` and fails if the skills are missing.
+- **When to run it:** after any destroy and re-onboard of `airc` or `aircdemo`, and after changing a skill. Skills live in `/sandbox/.hermes/skills/<name>` inside the sandbox. They survive stop and start and `rebuild`, but not a destroy (checked in the NemoHermes v0.0.137 docs on the VM, Oct 28).
+- **Installed is not the same as used.** On Oct 28 the agent had the skill installed and never opened it (`docs/LEARNING-LOG.md`). So the description skill's text is also compiled into the code and sent with every draft request and every `package_get` result. A test fails if that copy drifts from `skills/rlr-description-safety/SKILL.md`, so after editing the skill, run `pnpm test`, then deploy Convex and the bridge (the two places that carry the copy) as well as running `install-skills.sh`.
+- **The agent's own skill was removed.** On Oct 27 the agent wrote itself a skill, `mixcloud-package-submission`, that taught it wrong limits (`docs/FRICTION_LOG.md`, Oct 28). It was removed from `airc` on Oct 28; a backup is on the VM at `~/.aircheck/agent-skill-backup`. After a live draft, check that `nemohermes airc skill list` shows no new agent-made description skill.
+- The watchdog's `Agent skills` probe alerts if `rlr-description-safety` disappears from either sandbox.
+
+## Deploy order (changes that touch Convex, the bridge and the publisher)
+
+Some changes span several parts, and each part expects the newer version of the one before it. Deploy in this order:
+
+1. **Convex first** (from the Mac, `npx convex deploy -y` as in "Convex production commands"). New routes, tables and functions must exist before anything calls them.
+2. **The bridge**, then re-wire both sandboxes so the agent sees the new tool list: `nemohermes airc mcp restart` and `nemohermes aircdemo mcp restart`. Check with `nemohermes airc mcp status aircheck --json --tools` (and the same for `aircdemo`) that the tools are listed and registered.
+3. **The console** (`dc up -d --build`), and check `dc ps` says healthy.
+4. **The publisher last, and only when nothing is publishing** (see "Updating the publisher").
+
+Deploy from `main`, after the pull request is merged; a production deploy from an unmerged branch was blocked on Oct 28, and the PR route that followed is the normal path now. For multi-step changes on the VM, put the commands in a short script file, copy it over with ssh and `cat`, read it, and run it, rather than pasting a long one-line ssh command: long pasted one-liners broke on Oct 28 (`docs/FRICTION_LOG.md`).
 
 ## Certificates and renewal dates
 
