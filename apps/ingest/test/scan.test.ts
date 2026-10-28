@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
 import { newMemory, runScan } from "../src/scan.js";
 import { json } from "./fakes.js";
-import { NOTES_SECRET, world } from "./world.js";
+import { NOTES_SECRET, PAPER_DOCS, world } from "./world.js";
 
 let close: (() => Promise<void>) | null = null;
 afterEach(async () => {
@@ -219,5 +219,33 @@ describe("R14: a source not connected is missing; a connected source that fails 
     await runScan(w.deps);
     await draftPass(draftDeps(w));
     expect(w.cv.draftCalls).toHaveLength(1);
+  });
+});
+
+describe("one unreadable doc is that show's question, not a failed source (fix round 1)", () => {
+  const draftDeps = (w: Awaited<ReturnType<typeof world>>) => ({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+
+  test.each([
+    ["a Drive export 403", { googleRoutes: { "GET /drive/v3/files/g1/export": (_: unknown, res: Parameters<typeof json>[0]) => json(res, 403, { error: "cannotExportFile" }) } }],
+    ["a Drive doc over 1 MB", { googleRoutes: { "GET /drive/v3/files/g1/export": (_: unknown, res: Parameters<typeof json>[0]) => { res.writeHead(200); res.end("x".repeat(1024 ** 2 + 1)); } } }],
+    ["a Dropbox get_metadata 400", { dropboxRoutes: { "POST /2/files/get_metadata": (req: { body: string }, res: Parameters<typeof json>[0]) => {
+      const path = JSON.parse(req.body).path as string;
+      return path === "id:p1" ? json(res, 400, { error_summary: "path/malformed/" }) : json(res, 200, { id: path, export_info: { export_options: PAPER_DOCS[path]!.options } });
+    } } }],
+  ])("%s → that show gets a 'could not be read' question; the source stays connected and other shows still draft", async (_n, o) => {
+    const w = await make(o as Parameters<typeof world>[0]);
+    await runScan(w.deps);
+    const jan2 = byDate(w)["2026-01-02"]!;
+    expect(jan2.questions.map((q) => [q.kind, /could not be read/.test(q.text)])).toContainEqual(["tracklist", true]);
+    expect(w.deps.memory.lastScanComplete).toBe(true);
+    for (const p of ["box", "google", "dropbox"] as const) expect(w.cv.lastSource(p)!.state).toBe("connected");
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-30", true]]);
+  });
+
+  test("a Drive list call failing still fails the source (R14: previous facts kept, no draft)", async () => {
+    const w = await make({ googleRoutes: { "GET /drive/v3/files": (_, res) => json(res, 403, {}) } });
+    await runScan(w.deps);
+    expect(w.deps.memory.lastScanComplete).toBe(false);
   });
 });

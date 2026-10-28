@@ -44,6 +44,15 @@ const dated = (name: string) => {
   return d.ok && is2026(d.date) ? d.date : null;
 };
 const push = <T>(m: Map<string, T[]>, k: string, v: T) => void m.set(k, [...(m.get(k) ?? []), v]);
+/**
+ * One doc that can't be read (Drive export 403, a doc over 1 MB, a Dropbox metadata 400) is that doc's question, not a
+ * failed source: only the token and list calls fail a source. 429 is retried in `call`; 401 is the access token, not
+ * the doc, so it still fails the source.
+ */
+const docError = (e: unknown) =>
+  e instanceof HttpError && (e.message === "too_large" || (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429));
+const orUnread = <T, U>(p: Promise<T>, unread: U): Promise<T | U> => p.catch((e: unknown) => (docError(e) ? unread : Promise.reject(e)));
+
 /** Hard Rule 8: a short code, never a message that could carry a URL or a token. */
 const code = (e: unknown) => (e instanceof HttpError || e instanceof AuthRefused ? e.message : "network");
 
@@ -123,7 +132,7 @@ async function readDrive(deps: ScanDeps): Promise<Read<DriveDoc>> {
     const byDate = new Map<string, DriveDoc[]>();
     for (const d of await drive.listDocs()) {
       const date = dated(d.name);
-      if (date) push(byDate, date, { id: d.id, name: d.name, text: await drive.exportText(d.id) });
+      if (date) push(byDate, date, { id: d.id, name: d.name, text: await orUnread(drive.exportText(d.id), null) });
     }
     return { value: byDate, count: byDate.size };
   });
@@ -138,7 +147,7 @@ async function readPaper(deps: ScanDeps): Promise<Read<PaperDoc>> {
     // R3: .paper files named for a 2026 show that mention Rhythm Lab, anywhere in the Dropbox.
     for (const f of await dbx.listFiles()) {
       const date = /\.paper$/i.test(f.name) && /rhythm lab/i.test(f.name) ? dated(f.name) : null;
-      if (date) push(byDate, date, { id: f.id, name: f.name, export: await dbx.exportText(f.id) });
+      if (date) push(byDate, date, { id: f.id, name: f.name, export: await orUnread(dbx.exportText(f.id), { kind: "unreadable" as const }) });
     }
     return { value: byDate, count: byDate.size };
   });

@@ -16,13 +16,19 @@ export const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 const TOKEN_TTL_MS = 55 * 60_000;
 const PAGE = 1000;
 
+/**
+ * Ingest's own temp suffix. Not ".part": DEPLOY tells Tarik to hand-copy WAVs as `x.wav.part` then mv, and the stale
+ * sweep must never delete a copy in progress. Media ignores it (not a .wav).
+ */
+export const PART_SUFFIX = ".ingest-part";
+
 /** Box answers a download with a 302 to a short-lived dl.boxcloud.com URL (research §1). Nothing else is followed. */
 export const isBoxDownloadHost = (u: URL) => u.protocol === "https:" && (u.hostname === "boxcloud.com" || u.hostname.endsWith(".boxcloud.com"));
 
 export interface BoxItem { type: string; id: string; name: string; size: number }
 export interface BoxClient {
   items(folderId: string): Promise<BoxItem[]>;
-  /** Streams one file to `dest` (via `dest.part`, renamed when whole). Returns the byte count. */
+  /** Streams one file to `dest` (via `dest` + PART_SUFFIX, renamed when whole). Returns the byte count. */
   download(fileId: string, dest: string, expectedSize: number): Promise<number>;
 }
 export interface BoxOptions { api?: string; isDownloadHost?: (u: URL) => boolean; now?: () => number }
@@ -86,7 +92,7 @@ export function boxClient(http: Http, creds: Pick<BoxCreds, "clientId" | "client
 
     async download(fileId, dest, expectedSize) {
       if (expectedSize > MAX_DOWNLOAD_BYTES) throw new HttpError(0, "too_large");
-      const part = `${dest}.part`;
+      const part = `${dest}${PART_SUFFIX}`;
       try {
         let res = await authed(`${api}/2.0/files/${id(fileId)}/content`, { redirect: "manual" }, DOWNLOAD_TIMEOUT_MS);
         if (res.status >= 300 && res.status < 400) {

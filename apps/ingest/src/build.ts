@@ -10,7 +10,8 @@ import type { PaperExport } from "./dropbox.js";
 // directly. "Never guess": anything the rules can't settle becomes a plain question for Tarik.
 
 export interface BoxFolder { id: string; name: string; assembly: EpisodeAssembly }
-export interface DriveDoc { id: string; name: string; text: string }
+/** `text` null: Drive would not export it (that doc's question). */
+export interface DriveDoc { id: string; name: string; text: string | null }
 export interface PaperDoc { id: string; name: string; export: PaperExport }
 export interface Found { box: Map<string, BoxFolder[]>; drive: Map<string, DriveDoc[]>; paper: Map<string, PaperDoc[]> }
 
@@ -83,7 +84,11 @@ function notesOf(date: string, docs: PaperDoc[] | undefined, q: Question[]): { n
 
 function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTrack[] | null, q: Question[]): { tracklist: ScannedEpisode["tracklist"]; docTitle?: string } {
   if (!docs?.length) return { tracklist: { status: "missing" } };
-  const parsed = docs.map((d) => ({ d, p: parseDrive(d.text) }));
+  for (const d of docs.filter((x) => x.text === null))
+    q.push(ask("tracklist", `The tracklist "${d.name}" for ${date} could not be read from Drive. Check the doc.`));
+  const readable = docs.filter((d): d is DriveDoc & { text: string } => d.text !== null);
+  if (!readable.length) return { tracklist: { status: "missing" } };
+  const parsed = readable.map((d) => ({ d, p: parseDrive(d.text) }));
   // Rule 7: of two docs for one date, use the one with the HOUR 1 / HOUR 2 structure. Anything else is a question.
   const structured = parsed.filter((x) => hasBothHours(x.p));
   const pick = structured.length === 1 ? structured[0] : parsed.length === 1 ? parsed[0] : undefined;

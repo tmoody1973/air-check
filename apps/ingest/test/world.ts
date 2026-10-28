@@ -44,7 +44,7 @@ export const PAPER_DOCS: Record<string, { name: string; options: string[]; text:
   "id:px": { name: "Shopping list 1-2-26.paper", options: ["markdown"], text: "milk" },
 };
 
-export interface WorldOptions { googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler>; dropboxList?: () => boolean }
+export interface WorldOptions { googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler>; dropboxList?: () => boolean; googleRoutes?: Record<string, Handler>; dropboxRoutes?: Record<string, Handler> }
 
 export async function world(o: WorldOptions = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ingest-"));
@@ -80,6 +80,7 @@ export async function world(o: WorldOptions = {}) {
     "POST /token": o.googleTokenRoute ?? ((_, res) => json(res, 200, { access_token: "g-access", expires_in: 3599 })),
     "GET /drive/v3/files": (_, res) => json(res, 200, { files: Object.entries(DRIVE_DOCS).map(([id, d]) => ({ id, name: d.name })) }),
     ...Object.fromEntries(Object.entries(DRIVE_DOCS).map(([id, d]) => [`GET /drive/v3/files/${id}/export`, (_: unknown, res: Parameters<typeof json>[0]) => { res.writeHead(200); res.end(d.text); }])),
+    ...o.googleRoutes,
   });
   const dropbox = await fakeServer({
     "POST /oauth2/token": o.dropboxTokenRoute ?? ((_, res) => json(res, 200, { access_token: "d-access", expires_in: 14400 })),
@@ -87,6 +88,7 @@ export async function world(o: WorldOptions = {}) {
       json(res, 200, { entries: [...Object.entries(PAPER_DOCS).map(([id, d]) => ({ ".tag": "file", id, name: d.name })), { ".tag": "folder", id: "id:f", name: "Show notes" }], has_more: false, cursor: "c" }),
     "POST /2/files/get_metadata": (req, res) => json(res, 200, { id: JSON.parse(req.body).path, export_info: { export_options: PAPER_DOCS[JSON.parse(req.body).path]!.options } }),
     "POST /2/files/export": (req, res) => { res.writeHead(200); res.end(PAPER_DOCS[JSON.parse(String(req.headers["dropbox-api-arg"])).path]!.text); },
+    ...o.dropboxRoutes,
   });
 
   // Downloads in the fake world are sized in bytes = listed size / 1 MB, so the size check is against that.

@@ -1,6 +1,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { EpisodeFacts } from "@aircheck/core";
+import { PART_SUFFIX } from "./box.js";
 import type { IngestRow } from "./convex.js";
 
 const DATE_DIR = /^\d{4}-\d{2}-\d{2}$/;
@@ -35,12 +36,12 @@ export async function onDisk(inboxDir: string, preparedDir: string): Promise<OnD
   return { held, complete };
 }
 
-/** A `.part` in the inbox is a download that died with the process (only this service writes them, one at a time). */
+/** An `.ingest-part` in the inbox is a download that died with the process (only this service writes them, one at a time). */
 export async function removeStaleParts(inboxDir: string): Promise<void> {
   for (const e of await list(inboxDir)) {
     if (!e.isDirectory() || !DATE_DIR.test(e.name)) continue;
     for (const f of await readdir(join(inboxDir, e.name)).catch(() => []))
-      if (f.endsWith(".part")) await rm(join(inboxDir, e.name, f), { force: true });
+      if (f.endsWith(PART_SUFFIX)) await rm(join(inboxDir, e.name, f), { force: true });
   }
 }
 

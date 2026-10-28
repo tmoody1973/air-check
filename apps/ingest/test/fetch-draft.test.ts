@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { matchInbox } from "@aircheck/core";
 import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
-import { fetchPass, inboxName, RETRY_BACKOFF_MS } from "../src/fetch.js";
+import { fetchPass, inboxName, MAX_FETCH_FAILURES, RETRY_BACKOFF_MS } from "../src/fetch.js";
+import { MB } from "./world.js";
 import { runScan } from "../src/scan.js";
 import { NOTES_SECRET, world } from "./world.js";
 
@@ -19,7 +20,7 @@ const make = async (o: Parameters<typeof world>[0] = {}) => {
   return w;
 };
 const fetchDeps = (w: Awaited<ReturnType<typeof world>>, now = () => 0) => ({
-  convex: w.cv.convex, log: w.deps.log, box: w.deps.box!.client, inboxDir: w.inboxDir, preparedDir: w.preparedDir, failedAt: new Map<string, number>(), now,
+  convex: w.cv.convex, log: w.deps.log, box: w.deps.box!.client, inboxDir: w.inboxDir, preparedDir: w.preparedDir, failures: new Map<string, { count: number; at: number }>(), now,
 });
 const downloads = (w: Awaited<ReturnType<typeof world>>) => w.box.seen.filter((s) => s.path.endsWith("/content")).map((s) => s.path.split("/")[3]);
 
@@ -90,7 +91,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
     await fetchPass(deps);
     expect(w.cv.fetches.at(-1)).toEqual({ showDate: "2026-01-02", status: "failed", error: "download_failed" });
     const left = await readdir(join(w.inboxDir, "2026-01-02")).catch(() => []);
-    expect(left.filter((f) => f.endsWith(".part"))).toEqual([]);
+    expect(left.filter((f) => f.includes("part"))).toEqual([]);
     expect(w.logs.some((l) => l.startsWith("ingest date=2026-01-02 step=fetch ok=false"))).toBe(true);
 
     fail = false;
@@ -104,24 +105,55 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
     expect(downloads(w).length).toBeGreaterThan(n);
   });
 
-  test("a .part left by a crash is removed at the start of a pass; a finished hour is not downloaded again", async () => {
+  test("ingest's own stale .ingest-part is removed at the start of a pass; Tarik's hand copy (.wav.part) is never touched", async () => {
     const w = await make();
     const dir = join(w.inboxDir, "2026-01-02");
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "2-9126.wav.part"), "half");
+    await writeFile(join(dir, "2-9126.wav.ingest-part"), "half");
     await writeFile(join(dir, "1-9125.wav"), Buffer.alloc(600, 1)); // hour 1 finished before the crash
+    const hand = join(w.inboxDir, "2026-02-13");
+    await mkdir(hand);
+    await writeFile(join(hand, "9125.wav.part"), "copying"); // DEPLOY's `cat > x.wav.part && mv` hand copy, mid-copy
     await fetchPass(fetchDeps(w));
     expect((await readdir(dir)).sort()).toEqual(["1-9125.wav", "2-9126.wav"]);
+    expect(await readdir(hand)).toEqual(["9125.wav.part"]);
     expect(downloads(w)).toEqual(["1002"]);
   });
 
-  test("a listed file over 2 GB is refused without a download", async () => {
+  test.each(["hour1", "hour2"] as const)("a listed %s over 2 GB is refused before anything is downloaded or a folder made", async (h) => {
     const w = await make();
     const row = w.cv.rows.get("2026-01-02")!;
-    row.audio.hour1!.size = 2 * 1024 ** 3 + 1;
+    row.audio[h]!.size = 2 * 1024 ** 3 + 1;
     await fetchPass(fetchDeps(w));
     expect(downloads(w)).toEqual([]);
     expect(w.cv.fetches.at(-1)).toEqual({ showDate: "2026-01-02", status: "failed", error: "too_large" });
+    expect(await readdir(w.inboxDir).catch(() => [])).toEqual([]);
+  });
+
+  test("a failed download with no finished hour removes its date folder, so it holds no disk slot", async () => {
+    const w = await make();
+    w.cv.rows.get("2026-01-02")!.audio.hour1!.size = 601 * MB; // Box sends 600: size_mismatch
+    await fetchPass(fetchDeps(w));
+    expect(w.cv.fetches.at(-1)).toEqual({ showDate: "2026-01-02", status: "failed", error: "size_mismatch" });
+    expect(await readdir(w.inboxDir)).toEqual([]);
+  });
+
+  test("after 3 failures a show is not tried again (Episodes keeps 'failed'), and its slot goes to the next show", async () => {
+    let now = 0;
+    const w = await make();
+    w.cv.rows.get("2026-01-02")!.audio.hour2!.size = 601 * MB; // hour 1 downloads fine; hour 2 never matches
+    const deps = fetchDeps(w, () => now);
+    for (let i = 0; i < MAX_FETCH_FAILURES; i++) {
+      await fetchPass(deps);
+      if (i === 0) expect(await readdir(join(w.inboxDir, "2026-01-02"))).toEqual(["1-9125.wav"]); // a finished hour is kept to resume
+      now += RETRY_BACKOFF_MS + 1;
+    }
+    expect(w.cv.fetches.filter((f) => f.showDate === "2026-01-02" && f.status === "failed")).toHaveLength(3);
+    expect(await readdir(w.inboxDir)).toEqual([]); // given up: its files are gone, the slot is free
+    await fetchPass(deps);
+    expect(downloads(w).filter((id) => id === "1002")).toHaveLength(3); // no 4th attempt
+    expect(w.cv.fetches.at(-1)).toEqual({ showDate: "2026-01-30", status: "fetched" });
+    expect(w.cv.fetches.filter((f) => f.showDate === "2026-01-02").at(-1)!.status).toBe("failed");
   });
 });
 

@@ -41,7 +41,7 @@ function main(): void {
     google: google ? (rt) => driveClient(realHttp, google, rt) : null,
     dropbox: dropbox ? (rt) => dropboxClient(realHttp, dropbox, rt) : null,
   };
-  const fetchDeps = { convex, log, box: boxSide?.client ?? null, inboxDir: config.inboxDir, preparedDir: config.preparedDir, failedAt: new Map<string, number>() };
+  const fetchDeps = { convex, log, box: boxSide?.client ?? null, inboxDir: config.inboxDir, preparedDir: config.preparedDir, failures: new Map<string, { count: number; at: number }>() };
   const draftDeps = { convex, log, last: { key: "" }, scan: scanDeps.memory };
   log("ingest step=start ok=true");
   const timers = [
@@ -52,7 +52,7 @@ function main(): void {
       await draftPass(draftDeps);
     }),
   ];
-  // Stopping mid-download leaves a .part; the next pass removes it and downloads again.
+  // Stopping mid-download leaves an .ingest-part; the next pass removes it and downloads again.
   const shutdown = () => { for (const t of timers) clearInterval(t); process.exit(0); };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
