@@ -74,10 +74,10 @@ Important data rules:
 | Models (Nemotron) | Nebius Token Factory | Registered in NemoClaw as a custom OpenAI-compatible provider |
 | Agent: Hermes in the OpenShell sandbox (NemoClaw) | One Nebius AI Cloud Linux VM, Docker | No GPU needed with hosted inference. Dashboard (18789) and API (8642) stay on loopback |
 | Console (Next.js) and reverse proxy | Same VM | HTTPS, Clerk sign-in, is the only public entry and the public demo URL. The AgentMail webhook also enters here |
-| Ingest worker, publisher | Same VM, separate containers | Hold the source and Mixcloud credentials. Secrets in separate env files, never mounted into the sandbox. A second VM would separate them more strongly if time allows |
+| Ingest worker, publisher | Same VM. The publisher is built as a host process under systemd (`aircheck-publisher.service`, decision 014), not a container | Hold the source and Mixcloud credentials. Secrets in separate env files, never mounted into the sandbox. A second VM would separate them more strongly if time allows |
 | Crate research service (behind the bridge) | Same VM, a host process under systemd (not a container), on the private address only | The host firewall (ufw) protects host ports, but ports published by Docker skip ufw. A host process bound to the private address with one ufw rule (allow only the `openshell-docker` network) keeps it off the internet. Runbook: `docs/DEPLOY.md` |
 | Relay (console to Hermes) | Same VM, a host process under systemd (`aircheck-relay.service`), not a container | The only program that talks to Hermes. The console never calls Hermes directly, because Hermes stays on loopback (decision 012). The console writes queued runs into Convex. The relay watches Convex, starts Hermes runs at `127.0.0.1:8642`, streams events back and sends stops. It also reads the sandbox log into the Trust page. Runbook: `docs/DEPLOY.md` |
-| Media worker (ffmpeg join and MP3 encode) | Container on the VM; optionally a Nebius Serverless Job (P2) | Plan about 3 GB scratch for one show in flight (two WAVs are about 1.26 GB); process one show at a time and delete after upload |
+| Media worker (ffmpeg join and MP3 encode) | Same VM, a host process under systemd (`aircheck-media.service`). The Serverless Job option was dropped on Oct 27 (decision 014) | Plan about 3 GB scratch for one show in flight (two WAVs are about 1.26 GB); process one show at a time and delete after upload |
 | State and auth | Convex Cloud and Clerk (hosted services, as in TarikOS) | Not on Nebius. Disclose in the README: compute and models run on Nebius; auth and the app database are hosted services |
 | External services | Telegram, Tavily, AgentMail, Mixcloud, Box / Google / Dropbox | Only the ones on the sandbox allow-list are reachable from the agent |
 
@@ -108,21 +108,33 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
 - Runs the `rlr-box-episode-assembly` and `rlr-source-reconciliation` logic as code for the deterministic part, and asks the agent only for judgment calls.
 - Writes to the agent's corpus folder. No credentials ever enter the sandbox.
 
-### 3.4 Media worker (Nebius GPU or CPU VM)
-- Downloads the two hour files, joins in order with ffmpeg, encodes MP3 for Mixcloud (the upload API documents only the `mp3` field).
-- Measures real durations (never assumes 60:00). The hour-1 length drives the player's "Jump to hour 2" (design spec 5.8); no track start times are generated or sent.
+### 3.4 Media worker (built: a host service on the VM, decision 014)
+- Built as `apps/media`, a host systemd service (`aircheck-media`) on the VM, using ffmpeg installed on the VM. Decision 004's Nebius Serverless Job was dropped on Oct 27 (Tarik's call).
+- Audio arrives in an inbox folder on the VM, one `YYYY-MM-DD` folder per show with the two hour WAVs. Copies land under a temporary `.part` name and are renamed when complete.
+- A WAV is used only when its header says the whole file is there (the RIFF size field matches the size on disk) and nothing has written to it for 2 minutes. ffmpeg turns a cut-off WAV into a short MP3 without complaint, so this guard keeps a half-copied show from being approved.
+- Joins the two hours in order and encodes a 192 kbps MP3 for Mixcloud (the upload API documents only the `mp3` field). At most 3 prepared MP3s wait on disk (`MAX_PREPARED`); after a failure a show waits 10 minutes before the next try.
+- Measures real durations (never assumes 60:00). The hour-1 length drives the player's "Jump to hour 2" (design spec 5.8).
+- Talks to Convex with its own `MEDIA_TOKEN`, which can only list packages waiting for audio, attach the MP3's hash, report waiting shows and list MP3s it may delete. When it attaches the MP3, the real WAV filenames replace the agent's placeholder hour ids. It cannot approve anything.
+- The MP3 and the inbox folder are deleted after the show is on Mixcloud.
 - No track start times are generated or sent.
+- First real show (10-2-26, Oct 28): 99 seconds to encode, 171.6 MB, 7150.08 seconds.
 
 ### 3.5 Publisher (approval-gated, holds Mixcloud OAuth)
 - Accepts only a package that Tarik approved in the signed-in console (design spec 5.1 and 7.1). Telegram never approves.
 - Uploads through Mixcloud's upload API (checked against the Mixcloud developer docs, Oct 19): `POST https://api.mixcloud.com/upload/`, multipart, OAuth 2.0 access token. Fields: `mp3` (audio, 4 GB max), `name` (required), `description` (**max 1,000 characters**), `tags-0-tag` to `tags-4-tag` (5 max), `picture` (10 MB max), `unlisted`, and `sections-N-artist` / `sections-N-song` / `sections-N-start_time` (whole seconds).
-- Authorization is browser-based only: Tarik signs in once to grant the publisher a token, which he can revoke at any time.
+- Authorization is browser-based only: Tarik signs in once from the console's Settings page ("Connect Mixcloud"); the console's server writes the token to a file on the VM that only the publisher reads. Convex holds only whether Mixcloud is connected. Tarik can revoke it at any time.
 - `publish_date` is **Pro only**, and the docs say it applies to shows never made public. Whether a past date works for backdating is unverified. Without it, shows post with today's date, so upload the backlog oldest first to keep the feed order right.
-- Audio is validated only after the full upload, so the publisher validates all metadata first. Rate limits return HTTP 403 with `Retry-After`; the publisher waits and retries once.
-- `unlisted: true` allows a safe end-to-end test on Tarik's real account without a separate test account.
-- **Tracklist implication:** the description limit means the tracklist goes in `sections`. The Mixcloud docs list `start_time` as an option, not a requirement, and the Rhythm Lab web app already sends sections with artist and song only (no times). **(verify with an unlisted test upload whether Mixcloud accepts and displays sections without times.)** Tarik does not need per-track times (decided Oct 19). If sections without times do not display, fall back to a short artist list in the description.
-- Records the Mixcloud URL back into the corpus so the backlog list updates.
-- Built as `apps/publisher` (a host systemd service, `aircheck-publisher`). At most 3 uploads per America/Chicago day, oldest show first; the MP3 is re-hashed against the approved fingerprint and streamed from disk. A crash, timeout, 5xx or unreadable answer leaves the package `outcome_unknown`: never retried, Tarik checks Mixcloud. A refused access token is the one case that puts a package back to `approved` (Mixcloud checks the key before it takes audio); the refused key is never tried again and Tarik gets one Telegram alert to reconnect.
+- **Tracklist:** the description limit means the tracklist goes in `sections`, with artist and song only (no times). Answered by the first live post (10-2-26, Oct 28): Mixcloud accepts sections without times and shows them like Tarik's manual posts (spike V5 in `docs/SPIKES.md`). Mixcloud's public API returns no sections for any show, so check the show page, not the API.
+- Built as `apps/publisher`, a host systemd service (`aircheck-publisher`) with its own `PUBLISHER_TOKEN`, which can only read the approved queue, claim one package, record the result and report the Mixcloud connection.
+  - **Pacing:** at most 3 uploads per America/Chicago day, oldest show first. Unknown outcomes count toward the 3.
+  - **Checks before sending:** the MP3 is re-hashed against the approved fingerprint (`audio_changed` / `audio_missing` if not), metadata is validated and the cover fetched before the package is claimed, and the MP3 is streamed from disk.
+  - **Never retry an unknown outcome.** A crash, timeout, 5xx or unreadable answer leaves the package `outcome_unknown`. On start, any package left `publishing` becomes `outcome_unknown`, never approved. Tarik checks Mixcloud, then confirms ("It's on Mixcloud" with the show's address) or reopens it for review.
+  - A rate limit (HTTP 403 with `Retry-After`) is waited out and retried once. A refused access token is the one case that puts a package back to `approved` (Mixcloud checks the key before it takes audio); the refused key is never tried again and Tarik gets one Telegram alert to reconnect (`needs_reconnect`).
+  - A failed package can be reopened for review; an audio failure reopens to "waiting for audio" so the media service rebuilds the MP3.
+  - Sends Telegram "ready to review" cards that only link to the package page.
+- **Description updates (Plan 5c, decision 015):** a published show's description can be replaced. Tarik or the agent (`package_revise`) proposes; only a signed-in human approves the exact text; the publisher posts the description alone to `POST https://api.mixcloud.com/upload/<account>/<show>/edit/`, built only from the package's own receipt URL. Up to 3 tries (an edit is safe to resend), then `retries_exhausted`; a success reply without Mixcloud's confirmation ends as `unconfirmed`. The package record is never rewritten; the live description is the latest pushed update.
+- **The description skill reaches the agent in code.** The agent did not open the installed `rlr-description-safety` skill in the live test (Oct 28), so its text is compiled into the code and sent with every draft prompt and every `package_get` result (the agent's read-only package tool); a drift test ties the copy to `skills/rlr-description-safety/SKILL.md`. Artist facts in a description come only from Crate and are listed privately in `descriptionSources`, never sent to Mixcloud.
+- Records the Mixcloud URL back as the package's receipt, so the backlog list updates.
 
 ### 3.6 Interfaces
 - **Telegram:** the digest and package cards that link to the console's package page (no approve buttons, design spec 5.1), pre-air reports, questions.

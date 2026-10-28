@@ -12,7 +12,7 @@ The hosted demo is at https://aircheck.rhythmlabradio.com. Go to https://airchec
 
 ## Where it runs
 
-Models run on Nebius Token Factory (NVIDIA Nemotron). Compute runs on Nebius AI Cloud. The agent is Hermes Agent in an OpenShell sandbox, installed with NVIDIA NemoClaw. Audio joining runs as a Nebius Serverless Job. Sign-in (Clerk) and the app database (Convex) are hosted services.
+Models run on Nebius Token Factory (NVIDIA Nemotron). Compute runs on Nebius AI Cloud. The agent is Hermes Agent in an OpenShell sandbox, installed with NVIDIA NemoClaw. Audio joining (ffmpeg) runs on the same Nebius VM. Sign-in (Clerk) and the app database (Convex) are hosted services.
 
 ## Develop
 
@@ -36,6 +36,10 @@ pnpm test
 ## What is pre-existing and what changed (draft)
 
 Air Check is new work built for this hackathon. It calls Tarik Moody's existing Crate research service (MusicBrainz, Discogs, Genius, Last.fm, Wikipedia and Bandcamp lookups) over MCP, and borrows the OpenUI integration pattern from Crate Web and interaction patterns from CopilotKit's MIT-licensed OpenMuse. Everything else, including the agent skills, verification tools, ingest and publish pipeline, approval flow and console, was written during the hackathon.
+
+Changed from the original plan: the audio join (ffmpeg turning a show's two hour-long WAV files into one MP3) runs as a small service on the Nebius VM instead of a Nebius Serverless Job. That was Tarik's call on Oct 27; decision 014 has the reasoning.
+
+Mixcloud descriptions are drafted in Tarik's own voice, with any artist fact backed by a research source he can see, and a published show's description can be updated later, only with his approval (decision 015).
 
 ## License
 

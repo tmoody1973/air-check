@@ -234,7 +234,7 @@
   1. Read `publisher.queue`. Use `nextToPublish` with `publishedToday`.
   2. Read the token file. If there is none: `setMixcloud(not_connected)`, then wait.
   3. `claim`.
-  4. Re-hash the prepared MP3 and compare with the fingerprinted `mp3Sha256`. On mismatch: `result failed "audio changed since approval"`, with no upload (Review Focus 2).
+  4. Re-hash the prepared MP3 and compare with the fingerprinted `mp3Sha256`. On mismatch: `result failed "audio changed since approval"`, with no upload (Review Focus 2). *(Note, Oct 28: as built, the error is the short code `audio_changed` (and `audio_missing` for a missing MP3), not this free text; the console shows the plain sentence.)*
   5. Run `validateForUpload`. If there are problems: `result failed <problems>`.
   6. Build the fields with `toMixcloudFields(draft)`, plus `picture` (the package cover, else the standard cover).
   7. **Stream** the multipart upload from disk to `https://api.mixcloud.com/upload/?access_token=…`. The MP3 can be about 140 MB; never buffer the whole file in memory. Use `fs.openAsBlob` with undici `FormData`, or an equivalent streaming body.
