@@ -21,6 +21,7 @@ PROBES=(
   "Relay|systemctl is-active --quiet aircheck-relay"
   "Media|systemctl is-active --quiet aircheck-media"
   "Publisher|systemctl is-active --quiet aircheck-publisher"
+  "Agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes airc mcp status \"$s\" --json 2>/dev/null | grep -q '\"registered\": true' || exit 1; done"
 )
 
 down=()
