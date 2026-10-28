@@ -76,7 +76,7 @@ describe("GET /api/audio/[packageId]", () => {
     expect(res.headers.get("content-type")).not.toBe("audio/mpeg");
   });
 
-  it.each(["../pkg-10-2-26", "..%2Fsecret", "pkg-10-2-26/../../etc/passwd", "pkg-10-2-2026", "pkg-10-2-26.mp3", "PKG-10-2-26", "pkg-100-2-26", ""])(
+  it.each(["../pkg-10-2-26", "..%2Fsecret", "pkg-10-2-26/../../etc/hosts", "pkg-10-2-2026", "pkg-10-2-26.mp3", "PKG-10-2-26", "pkg-100-2-26", ""])(
     "a bad id (%s) → 400 before any path is built",
     async (id) => {
       const res = await get(id);
