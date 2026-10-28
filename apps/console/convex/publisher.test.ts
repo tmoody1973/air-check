@@ -98,6 +98,20 @@ describe("publisher.queue", () => {
     await t.mutation(api.publisher.result, { token: PUB, packageId: failed, result: { status: "failed", error: "x" } });
     expect((await t.query(api.publisher.queue, { token: PUB })).publishedToday).toBe(1);
   });
+
+  test("R10: an unknown outcome counts toward today (it may have posted)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = convexTest(schema, modules);
+    vi.setSystemTime(new Date("2026-10-28T04:30:00Z")); // 23:30 CDT Oct 27
+    const old = await approved(t, { id: "pkg-old", showDate: "2026-09-01" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: old });
+    await t.mutation(api.publisher.reconcile, { token: PUB });
+    vi.setSystemTime(new Date("2026-10-28T05:00:01Z")); // 00:00 CDT Oct 28
+    const id = await approved(t, { id: "pkg-x", showDate: "2026-09-08" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: id, result: { status: "outcome_unknown" } });
+    expect((await t.query(api.publisher.queue, { token: PUB })).publishedToday).toBe(1);
+  });
 });
 
 describe("publisher.claim / result", () => {
@@ -129,6 +143,42 @@ describe("publisher.claim / result", () => {
   });
 });
 
+describe("R11: publish transitions write activity rows", () => {
+  const activity = (t: T) => t.run((ctx) => ctx.db.query("activity").collect());
+
+  test("a claim and a succeeded result each write a row with the id and status, no content", async () => {
+    const t = convexTest(schema, modules);
+    const id = await approved(t);
+    const before = (await activity(t)).length;
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: id, result: { status: "succeeded", url: URL_ } });
+    const rows = (await activity(t)).slice(before);
+    expect(rows.map(({ workspace, kind, result, title, packageId }) => ({ workspace, kind, result, title, packageId }))).toEqual([
+      { workspace: "real", kind: "action", result: "done", title: `Publishing package ${id}`, packageId: id },
+      { workspace: "real", kind: "action", result: "done", title: `Published package ${id}`, packageId: id },
+    ]);
+    const title = (await pkg(t, id))!.draft.title as string;
+    expect(JSON.stringify(rows)).not.toContain(title);
+    expect(JSON.stringify(rows)).not.toContain(URL_);
+  });
+
+  test("failed and unknown outcomes (including reconcile) ask for Tarik, without the error text", async () => {
+    const t = convexTest(schema, modules);
+    const failed = await approved(t, { id: "pkg-f" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: failed });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: failed, result: { status: "failed", error: "secret-ish detail" } });
+    const stuck = await approved(t, { id: "pkg-s" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: stuck });
+    await t.mutation(api.publisher.reconcile, { token: PUB });
+    const rows = (await activity(t)).filter((r) => r.result === "needs_you" && r.kind === "waiting" && r.title.includes("ublish"));
+    expect(rows.map((r) => [r.packageId, r.title])).toEqual([
+      ["pkg-f", "Publish failed for package pkg-f"],
+      ["pkg-s", "Publish outcome unknown for package pkg-s"],
+    ]);
+    expect(JSON.stringify(await activity(t))).not.toContain("secret-ish detail");
+  });
+});
+
 describe("publisher.reconcile", () => {
   test("moves publishing to outcome_unknown and touches nothing else", async () => {
     const t = convexTest(schema, modules);
@@ -148,10 +198,31 @@ describe("publisher.reconcile", () => {
 });
 
 describe("publisher.coverUrl", () => {
-  test("returns a URL for a stored cover", async () => {
+  const store = (t: T) => t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
+
+  test("R9: resolves the standard cover", async () => {
     const t = convexTest(schema, modules);
-    const cover = await t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
-    expect(await t.query(api.publisher.coverUrl, { token: PUB, storageId: cover })).toEqual(expect.any(String));
+    const standard = await store(t);
+    vi.stubEnv("STANDARD_COVER_STORAGE_ID", standard);
+    expect(await t.query(api.publisher.coverUrl, { token: PUB, storageId: standard })).toEqual(expect.any(String));
+  });
+
+  test("R9: resolves the cover of an approved or publishing real package, nothing else", async () => {
+    const t = convexTest(schema, modules);
+    const [a, b, c, stray] = [await store(t), await store(t), await store(t), await store(t)];
+    const withCover = async (id: string, cover: string) => {
+      await reviewable(t, { id });
+      await t.withIdentity(human).mutation(api.packages.setCover, { packageId: id, storageId: cover as never });
+    };
+    await withCover("pkg-a", a);
+    await t.withIdentity(human).mutation(api.packages.decide, { packageId: "pkg-a", fingerprint: (await pkg(t, "pkg-a"))!.fingerprint!, decision: "approve" });
+    await withCover("pkg-b", b);
+    await t.withIdentity(human).mutation(api.packages.decide, { packageId: "pkg-b", fingerprint: (await pkg(t, "pkg-b"))!.fingerprint!, decision: "approve" });
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: "pkg-b" });
+    await withCover("pkg-c", c); // still awaiting review
+    expect(await t.query(api.publisher.coverUrl, { token: PUB, storageId: a })).toEqual(expect.any(String));
+    expect(await t.query(api.publisher.coverUrl, { token: PUB, storageId: b })).toEqual(expect.any(String));
+    for (const id of [c, stray]) expect(await errorCode(t.query(api.publisher.coverUrl, { token: PUB, storageId: id }))).toBe("NOT_FOUND");
   });
 });
 

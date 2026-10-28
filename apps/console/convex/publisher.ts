@@ -18,7 +18,7 @@ export const queue = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requirePublisher(token);
-    const real = (status: "approved" | "succeeded") =>
+    const real = (status: "approved" | "succeeded" | "outcome_unknown") =>
       ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
     const standard = process.env.STANDARD_COVER_STORAGE_ID;
     const packages = (await real("approved")).map((d) => {
@@ -30,8 +30,10 @@ export const queue = query({
       };
     });
     const today = chicagoDayKey(Date.now());
-    // ponytail: scans every success ever (a few a week); add a by-day index if this grows large.
-    const publishedToday = (await real("succeeded")).filter((d) => d.result?.at && chicagoDayKey(Date.parse(d.result.at)) === today).length;
+    // R10: an unknown outcome may be a real post, so it counts too (pacing errs conservative).
+    // ponytail: scans every such result ever (a few a week); add a by-day index if this grows large.
+    const results = [...(await real("succeeded")), ...(await real("outcome_unknown"))];
+    const publishedToday = results.filter((d) => d.result?.at && chicagoDayKey(Date.parse(d.result.at)) === today).length;
     return { packages, publishedToday };
   },
 });
@@ -75,12 +77,23 @@ export const reconcile = mutation({
   },
 });
 
-/** A URL the publisher downloads the cover from. */
+/**
+ * A URL the publisher downloads the cover from. R9: only the standard cover or the cover of a real package that is
+ * approved or publishing; anything else is NOT_FOUND (Convex file URLs do not expire, so the set is kept narrow).
+ */
 export const coverUrl = query({
   args: { token: v.string(), storageId: v.id("_storage") },
   handler: async (ctx, { token, storageId }) => {
     requirePublisher(token);
-    return ctx.storage.getUrl(storageId);
+    let allowed = storageId === process.env.STANDARD_COVER_STORAGE_ID;
+    for (const status of ["approved", "publishing"] as const) {
+      if (allowed) break;
+      const docs = await ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
+      allowed = docs.some((d) => (d.draft as PackageDraft).coverStorageId === storageId);
+    }
+    const url = allowed ? await ctx.storage.getUrl(storageId) : null;
+    if (!url) throw new ConvexError({ code: "NOT_FOUND" });
+    return url;
   },
 });
 
