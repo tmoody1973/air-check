@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EpisodeItem } from "./EpisodeItem";
 import { EpisodesView, type EpisodeActions, type EpisodeRow } from "./EpisodesView";
 import type { SourceStatus } from "./SourceConnections";
 
@@ -181,5 +182,58 @@ describe("EpisodesView reruns", () => {
   it("no Mark control once a show has a package", () => {
     setup([ep("2026-01-02"), ep("2026-01-09", { status: "awaiting-review", packageStatus: "awaiting_review" })], { today: "2026-01-09" });
     expect(within(rowOf("2026-01-09")).queryByRole("button", { name: "Mark as rerun of…" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EpisodeItem as a card (R15: phone width, no sideways scroll)", () => {
+  const ctx = (acts = actions()) => ({ actions: acts, announce: vi.fn(), choices: ["2026-01-02", "2026-01-09"] });
+
+  it("stacks date and status, three labelled source lines, the full-width answer box and the rerun control", async () => {
+    const acts = actions();
+    render(
+      <ul>
+        <EpisodeItem
+          layout="card"
+          showDate="2026-01-16"
+          e={ep("2026-01-16", { status: "question", notes: { status: "missing" }, gaps: ["notes"], questions: [{ id: "t1", kind: "tracklist", text: "Keep track 3?" }] })}
+          sources={{ box: "connected", google: "not_connected", dropbox: "connected" }}
+          ctx={ctx(acts)}
+        />
+      </ul>,
+    );
+    const card = rowOf("2026-01-16");
+    expect(card.tagName).toBe("LI");
+    expect(within(card).getByRole("heading", { name: "Jan 16, 2026" })).toBeInTheDocument();
+    expect(within(card).getByText("Question for you")).toBeInTheDocument();
+    expect(within(card).getByText("Audio").nextElementSibling).toHaveTextContent("In Box");
+    expect(within(card).getByText("Tracklist").nextElementSibling).toHaveTextContent("Not connected");
+    expect(within(card).getByText("Notes").nextElementSibling).toHaveTextContent("Missing");
+    const box = within(card).getByLabelText("Keep track 3?");
+    expect(box).toHaveClass("w-full");
+    fireEvent.change(box, { target: { value: "Yes" } });
+    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Save answer" })));
+    expect(acts.answer).toHaveBeenCalledWith({ showDate: "2026-01-16", questionId: "t1", answer: "Yes" });
+    fireEvent.click(within(card).getByRole("button", { name: "Mark as rerun of…" }));
+    expect(within(card).getByLabelText("Rerun of")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("a blank Friday card says so and can be marked", () => {
+    render(<ul><EpisodeItem layout="card" showDate="2026-01-23" e={null} sources={{}} ctx={ctx()} /></ul>);
+    const card = rowOf("2026-01-23");
+    expect(within(card).getByText("Blank Friday")).toBeInTheDocument();
+    expect(within(card).getByText("No show folder or tracklist found")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Mark as rerun of…" })).toBeInTheDocument();
+  });
+
+  it("the view in card layout keeps the summary line, blank Fridays and the Connect note", () => {
+    render(
+      <EpisodesView layout="cards" data={{ episodes: [ep("2026-01-09")], awaitingReview: 0 }} sources={[{ source: "box", state: "connected" }, { source: "dropbox", state: "connected" }]} workspace="real" today="2026-01-09" actions={actions()} />,
+    );
+    expect(screen.getByText("1 show · 1 blank Friday")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: /2026 shows/ })).toBeInTheDocument();
+    expect(rowOf("2026-01-02")).toHaveTextContent("No show folder or tracklist found");
+    expect(screen.getByRole("link", { name: "Connect Google in Settings" })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });
