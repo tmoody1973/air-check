@@ -7,6 +7,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { PackageDecision, type CoverChangeFn, type DecideFn } from "@/components/PackageDecision";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { uploadCover } from "@/lib/cover";
+import { useChicagoDayKey } from "@/lib/date";
 
 export default function PackagePage() {
   const { id } = useParams<{ id: string }>();
@@ -15,7 +16,9 @@ export default function PackagePage() {
   const decideMutation = useMutation(api.packages.decide);
   // These are null (or []) for demo and non-staff callers, so the real-only parts never show in the demo.
   const mixcloud = useQuery(api.mixcloud.get, {});
-  const publish = useQuery(api.packages.publishState, { packageId: id });
+  // The day is an argument so the queue count follows Chicago midnight; the label uses the same key.
+  const today = useChicagoDayKey();
+  const publish = useQuery(api.packages.publishState, { packageId: id, today });
   const coverUrl = useQuery(api.packages.coverPreview, { packageId: id });
   const coverUploadUrl = useMutation(api.packages.coverUploadUrl);
   const setCover = useMutation(api.packages.setCover);
@@ -42,7 +45,7 @@ export default function PackagePage() {
           decide={decide}
           needsMixcloud={!!mixcloud && mixcloud.state !== "connected"}
           cover={workspace === "real" && coverUrl !== undefined ? { url: coverUrl, change: changeCover } : undefined}
-          publish={publish}
+          publish={publish && { ...publish, today }}
           mixcloudAccount={mixcloud?.account}
         />
       )}

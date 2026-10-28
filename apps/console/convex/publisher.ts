@@ -15,9 +15,9 @@ function requirePublisher(token: string): void {
 
 /**
  * Approved real packages (demo ones never) with the cover the upload will use, and how many went up today
- * (America/Chicago) for the 3-per-day pace. Shared by `queue` and the package page's `packages.publishState`.
+ * (America/Chicago day key `today`, e.g. "2026-10-28") for the 3-per-day pace. Shared by `queue` and the package page's `packages.publishState`.
  */
-export async function publishQueue(ctx: QueryCtx) {
+export async function publishQueue(ctx: QueryCtx, today: string) {
   const real = (status: "approved" | "succeeded" | "outcome_unknown") =>
     ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
   const standard = process.env.STANDARD_COVER_STORAGE_ID;
@@ -29,7 +29,6 @@ export async function publishQueue(ctx: QueryCtx) {
       ...(coverStorageId ? { coverStorageId } : {}),
     };
   });
-  const today = chicagoDayKey(Date.now());
   // R10: an unknown outcome may be a real post, so it counts too (pacing errs conservative).
   // ponytail: scans every such result ever (a few a week); add a by-day index if this grows large.
   const results = [...(await real("succeeded")), ...(await real("outcome_unknown"))];
@@ -41,7 +40,7 @@ export const queue = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requirePublisher(token);
-    return publishQueue(ctx);
+    return publishQueue(ctx, chicagoDayKey(Date.now()));
   },
 });
 

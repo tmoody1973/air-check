@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
 import { expect, it } from "vitest";
-import { chicagoDateLabel, chicagoTimeLabel, showDateLabel } from "./date";
+import { act, renderHook } from "@testing-library/react";
+import { vi } from "vitest";
+import { chicagoDateLabel, chicagoDayKey, chicagoTimeLabel, dayKeyLabel, showDateLabel, useChicagoDayKey } from "./date";
 
 it("formats the show date with a short month and no leading zero", () => {
   expect(showDateLabel("2026-10-02")).toBe("Oct 2, 2026");
@@ -22,4 +25,24 @@ it("adds whole Chicago calendar days, across a month end and the DST change", ()
 it("a receipt time is the Milwaukee date and clock time", () => {
   expect(chicagoTimeLabel("2026-10-28T03:04:00.000Z")).toMatch(/^Oct 27, 2026, 10:04\sPM$/);
   expect(chicagoTimeLabel("garbage")).toBe("garbage");
+});
+
+it("labels a Chicago day key plus whole days", () => {
+  expect(dayKeyLabel("2026-10-27", 0)).toBe("Oct 27, 2026");
+  expect(dayKeyLabel("2026-10-27", 6)).toBe("Nov 2, 2026");
+  expect(dayKeyLabel("2026-12-31", 1)).toBe("Jan 1, 2027");
+});
+
+it("useChicagoDayKey moves to the new day within a minute of Chicago midnight", () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-28T04:59:30Z")); // 23:59:30 CDT Oct 27
+    const { result } = renderHook(() => useChicagoDayKey());
+    expect(result.current).toBe("2026-10-27");
+    expect(result.current).toBe(chicagoDayKey(Date.now()));
+    act(() => void vi.advanceTimersByTime(60_000));
+    expect(result.current).toBe("2026-10-28");
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -1,9 +1,10 @@
 import type { PackageRecord } from "@aircheck/core";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { chicagoDateLabel, chicagoTimeLabel } from "../lib/date";
+import { chicagoTimeLabel, dayKeyLabel } from "../lib/date";
 
-export type PublishState = { dayOffset: number | null; mixcloudState: "connected" | "needs_reconnect" | "not_connected" };
+/** packages.publishState's answer, plus the Chicago day key (`today`) it was asked for, so count and label agree. */
+export type PublishState = { dayOffset: number | null; mixcloudState: "connected" | "needs_reconnect" | "not_connected"; today: string };
 
 const MIXCLOUD = "https://www.mixcloud.com/";
 /** A receipt URL becomes a link only on Mixcloud's own site; anything else is shown as text. */
@@ -21,10 +22,10 @@ function Banner({ tone, children }: { tone: keyof typeof TONE; children: ReactNo
   return <div role="status" className={`rounded-control px-4 py-3 text-sm [overflow-wrap:anywhere] ${TONE[tone]}`}>{children}</div>;
 }
 
-function queuedText(dayOffset: number | null): string {
+function queuedText({ dayOffset, today }: PublishState): string {
   if (dayOffset === null) return "Queued, but it can't post until it has a cover.";
   // ponytail: "posts on <date>" names the day it should go up, from the same 3-a-day order the publisher uses.
-  return dayOffset === 0 ? "Queued: posts today" : `Queued: posts on ${chicagoDateLabel(Date.now(), dayOffset)} (3 a day, oldest first)`;
+  return dayOffset === 0 ? "Queued: posts today" : `Queued: posts on ${dayKeyLabel(today, dayOffset)} (3 a day, oldest first)`;
 }
 
 /** Where a decided real package stands with Mixcloud: queued, uploading, the receipt, or what went wrong. */
@@ -38,7 +39,7 @@ export function PublishStatus({ record, publish, mixcloudAccount }: {
     case "approved":
       if (!publish) return null;
       return publish.mixcloudState === "connected" ? (
-        <Banner tone="ready">{queuedText(publish.dayOffset)}</Banner>
+        <Banner tone="ready">{queuedText(publish)}</Banner>
       ) : (
         <Banner tone="caution">
           <Link href="/settings" className={LINK}>Connect Mixcloud to publish</Link>. The show waits in the queue until then.

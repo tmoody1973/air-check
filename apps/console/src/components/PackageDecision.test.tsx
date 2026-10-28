@@ -186,7 +186,7 @@ describe("PackageDecision", () => {
 const HASH = "ab".repeat(32);
 const withAudio = (over: Partial<PackageRecord> = {}) =>
   record(over, { id: "pkg-10-2-26", audio: { hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: HASH, hour1DurationSec: 3612.5 } });
-const connected: PublishState = { dayOffset: 0, mixcloudState: "connected" };
+const connected: PublishState = { dayOffset: 0, mixcloudState: "connected", today: "2026-10-27" };
 const real = (r: PackageRecord, more: Partial<Parameters<typeof PackageDecision>[0]> = {}) =>
   render(<PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} {...more} /></PlayerProvider>);
 
@@ -264,18 +264,23 @@ describe("PackageDecision: queue and receipt", () => {
   afterEach(() => vi.useRealTimers());
 
   it("approved and connected: posts today, or on a Milwaukee date (3 a day, oldest first)", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-28T03:00:00Z")); // Oct 27, 10 pm in Milwaukee
     const { unmount } = real(withAudio({ status: "approved" }), { publish: connected });
     expect(screen.getByText("Queued: posts today")).toBeInTheDocument();
     unmount();
-    real(withAudio({ status: "approved" }), { publish: { dayOffset: 2, mixcloudState: "connected" } });
+    real(withAudio({ status: "approved" }), { publish: { dayOffset: 2, mixcloudState: "connected", today: "2026-10-27" } });
     expect(screen.getByText("Queued: posts on Oct 29, 2026 (3 a day, oldest first)")).toBeInTheDocument();
+  });
+
+  it("the date comes from the day the server counted against, not the browser's clock", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-15T18:00:00Z"));
+    real(withAudio({ status: "approved" }), { publish: { dayOffset: 5, mixcloudState: "connected", today: "2026-10-28" } });
+    expect(screen.getByText("Queued: posts on Nov 2, 2026 (3 a day, oldest first)")).toBeInTheDocument();
   });
 
   it("approved but Mixcloud not connected: points to Settings instead of a date", () => {
     for (const mixcloudState of ["not_connected", "needs_reconnect"] as const) {
-      const { unmount } = real(withAudio({ status: "approved" }), { publish: { dayOffset: 0, mixcloudState } });
+      const { unmount } = real(withAudio({ status: "approved" }), { publish: { dayOffset: 0, mixcloudState, today: "2026-10-27" } });
       expect(screen.getByRole("link", { name: "Connect Mixcloud to publish" })).toHaveAttribute("href", "/settings");
       expect(screen.queryByText("Queued: posts today")).not.toBeInTheDocument();
       unmount();

@@ -42,6 +42,8 @@ async function realPackage(ctx: QueryCtx, packageId: string) {
   return doc?.workspace === "real" ? doc : null;
 }
 
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
 export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudStatus["state"] };
 
 /**
@@ -49,10 +51,13 @@ export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudSt
  * uses. Like the publisher, a package with no cover (its own or the standard one) is not queued.
  */
 export const publishState = query({
-  args: { packageId: v.string() },
-  handler: async (ctx, { packageId }): Promise<PublishState | null> => {
+  // `today` is the browser's Chicago day key. A subscribed query never re-runs because time passed, so the page
+  // passes the day and asks again after midnight. It only shapes this display; the publisher counts its own day.
+  args: { packageId: v.string(), today: v.string() },
+  handler: async (ctx, { packageId, today }): Promise<PublishState | null> => {
+    if (!DAY_KEY.test(today)) throw new ConvexError({ code: "BAD_INPUT", message: "today must be YYYY-MM-DD" });
     if (!(await realPackage(ctx, packageId))) return null;
-    const { packages, publishedToday } = await publishQueue(ctx);
+    const { packages, publishedToday } = await publishQueue(ctx, today);
     // Same mapping as the publisher service's nextToPublish call (apps/publisher/src/publish.ts).
     const approved = packages
       .filter((p) => p.coverStorageId)
