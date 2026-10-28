@@ -235,3 +235,14 @@ test("assemble exposes the MMDDYY stamp date", () => {
   expect(m.status).toBe("ask");
   expect(m.stampDate).toBe("2026-03-06");
 });
+
+test("R10: two finished drafts with no package is draft-failed, never picked again; a package still wins", () => {
+  expect(episodeStatus(ep("2026-01-02", { draftAttempts: 1 })).status).toBe("ready-to-draft");
+  expect(episodeStatus(ep("2026-01-02", { draftAttempts: 2 })).status).toBe("draft-failed");
+  expect(episodeStatus(ep("2026-01-02", { draftAttempts: 2, packageStatus: "awaiting_review" })).status).toBe("awaiting-review");
+  // An open question is still the more useful thing to show.
+  expect(episodeStatus(ep("2026-01-02", { draftAttempts: 2, questions: [{ id: "q", text: "?" }] })).status).toBe("question");
+  const eps = [ep("2026-01-02", { draftAttempts: 2 }), ep("2026-01-09")];
+  expect(nextToDraft(eps, 0)?.showDate).toBe("2026-01-09");
+  expect(nextAudioToFetch(eps, 0)?.showDate).toBe("2026-01-09");
+});

@@ -86,6 +86,19 @@ describe("INGEST_TOKEN", () => {
     expect(await errorCode(t.query(api.publisher.awaitingReview, { token: OTHER.PUBLISHER_TOKEN }))).toBe("UNAUTHORIZED");
   });
 
+  test("R11: the relay and the agent routes refuse their token when it equals INGEST_TOKEN", async () => {
+    const t = convexTest(schema, modules);
+    vi.stubEnv("RELAY_TOKEN", INGEST);
+    expect(await errorCode(t.query(api.relay.pending, { token: INGEST }))).not.toBe("no error");
+    vi.stubEnv("AGENT_SUBMIT_TOKEN", INGEST);
+    const res = await t.fetch("/agent/episodes/rerun", { method: "POST", headers: { authorization: `Bearer ${INGEST}`, "content-type": "application/json" }, body: JSON.stringify({ showDate: "2026-01-02", rerunOf: "2025-12-26" }) });
+    expect(res.status).toBe(401);
+    vi.stubEnv("AGENT_SUBMIT_TOKEN", OTHER.AGENT_SUBMIT_TOKEN);
+    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", INGEST);
+    const demo = await t.fetch("/agent/episodes/rerun", { method: "POST", headers: { authorization: `Bearer ${INGEST}`, "content-type": "application/json" }, body: JSON.stringify({ showDate: "2026-01-02", rerunOf: "2025-12-26" }) });
+    expect(demo.status).toBe(401);
+  });
+
   test("the ingest token is refused by media and publisher", async () => {
     const t = convexTest(schema, modules);
     expect(await errorCode(t.query(api.media.pending, { token: INGEST }))).toBe("UNAUTHORIZED");
@@ -309,8 +322,30 @@ describe("ingest.requestDraft", () => {
       });
     }
     expect(await u.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "draft-failed" });
-    expect((await u.query(api.ingest.list, { token: INGEST })).episodes[0]!.draftAttempts).toBe(2);
+    const listed = (await u.query(api.ingest.list, { token: INGEST })).episodes[0]!;
+    expect(listed.draftAttempts).toBe(2);
+    expect(listed.status).toBe("draft-failed"); // R10: core's status, so nextToDraft skips it and Episodes says why
     expect(await runs(u)).toHaveLength(2);
+  });
+
+  test("R11: a draft run open longer than 6 hours no longer counts as open, for idempotency or for the pace", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "drafting" });
+    expect((await t.query(api.ingest.list, { token: INGEST })).awaitingReview).toBe(1);
+    // 5 h 59 min: still open. 6 h 1 min: stuck; it counts as a finished attempt instead.
+    const age = (ms: number) => t.run(async (ctx) => {
+      for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { createdAt: Date.now() - ms });
+    });
+    await age(6 * 3_600_000 - 60_000);
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "drafting" });
+    await age(6 * 3_600_000 + 60_000);
+    const l = await t.query(api.ingest.list, { token: INGEST });
+    expect(l.awaitingReview).toBe(0);
+    expect(l.episodes[0]!.draftAttempts).toBe(1);
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+    expect(await runs(t)).toHaveLength(2);
   });
 });
 

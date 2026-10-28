@@ -23,7 +23,6 @@ const MAX_TRACKS = 100;
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
 const MAX_ERROR_CHARS = 200;
-const MAX_DRAFT_ATTEMPTS = 2;
 const PACE = 3;
 
 const scannedEpisodeV = v.object(scannedEpisodeFields);
@@ -70,8 +69,7 @@ export const list = query({
   handler: async (ctx, { token }) => {
     requireIngest(token);
     const rows = await episodeRows(ctx);
-    const episodes = await Promise.all(rows.map(async (e) => ({ ...e, draftAttempts: (await draftRunsFor(ctx, e.showDate)).filter((r) => !isOpenRun(r)).length })));
-    return { episodes, awaitingReview: await awaitingReviewCount(ctx) };
+    return { episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx) };
   },
 });
 
@@ -106,11 +104,14 @@ export const requestDraft = mutation({
     if (!isShowDate(showDate)) throw new ConvexError({ code: "BAD_INPUT", message: "showDate must be a real date, yyyy-mm-dd" });
     const row = await episodeByDate(ctx, showDate);
     if (!row) throw new ConvexError({ code: "NOT_FOUND" });
-    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus));
-    if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
     const runs = await draftRunsFor(ctx, showDate);
-    if (runs.some(isOpenRun)) return { queued: false, reason: "drafting" } as const;
-    if (runs.length >= MAX_DRAFT_ATTEMPTS) return { queued: false, reason: "draft-failed" } as const;
+    if (runs.some((r) => isOpenRun(r))) {
+      // An open run means "drafting" whatever else the facts say, so a second scan never queues a second run.
+      const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus));
+      return { queued: false, reason: status === "ready-to-draft" ? "drafting" : status } as const;
+    }
+    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, runs.length));
+    if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
     if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;
     const tracks = row.tracklist.tracks ?? [];
     if (!tracks.length) return { queued: false, reason: "missing-tracklist" } as const;

@@ -30,6 +30,8 @@ export interface EpisodeFacts {
   stampDate?: string;
   /** Drive doc title. */
   docTitle?: string;
+  /** Finished draft-package runs for the date (R10). */
+  draftAttempts?: number;
 }
 
 export type EpisodeStatus =
@@ -44,7 +46,8 @@ export type EpisodeStatus =
   | "failed"
   | "outcome-unknown"
   | "skipped"
-  | "rerun";
+  | "rerun"
+  | "draft-failed";
 
 export interface EpisodeStatusResult {
   status: EpisodeStatus;
@@ -63,6 +66,8 @@ const FROM_PACKAGE: Partial<Record<LinkedPackageStatus, EpisodeStatus>> = {
   skipped: "skipped",
 };
 
+export const MAX_DRAFT_ATTEMPTS = 2;
+
 export function episodeStatus(e: EpisodeFacts): EpisodeStatusResult {
   const gaps: EpisodeStatusResult["gaps"] = [];
   if (e.audio.status !== "ready") gaps.push("audio");
@@ -79,5 +84,7 @@ export function episodeStatus(e: EpisodeFacts): EpisodeStatusResult {
   if (unresolved || audioAsk) return { status: "question", gaps };
   if (e.audio.status !== "ready") return { status: "missing-audio", gaps };
   if (e.tracklist.status === "missing") return { status: "missing-tracklist", gaps };
+  // R10: two drafts finished without a package; stop so one stuck show never blocks the queue.
+  if ((e.draftAttempts ?? 0) >= MAX_DRAFT_ATTEMPTS) return { status: "draft-failed", gaps };
   return { status: "ready-to-draft", gaps };
 }

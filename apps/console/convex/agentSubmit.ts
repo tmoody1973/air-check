@@ -22,14 +22,19 @@ export function tokenMatches(header: string | null, expected: string | undefined
   return !!header?.startsWith("Bearer ") && sameToken(header.slice("Bearer ".length), expected);
 }
 
-/** Which workspace a Bearer header authorises: the real-token wins a tie; null means neither matched. */
+/**
+ * Which workspace a Bearer header authorises: the real-token wins a tie; null means neither matched. R11: an agent token
+ * equal to INGEST_TOKEN is treated as unset, so the ingest service's secret never opens an agent route.
+ */
 export function workspaceForToken(
   header: string | null,
   tokens: { real: string | undefined; demo: string | undefined },
+  ingest = process.env.INGEST_TOKEN,
 ): "real" | "demo" | null {
   if (tokens.real && tokens.real === tokens.demo) return null; // same secret for both: ambiguous
-  const real = tokenMatches(header, tokens.real); // both compares always run
-  const demo = tokenMatches(header, tokens.demo);
+  const usable = (t: string | undefined) => (t && t === ingest ? undefined : t);
+  const real = tokenMatches(header, usable(tokens.real)); // both compares always run
+  const demo = tokenMatches(header, usable(tokens.demo));
   return real ? "real" : demo ? "demo" : null;
 }
 

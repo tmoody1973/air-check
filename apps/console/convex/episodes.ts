@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { actorOf, workspaceOf } from "./gate";
+import { createdAtOf } from "./runDefaults";
 import { workspaceV } from "./schema";
 
 // Plan 6: the 2026 backlog, one row per show. Hard Rule 9: real workspace only; the demo login and anonymous callers
@@ -35,7 +36,10 @@ export async function linkedPackage(ctx: QueryCtx, showDate: string): Promise<{ 
 }
 
 const OPEN = ["queued", "running", "stopping"] as const;
-export const isOpenRun = (r: Doc<"runs">) => (OPEN as readonly string[]).includes(r.status ?? "");
+/** R11: a draft run still "open" after this long is stuck; it stops holding the show or the pace (and counts as an attempt). */
+export const STUCK_RUN_MS = 6 * 3_600_000;
+export const isOpenRun = (r: Doc<"runs">, now = Date.now()) =>
+  (OPEN as readonly string[]).includes(r.status ?? "") && now - createdAtOf(r) < STUCK_RUN_MS;
 
 /** The real draft-package runs for one show date: the Tracklist page's and the ingest service's. */
 export async function draftRunsFor(ctx: QueryCtx, showDate: string) {
@@ -49,13 +53,14 @@ export async function awaitingReviewCount(ctx: QueryCtx): Promise<number> {
   for (const status of ["awaiting_review", "preparing_audio"] as const)
     n += (await ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect()).length;
   for (const status of OPEN)
-    n += (await ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect()).filter((r) => r.workspace === "real" && r.kind === "draft-package").length;
+    n += (await ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect()).filter((r) => r.workspace === "real" && r.kind === "draft-package" && isOpenRun(r)).length;
   return n;
 }
 
 /** What core's episodeStatus, nextToDraft and rerunCandidate read. */
-export function factsOf(e: EpisodeDoc, packageStatus: LinkedPackageStatus): EpisodeFacts {
+export function factsOf(e: EpisodeDoc, packageStatus: LinkedPackageStatus, draftAttempts = 0): EpisodeFacts {
   return {
+    draftAttempts,
     showDate: e.showDate,
     audio: { status: e.audio.status },
     tracklist: { status: e.tracklist.status },
@@ -80,7 +85,8 @@ export async function episodeRows(ctx: QueryCtx) {
       const { _id, _creationTime, notes: { text, ...notes }, tracklist: { tracks, ...tracklist }, ...rest } = e;
       void _id, _creationTime, text;
       const pkg = await linkedPackage(ctx, e.showDate);
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, ...episodeStatus(factsOf(e, pkg.packageStatus)) };
+      const draftAttempts = (await draftRunsFor(ctx, e.showDate)).filter((r) => !isOpenRun(r)).length;
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
     }),
   );
 }
