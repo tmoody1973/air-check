@@ -18,8 +18,8 @@ export interface PublishDeps {
   report: (status: MixcloudStatus) => Promise<void>;
   /** A Telegram message to Tarik. Never throws; a failure never blocks publishing. */
   alert: (text: string) => Promise<boolean>;
-  /** Tests only: the fake Mixcloud's address and a quick clock. */
-  uploadUrl?: string; uploadTimeoutMs?: number; sleep?: (ms: number) => Promise<void>;
+  /** Tests only: the fake Mixcloud's address, a quick clock, and an exit that does not end the test run. */
+  uploadUrl?: string; uploadTimeoutMs?: number; sleep?: (ms: number) => Promise<void>; exit?: (code: number) => void;
 }
 
 /** What a single upload needs (the unlisted test CLI has only this). */
@@ -30,6 +30,29 @@ const COVER_TIMEOUT_MS = 15_000;
 const SAFE_ID = /^[A-Za-z0-9][\w-]{0,99}$/;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Waits between attempts at a result or unclaim write (5 attempts). The upload itself is never retried. */
+const WRITE_BACKOFF_MS = [1000, 2000, 4000, 8000];
+const notReady = (e: unknown) => (e as { data?: { code?: string } })?.data?.code === "NOT_READY" || /NOT_READY/.test(String(e));
+
+/**
+ * The write that ends a claim (result or unclaim), tried 5 times. NOT_READY means an earlier attempt landed and only
+ * its answer was lost. If it still fails, exit: systemd restarts the service and reconcile turns the package
+ * outcome_unknown, rather than it sitting in `publishing` (uncounted by the pacing) forever.
+ */
+async function settle(deps: PublishDeps, id: string, step: string, write: () => Promise<void>): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await timed(deps.log, id, step, write);
+    } catch (e) {
+      if (notReady(e)) return;
+      const backoff = WRITE_BACKOFF_MS[attempt];
+      if (backoff === undefined) break;
+      await (deps.sleep ?? wait)(backoff);
+    }
+  }
+  deps.log(`publish package=${id} step=record ok=false ms=0`);
+  (deps.exit ?? ((code: number) => process.exit(code)))(1);
+}
 
 /** Calls setMixcloud only when the status changes, so a pass every 30 s does not write Convex every 30 s. */
 export function statusReporter(convex: Pick<PublisherConvex, "setMixcloud">): (s: MixcloudStatus) => Promise<void> {
@@ -133,7 +156,13 @@ const send = (deps: UploadDeps, id: string, accessToken: string, ready: Prepared
 export async function publishPass(deps: PublishDeps): Promise<void> {
   const conn = await connection(deps);
   if (!conn.ok) return deps.report(conn.status);
-  const { packages, publishedToday } = await deps.convex.queue();
+  const { packages: queued, publishedToday } = await deps.convex.queue();
+  // Hard Rule 9: demo packages never publish. Convex already filters them; the publisher checks again.
+  const packages = queued.filter((p) => {
+    if (p.draft.workspace === "real") return true;
+    deps.log(`publish package=${p.packageId} step=skip_demo ok=false ms=0`);
+    return false;
+  });
   // R6: never upload coverless, and never claim a package that cannot go up.
   const covered = packages.filter((p) => p.coverStorageId);
   const status: MixcloudStatus = covered.length < packages.length ? { ...conn.status, lastError: "no_cover" } : conn.status;
@@ -143,30 +172,39 @@ export async function publishPass(deps: PublishDeps): Promise<void> {
   const id = pkg.packageId;
 
   await timed(deps.log, id, "claim", () => deps.convex.claim(id));
-  const record = (r: PublishResult) => timed(deps.log, id, "result", () => deps.convex.result(id, r));
-  const ready = await prepare(deps, pkg, pkg.coverStorageId);
-  if ("error" in ready) return record({ status: "failed", error: ready.error });
-
-  let out: UploadOutcome = await send(deps, id, conn.accessToken, ready);
-  if (out.kind === "rate_limited") {
-    // A rate limit proves Mixcloud did not take the show: wait as asked, then the one and only retry.
-    await (deps.sleep ?? wait)(out.retryAfterSec * 1000);
+  // From here on every path ends in one settled write (result or unclaim), whatever throws.
+  let sent = false;
+  let out: UploadOutcome;
+  try {
+    const ready = await prepare(deps, pkg, pkg.coverStorageId);
+    if ("error" in ready) return await settle(deps, id, "result", () => deps.convex.result(id, { status: "failed", error: ready.error }));
+    sent = true;
     out = await send(deps, id, conn.accessToken, ready);
-    if (out.kind === "rate_limited") out = { kind: "failed", code: "rate_limited" };
+    if (out.kind === "rate_limited") {
+      // A rate limit proves Mixcloud did not take the show: wait as asked, then the one and only retry.
+      await (deps.sleep ?? wait)(out.retryAfterSec * 1000);
+      out = await send(deps, id, conn.accessToken, ready);
+      if (out.kind === "rate_limited") out = { kind: "failed", code: "rate_limited" };
+    }
+  } catch {
+    // Before the request: nothing was sent. After it started: the show may be up, so never retried.
+    out = sent ? { kind: "unknown" } : { kind: "failed", code: "internal_error" };
   }
 
   if (out.kind === "invalid_token") {
     // Mixcloud checks the key before it takes audio, so nothing was posted: remember this connection (as a hash) so
     // it is never tried again, put the package back in the queue, say so once. The alert goes before the Convex
-    // calls, so Tarik hears even if Convex is down too.
-    await deps.state.update((s) => ({ ...s, rejectedToken: conn.rejectKey }));
-    await timed(deps.log, id, "alert", () => deps.alert(RECONNECT_ALERT), (sent) => sent).catch(() => false);
-    await timed(deps.log, id, "unclaim", () => deps.convex.unclaim(id));
+    // calls, so Tarik hears even if Convex is down too. Failing to save the hash costs one retry after a restart.
+    await deps.state.update((s) => ({ ...s, rejectedToken: conn.rejectKey })).catch(() => deps.log(`publish package=${id} step=state ok=false ms=0`));
+    await timed(deps.log, id, "alert", () => deps.alert(RECONNECT_ALERT), (ok) => ok).catch(() => false);
+    await settle(deps, id, "unclaim", () => deps.convex.unclaim(id));
     return deps.report({ ...conn.status, state: "needs_reconnect", lastError: "invalid_token" });
   }
-  if (out.kind === "succeeded") await record({ status: "succeeded", url: out.url });
-  else if (out.kind === "failed") await record({ status: "failed", error: out.code });
-  else await record({ status: "outcome_unknown" }); // never retried (Review Focus 1)
+  const result: PublishResult =
+    out.kind === "succeeded" ? { status: "succeeded", url: out.url }
+    : out.kind === "failed" ? { status: "failed", error: out.code }
+    : { status: "outcome_unknown" }; // never retried (Review Focus 1)
+  await settle(deps, id, "result", () => deps.convex.result(id, result));
   await deps.report(out.kind === "failed" && out.code === "rate_limited" ? { ...status, lastError: "rate_limited" } : status);
 }
 
@@ -178,6 +216,7 @@ export async function publishPass(deps: PublishDeps): Promise<void> {
 export async function unlistedTest(deps: UploadDeps & Pick<PublishDeps, "tokenFile">, packageId: string): Promise<string> {
   const pkg = (await deps.convex.queue()).packages.find((p) => p.packageId === packageId);
   if (!pkg) return "not_in_queue";
+  if (pkg.draft.workspace !== "real") return "demo_cannot_publish"; // Hard Rule 9: this path never meets the gate
   if (!pkg.coverStorageId) return "no_cover";
   const t = await readTokenFile(deps.tokenFile);
   if (t.kind !== "ok") return t.kind === "missing" ? "no_token" : "invalid_token_file";

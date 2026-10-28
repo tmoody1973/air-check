@@ -28,12 +28,14 @@ async function setup(opts: { upload?: NonNullable<Parameters<typeof fakeServer>[
   const logs: string[] = [];
   const alerts: string[] = [];
   const sleeps: number[] = [];
+  const exits: number[] = [];
   const deps = async (): Promise<PublishDeps> => ({
     convex: fake.convex, log: (l) => logs.push(l), tokenFile: ws.tokenFile, preparedDir: ws.preparedDir,
     state: await openState(ws.stateFile), report: statusReporter(fake.convex),
     alert: async (t) => (alerts.push(t), true), uploadUrl: server!.uploadUrl, sleep: async (ms) => void sleeps.push(ms),
+    exit: (code) => void exits.push(code),
   });
-  return { ws, items, fake, logs, alerts, sleeps, deps, srv: server };
+  return { ws, items, fake, logs, alerts, sleeps, exits, deps, srv: server };
 }
 const results = (calls: Array<[string, ...unknown[]]>) => calls.filter((c) => c[0] === "result").map((c) => c[2]);
 const statuses = (calls: Array<[string, ...unknown[]]>) => calls.filter((c) => c[0] === "setMixcloud").map((c) => c[1]);
@@ -240,6 +242,107 @@ describe("publishPass: Mixcloud's answers (R23)", () => {
   });
 });
 
+describe("Hard Rule 9: the publisher re-checks the workspace", () => {
+  test("a demo package in the queue is skipped (logged skip_demo), never claimed; the real one goes up", async () => {
+    const s = await setup({ items: 2 });
+    s.items[0]!.draft = { ...s.items[0]!.draft, workspace: "demo" }; // the older one, so it would be picked first
+    await publishPass(await s.deps());
+    expect(s.fake.calls.filter((c) => c[0] === "claim")).toEqual([["claim", s.items[1]!.packageId]]);
+    expect(s.logs).toContain(`publish package=${s.items[0]!.packageId} step=skip_demo ok=false ms=0`);
+    expect(s.srv.uploadRequests()).toBe(1);
+  });
+
+  test("only a demo package: nothing claimed, nothing uploaded", async () => {
+    const s = await setup();
+    s.items[0]!.draft = { ...s.items[0]!.draft, workspace: "demo" };
+    await publishPass(await s.deps());
+    expect(s.fake.calls.filter((c) => c[0] === "claim")).toEqual([]);
+    expect(s.srv.uploadRequests()).toBe(0);
+  });
+});
+
+describe("after the claim, a package never stays publishing", () => {
+  const failing = (fn: (...a: never[]) => Promise<void>, times: number, error = "network timeout") => {
+    let left = times;
+    return async (...a: never[]) => {
+      if (left-- > 0) throw new Error(error);
+      return fn(...a);
+    };
+  };
+
+  test("result fails once after a 200: retried after 1 s, succeeded recorded with the URL, no second upload", async () => {
+    const s = await setup();
+    s.fake.convex.result = failing(s.fake.convex.result as never, 1);
+    await publishPass(await s.deps());
+    expect(s.srv.uploadRequests()).toBe(1);
+    expect(s.sleeps).toEqual([1000]);
+    expect(results(s.fake.calls)).toEqual([{ status: "succeeded", url: "https://www.mixcloud.com/rhythmlab/rhythm-lab-radio-10-2-26/" }]);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("succeeded");
+    expect(s.exits).toEqual([]);
+  });
+
+  test("result fails 5 times: step=record ok=false and the process exits non-zero; no second upload", async () => {
+    const s = await setup();
+    s.fake.convex.result = failing(s.fake.convex.result as never, 99);
+    const deps = await s.deps();
+    await publishPass(deps);
+    expect(s.sleeps).toEqual([1000, 2000, 4000, 8000]);
+    expect(s.exits).toEqual([1]);
+    expect(s.logs).toContain(`publish package=${s.items[0]!.packageId} step=record ok=false ms=0`);
+    await publishPass(deps); // still publishing, so never queued again; the restart's reconcile settles it
+    expect(s.srv.uploadRequests()).toBe(1);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("publishing");
+  });
+
+  test("NOT_READY from result means an earlier attempt landed: done, no exit", async () => {
+    const s = await setup();
+    const real = s.fake.convex.result;
+    let first = true;
+    s.fake.convex.result = async (id, r) => {
+      await real(id, r); // the write lands, but the first answer is lost; the retry then gets NOT_READY
+      if (first) { first = false; throw new Error("answer lost"); }
+    };
+    await publishPass(await s.deps());
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("succeeded");
+    expect(s.sleeps).toEqual([1000]);
+    expect(s.exits).toEqual([]);
+  });
+
+  test("unclaim throws once: retried, and the package is back to approved", async () => {
+    const s = await setup({ upload: [recordUpload(401, { error: { type: "OAuthException" } })] });
+    s.fake.convex.unclaim = failing(s.fake.convex.unclaim as never, 1);
+    await publishPass(await s.deps());
+    expect(s.fake.calls.filter((c) => c[0] === "unclaim")).toHaveLength(1);
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+    expect(s.exits).toEqual([]);
+  });
+
+  test("saving the refused key fails: the package is still unclaimed", async () => {
+    const s = await setup({ upload: [recordUpload(401, { error: { type: "OAuthException" } })] });
+    const deps = await s.deps();
+    await publishPass({ ...deps, state: { get: deps.state.get, update: async () => { throw new Error("disk full"); } } });
+    expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+  });
+
+  test("an unexpected throw before the request is sent: failed internal_error, no upload", async () => {
+    const s = await setup();
+    s.items[0]!.draft = { ...s.items[0]!.draft, tracks: undefined as never };
+    await publishPass(await s.deps());
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(results(s.fake.calls)).toEqual([{ status: "failed", error: "internal_error" }]);
+  });
+
+  test("an unexpected throw after the request started: outcome_unknown, never retried", async () => {
+    const limited = recordUpload(403, { error: { type: "RateLimitException" } }, { "retry-after": "1" });
+    const s = await setup({ upload: [limited, okUpload] });
+    const deps = await s.deps();
+    await publishPass({ ...deps, sleep: async () => { throw new Error("unexpected"); } });
+    await publishPass(deps);
+    expect(s.srv.uploadRequests()).toBe(1);
+    expect(results(s.fake.calls)).toEqual([{ status: "outcome_unknown" }]);
+  });
+});
+
 describe("pacing and restarts", () => {
   test("the 4th approval in a Chicago day is not uploaded", async () => {
     const s = await setup({ publishedToday: 3 });
@@ -318,6 +421,14 @@ describe("--unlisted-test (R8)", () => {
     expect(s.srv.uploads()[0]!.form!.get("unlisted")).toBe("1");
     expect(s.fake.names()).toEqual(["queue", "coverUrl"]);
     expect(s.fake.status.get(s.items[0]!.packageId)).toBe("approved");
+  });
+
+  test("Hard Rule 9: a demo package is refused, nothing uploaded", async () => {
+    const s = await setup();
+    s.items[0]!.draft = { ...s.items[0]!.draft, workspace: "demo" };
+    expect(await unlistedTest(await s.deps(), s.items[0]!.packageId)).toBe("demo_cannot_publish");
+    expect(s.srv.uploadRequests()).toBe(0);
+    expect(s.fake.names()).toEqual(["queue"]);
   });
 
   test("refuses an id that is not in the approved queue", async () => {
