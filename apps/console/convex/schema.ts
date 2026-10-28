@@ -46,6 +46,23 @@ export default defineSchema({
   })
     .index("by_workspace_at", ["workspace", "at"])
     .index("by_workspace_key", ["workspace", "key"]),
+  // Plan 5c Task 4: a new description for a show already on Mixcloud. At most one open (proposed, approved, pushing)
+  // per package; the package row itself never changes. `attempts` counts pushes that ended without an answer.
+  descriptionUpdates: defineTable({
+    packageId: v.string(),
+    description: v.string(),
+    descriptionSources: v.optional(v.array(v.object({ claim: v.string(), source: v.string() }))),
+    status: v.union(v.literal("proposed"), v.literal("approved"), v.literal("pushing"), v.literal("pushed"), v.literal("failed")),
+    proposedBy: v.union(v.literal("agent"), v.literal("human")),
+    approvedBy: v.optional(v.string()),
+    approvedAt: v.optional(v.string()),
+    fingerprint: v.string(),
+    attempts: v.number(),
+    error: v.optional(v.string()),
+    pushedAt: v.optional(v.string()),
+  })
+    .index("by_packageId", ["packageId"])
+    .index("by_status", ["status"]),
   // Why a show's audio is not ready yet. The media service replaces the whole set on every scan (media.waiting).
   audioIssues: defineTable({ showDate: v.string(), reason: v.string(), updatedAt: v.number() }),
   // One row (real workspace). Hard Rule 2: no credential here; the Mixcloud token lives only in the publisher's token file.

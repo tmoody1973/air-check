@@ -23,6 +23,10 @@ Environment=XDG_RUNTIME_DIR=/run/user/1001
 # lands in phase Error. The watchdog alerts if Hermes is really down.
 ExecStart=-/home/user/.local/bin/nemohermes airc start
 ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes airc recover && exit 0; sleep 15; done; echo "aircheck-hermes: Hermes not healthy after 5 min; watchdog will alert"; exit 1'
+# After a restart Hermes comes back with its MCP registrations unwired ("adapter mismatch", 2026-10-28):
+# the tools exist but the agent cannot see package_submit or Crate. Re-wire them; harmless when already wired.
+# `timeout 120` so a hung re-wire cannot eat the unit's start budget.
+ExecStart=-/usr/bin/timeout 120 /home/user/.local/bin/nemohermes airc mcp restart
 # The judges' demo sandbox (aircdemo) has its own unit, aircheck-hermes-demo.service, so a slow
 # or broken demo can never time this unit out and stop the real sandbox.
 # At shutdown, stop the sandbox through OpenShell while the gateway (user@1001)

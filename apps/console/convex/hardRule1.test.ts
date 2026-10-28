@@ -32,13 +32,17 @@ test("the public writes are exactly the allowlist", async () => {
       "packages.setCover", "packages.coverUploadUrl",
       // I2: a signed-in real human settles a finished upload (reopen for review, or confirm it is on Mixcloud).
       "packages.reopen", "packages.confirmPosted",
+      // Plan 5c: a signed-in real human edits the description before approval (re-fingerprints; never approves).
+      "packages.editDescription",
+      // Plan 5c Task 4: a live show's description. A signed-in human proposes and approves; the publisher claims and records.
+      "descriptionUpdates.propose", "descriptionUpdates.approve", "descriptionUpdates.claim", "descriptionUpdates.record",
       "media.attached", "media.waiting",
       "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud", "publisher.unclaim",
       "mixcloud.connected", "mixcloud.disconnected",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
-    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
+    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
   );
 });
 
@@ -51,7 +55,7 @@ const src = (name: string) => readFileSync(new URL(`./${name}.ts`, import.meta.u
 test("run, chat and relay code never reach packages.decide or the publish functions", () => {
   for (const name of RUN_FILES) {
     const text = src(name);
-    for (const banned of ["packages.decide", "claimForPublish", "recordResult", "attachAudio", "internal.packages", "api.packages", "gateFor", "convexPackageStore", "ApprovalGate"]) {
+    for (const banned of ["packages.decide", "claimForPublish", "recordResult", "attachAudio", "internal.packages", "api.packages", "gateFor", "convexPackageStore", "ApprovalGate", "descriptionUpdates"]) {
       expect(text, `${name}.ts mentions ${banned}`).not.toContain(banned);
     }
     expect(text, `${name}.ts imports packages`).not.toMatch(/from "\.\/packages/);
@@ -77,20 +81,96 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP route is POST /agent/packages", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method])).toEqual([["/agent/packages", "POST"]]);
+test("the only HTTP routes are the agent's submit, revise and read-only get", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"]]);
 });
 
-test("the agent route reaches only internal.packages.submit", () => {
+test("the agent routes reach only internal.packages.submit, internal.packages.revise and internal.packages.agentGet", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
-    expect([...refs].filter((r) => r !== "internal.packages.submit")).toEqual([]);
+    expect([...refs].filter((r) => !allowed.includes(r))).toEqual([]);
   }
-  expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain("internal.packages.submit");
+  for (const ref of allowed) expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain(ref);
 });
 
-test("the agent route files import only what they should and make one ctx.run call", () => {
+// Plan 5c: the agent's revise reaches the gate only through revise (which never approves), and only for a package in
+// the token's own workspace; the human edit checks the signed-in actor and workspace before the gate.
+const fnBody = (text: string, decl: string) => {
+  const body = text.slice(text.indexOf(decl));
+  return body.slice(0, body.indexOf("\n});"));
+};
+
+test("packages.revise (the agent's) calls only gateFor(ctx).revise, after the workspace check", () => {
+  const fn = fnBody(src("packages"), "export const revise = internalMutation(");
+  expect([...fn.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1])).toEqual(["revise"]);
+  const workspaceCheck = fn.indexOf("cur.draft.workspace !== workspace");
+  expect(workspaceCheck).toBeGreaterThan(0);
+  expect(workspaceCheck).toBeLessThan(fn.indexOf("gateFor(ctx).revise("));
+  expect(fn).not.toMatch(/\bdecide\b|decidedBy|"approved"/);
+});
+
+test("packages.revise proposes a live show's update only as the agent, and only after the workspace check", () => {
+  const fn = fnBody(src("packages"), "export const revise = internalMutation(");
+  expect([...fn.matchAll(/proposeUpdate\(([^)]*)\)/g)].map((m) => m[1])).toEqual([`ctx, doc!, description, descriptionSources ?? [], "agent"`]);
+  expect(fn.indexOf("cur.draft.workspace !== workspace")).toBeLessThan(fn.indexOf("proposeUpdate("));
+});
+
+// Plan 5c Task 4: who can move a description update where. Source pins on descriptionUpdates.ts.
+test("descriptionUpdates: proposals are only ever inserted as proposed; only approve makes one approved, after the human and fingerprint checks", () => {
+  const text = src("descriptionUpdates");
+  expect([...text.matchAll(/\.insert\(\s*"(\w+)"/g)].map((m) => m[1])).toEqual(["descriptionUpdates"]);
+  expect(text.match(/\.insert\(/g)).toHaveLength(1);
+  expect(fnBody(text, "export async function proposeUpdate(")).toMatch(/status: "proposed"/);
+  // Every write that sets approved: approve (from proposed), or a push that ended without an answer (from pushing).
+  const approvedWrites = [...text.matchAll(/status: "approved"/g)].length;
+  expect(approvedWrites).toBe(3);
+  const approve = fnBody(text, "export const approve = mutation(");
+  const write = approve.indexOf(`status: "approved"`);
+  for (const check of [`actor?.kind !== "human"`, `workspaceOf(actor) !== "real"`, `u.status !== "proposed"`, "u.fingerprint !== fingerprint"]) {
+    expect(approve.indexOf(check), check).toBeGreaterThan(0);
+    expect(approve.indexOf(check), check).toBeLessThan(write);
+  }
+  const record = fnBody(text, "export const record = mutation(");
+  expect(record.indexOf(`u?.status !== "pushing"`)).toBeGreaterThan(0);
+  expect(record.indexOf(`u?.status !== "pushing"`)).toBeLessThan(record.indexOf(`status: "approved"`));
+  expect(fnBody(text, "async function retryLater(")).toMatch(/status: "approved"/);
+  expect(text.match(/retryLater\(ctx, u\b/g)).toHaveLength(2); // record (from pushing) and requeueStuckUpdates (by_status pushing)
+  // The publisher's functions check its token first, and claim takes only approved rows.
+  for (const name of ["claim", "record"]) expect(fnBody(text, `export const ${name} = mutation(`)).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requirePublisher\(token\);/);
+  const claim = fnBody(text, "export const claim = mutation(");
+  expect(claim).toMatch(/withIndex\("by_status", \(q\) => q\.eq\("status", "approved"\)\)\.first\(\)/);
+  expect([...claim.matchAll(/status: "(\w+)"/g)].map((m) => m[1]).sort()).toEqual(["failed", "pushing"]);
+  // The update path never touches the package row (R10) or the gate.
+  for (const banned of ["gateFor", "ApprovalGate", "convexPackageStore", "compareAndSwap", `patch(pkg`, `"packages", `]) expect(text, banned).not.toContain(banned);
+});
+
+test("the publisher claims only approved updates: every other status is never handed out", async () => {
+  vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
+  const t = convexTest(schema, modules);
+  const draft = goldenDraft({ audio: { hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64) } });
+  await t.run(async (ctx) => {
+    await ctx.db.insert("packages", { packageId: draft.id, workspace: "real", status: "succeeded", draft, result: { url: "https://www.mixcloud.com/rhythmlab/x/" } });
+    for (const status of ["proposed", "pushed", "failed"] as const)
+      await ctx.db.insert("descriptionUpdates", { packageId: draft.id, description: status, status, proposedBy: "agent", fingerprint: "f", attempts: 0 });
+  });
+  expect(await t.mutation(api.descriptionUpdates.claim, { token: "p".repeat(48) })).toBeNull();
+  expect((await t.run((ctx) => ctx.db.query("descriptionUpdates").collect())).map((u) => u.status).sort()).toEqual(["failed", "proposed", "pushed"]);
+});
+
+test("packages.editDescription checks the signed-in actor and the workspace before the gate", () => {
+  const fn = fnBody(src("packages"), "export const editDescription = mutation(");
+  const gate = fn.indexOf("gateFor(ctx).editDescription(");
+  expect(gate).toBeGreaterThan(0);
+  expect([...fn.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1])).toEqual(["editDescription"]);
+  for (const check of ["await staffOn(ctx, packageId)", `workspaceOf(actor) !== "real"`]) {
+    expect(fn.indexOf(check), check).toBeGreaterThan(0);
+    expect(fn.indexOf(check), check).toBeLessThan(gate);
+  }
+});
+
+test("the agent route files import only what they should and make one ctx.run call per route", () => {
   const read = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
   const httpSrc = read("./http.ts");
   const rel = [...httpSrc.matchAll(/from "(\.[^"]*)"/g)].map((m) => m[1]).sort();
@@ -98,12 +178,30 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery"]);
+});
+
+// The agent reads a package before it revises one. Read-only: an internal query (Convex gives it no writer), and its
+// source never writes, never reaches the gate, and never returns the cover, audio, receipt URL or who decided.
+test("packages.agentGet is a read-only internal query that returns only the rewrite fields", async () => {
+  const mod = (await import("./packages")) as unknown as Record<string, { isQuery?: boolean; isInternal?: boolean }>;
+  expect(mod.agentGet?.isQuery && mod.agentGet.isInternal).toBe(true);
+  expect(src("packages")).toContain("export const agentGet = internalQuery(");
+  const fn = fnBody(src("packages"), "export const agentGet = internalQuery(");
+  expect(fn).not.toMatch(/\b(?:insert|patch|replace|delete|gateFor|proposeUpdate|runMutation|scheduler)\b/);
+  expect(fn).not.toMatch(/coverStorageId|audio|fingerprint|decidedBy|result/);
+  const route = fnBody(readFileSync(new URL("./http.ts", import.meta.url), "utf8"), "const getPackage = httpAction(");
+  expect(route.match(/ctx\.\w+/g)).toEqual(["ctx.runQuery"]);
 });
 
 // Plan 5: the media and publisher services. Neither can decide; the publisher reaches packages only through the
 // gate's claimForPublish and recordResult (and reads them); Mixcloud status code never touches packages.
 const SERVICE_FILES = ["media", "publisher", "mixcloud"];
+
+test("media and mixcloud code never touch description updates; publisher only requeues stuck ones", () => {
+  for (const name of ["media", "mixcloud"]) expect(src(name), name).not.toContain("descriptionUpdates");
+  expect([...src("publisher").matchAll(/\b(requeueStuckUpdates|proposeUpdate|descriptionUpdates)\b/g)].map((m) => m[1]).sort()).toEqual(["descriptionUpdates", "requeueStuckUpdates", "requeueStuckUpdates"]);
+});
 
 test("media, publisher and mixcloud code never call decide", () => {
   for (const name of SERVICE_FILES) {
@@ -200,6 +298,7 @@ test("the relay's and the agent's tokens are refused by every media and publishe
       t.mutation(api.publisher.unclaim, { token, packageId: id }),
       t.query(api.publisher.awaitingReview, { token }),
       t.query(api.media.statuses, { token, packageIds: [id] }),
+      t.mutation(api.descriptionUpdates.claim, { token }),
     ];
     for (const call of calls) await expect(call).rejects.toThrow(/UNAUTHORIZED/);
   }

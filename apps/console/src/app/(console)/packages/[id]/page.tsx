@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
-import { PackageDecision, type CoverChangeFn, type DecideFn, type SettleFns } from "@/components/PackageDecision";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type SettleFns, type UpdateFns } from "@/components/PackageDecision";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { uploadCover } from "@/lib/cover";
 import { useChicagoDayKey } from "@/lib/date";
@@ -24,6 +24,10 @@ export default function PackagePage() {
   const setCover = useMutation(api.packages.setCover);
   const reopenMutation = useMutation(api.packages.reopen);
   const confirmMutation = useMutation(api.packages.confirmPosted);
+  const editDescriptionMutation = useMutation(api.packages.editDescription);
+  const updateView = useQuery(api.descriptionUpdates.forPackage, { packageId: id });
+  const proposeMutation = useMutation(api.descriptionUpdates.propose);
+  const approveUpdateMutation = useMutation(api.descriptionUpdates.approve);
 
   // The fingerprint is the one the host reviewed (pinned in PackageDecision), not the live one.
   const decide: DecideFn = async (decision, fingerprint) => {
@@ -42,6 +46,15 @@ export default function PackagePage() {
     confirmPosted: (url) => confirmMutation({ packageId: id, url }),
   };
 
+  // Plan 5c: the host rewrites the description before approving. Convex refuses anyone but a signed-in real human.
+  const editDescription: DescriptionSaveFn = (description) => editDescriptionMutation({ packageId: id, description });
+
+  // Plan 5c Task 4: a show already on Mixcloud. Convex lets only a signed-in real human propose or approve.
+  const updateFns: UpdateFns = {
+    propose: (description) => proposeMutation({ packageId: id, description }),
+    approve: (updateId, fingerprint) => approveUpdateMutation({ id: updateId as Id<"descriptionUpdates">, fingerprint }),
+  };
+
   return (
     <Shell title="Package">
       {record === undefined ? (
@@ -56,6 +69,8 @@ export default function PackagePage() {
           publish={publish && { ...publish, today }}
           mixcloudAccount={mixcloud?.account}
           settle={workspace === "real" ? settle : undefined}
+          editDescription={workspace === "real" ? editDescription : undefined}
+          descriptionUpdate={workspace === "real" ? { view: updateView, fns: updateFns } : undefined}
         />
       )}
     </Shell>

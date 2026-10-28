@@ -27,7 +27,21 @@ export async function fingerprint(p: PackageDraft): Promise<string> {
     picture: p.picture,
     // Undefined keys are dropped, so a draft with no cover hashes exactly as it did before covers existed.
     coverStorageId: p.coverStorageId,
+    // Same for sources: only present when the draft carries them.
+    descriptionSources: p.descriptionSources,
   };
+  return sha256Hex(content);
+}
+
+/**
+ * Plan 5c (R4): the hash a human approves a description update by: the text plus its private sources, exactly as
+ * shown on the package page. A change to either needs a new Approve.
+ */
+export function updateFingerprint(description: string, descriptionSources?: { claim: string; source: string }[]): Promise<string> {
+  return sha256Hex({ description, descriptionSources });
+}
+
+async function sha256Hex(content: unknown): Promise<string> {
   // Web Crypto, not node:crypto: this also runs inside Convex functions
   const bytes = new TextEncoder().encode(JSON.stringify(canonical(content)));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);

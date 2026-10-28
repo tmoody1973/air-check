@@ -1,11 +1,12 @@
 import { guardArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { connectConvex } from "./convex.js";
-import { publishPass, startup, statusReporter, unlistedTest, type PublishDeps } from "./publish.js";
+import { fullPass, startup, statusReporter, unlistedTest, type PublishDeps } from "./publish.js";
 import { openState } from "./state.js";
 import { sendReadyCards, telegramSender } from "./telegram.js";
 
-// Hard Rule 8: journald (stdout) only, and only `publish package=... step=... ok=... ms=...` lines plus the start line.
+// Hard Rule 8: journald (stdout) only, and only `publish package=... step=... ok=... ms=...` lines (with `update=...`
+// first for a description update) plus the start line.
 const log = (line: string) => console.log(line);
 const CARDS_MS = 60_000;
 
@@ -48,7 +49,8 @@ async function main(): Promise<void> {
   // R12: reconcile exactly once, before the loop. If Convex is unreachable, exit and let systemd restart us.
   await startup(deps);
   const timers = [
-    every(config.pollMs, "pass", () => publishPass(deps)),
+    // One upload and one description update at most per pass, never two requests at once.
+    every(config.pollMs, "pass", () => fullPass(deps)),
     every(CARDS_MS, "cards", () => sendReadyCards({ convex, state, appUrl: config.appUrl, send, log })),
   ];
   // Stopping mid-upload leaves the package `publishing`; the next start reconciles it to outcome_unknown.

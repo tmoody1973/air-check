@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { type AgentPackageInput, buildPackageDraft } from "../src/index";
+import { type AgentPackageInput, buildPackageDraft, checkDescriptionChange } from "../src/index";
 import { goldenDescription, goldenPackageTitles, leadsOf, readFixture } from "./helpers/fixtures";
 import { formatTrack } from "../src/index";
 import { goldenDraft, goldenTitles, goldenTracks } from "./helpers/goldens";
@@ -107,5 +107,53 @@ describe("buildPackageDraft", () => {
     const r = buildPackageDraft(input({ showDate: "2026-02-30" }), opts);
     expect(r).toEqual({ ok: false, problems: ["showDate is not a real date: 2026-02-30"] });
     expect(buildPackageDraft(input({ showDate: "2026-13-01" }), opts).ok).toBe(false);
+  });
+
+  describe("descriptionSources", () => {
+    const good = { claim: "Antibalas is a Brooklyn Afrobeat band", source: "MusicBrainz: Antibalas" };
+    const build = (descriptionSources: unknown) =>
+      buildPackageDraft(input({ tracklistText: reconciledText(), descriptionSources: descriptionSources as AgentPackageInput["descriptionSources"] }), opts);
+
+    test("accepted sources land on the draft", () => {
+      const r = build([good]);
+      expect(r.ok && r.draft.descriptionSources).toEqual([good]);
+    });
+    test("absent means no key on the draft", () => {
+      const r = buildPackageDraft(input({ tracklistText: reconciledText() }), opts);
+      expect(r.ok && "descriptionSources" in r.draft).toBe(false);
+    });
+    test.each([
+      ["empty claim", [{ ...good, claim: " " }]],
+      ["empty source", [{ ...good, source: "" }]],
+      ["claim over 300", [{ ...good, claim: "x".repeat(301) }]],
+      ["source over 300", [{ ...good, source: "x".repeat(301) }]],
+      ["13 entries", Array.from({ length: 13 }, () => good)],
+      ["not an array", "nope"],
+      ["wrong entry shape", [{ claim: 1, source: 2 }]],
+    ])("rejects %s with a plain message", (_n, v) => {
+      const r = build(v);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.problems.some((p) => p.startsWith("descriptionSources"))).toBe(true);
+    });
+    test("12 entries of exactly 300 characters are fine", () => {
+      const max = { claim: "c".repeat(300), source: "s".repeat(300) };
+      expect(build(Array.from({ length: 12 }, () => max)).ok).toBe(true);
+    });
+  });
+});
+
+// Final-review fix: a blank description is a problem on every path: submit (buildPackageDraft) and the edit, revise and
+// propose paths (all through checkDescriptionChange).
+describe("an empty description", () => {
+  test.each(["", "   ", "\n\t "])("submit refuses %j", (description) => {
+    const r = buildPackageDraft(input({ tracklistText: reconciledText(), description }), opts);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problems).toContain("description is empty");
+  });
+  test.each(["", "   ", "\n\t "])("edit, revise and propose refuse %j", (description) => {
+    expect(checkDescriptionChange(goldenDraft(), description, undefined, [])).toContain("description is empty");
+  });
+  test("a real description passes", () => {
+    expect(checkDescriptionChange(goldenDraft(), "Warm, patient soul.", undefined, [])).toEqual([]);
   });
 });

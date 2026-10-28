@@ -19,7 +19,7 @@ RestartSec=5s
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/user/aircheck-audio
+ReadWritePaths=-/home/user/aircheck-audio
 PrivateTmp=yes
 
 [Install]

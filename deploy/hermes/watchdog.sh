@@ -19,6 +19,11 @@ PROBES=(
   "Demo Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8643/health"
   "Crate bridge|curl -sf -m 5 -o /dev/null --cacert ${HOME}/.aircheck/ca/ca.crt https://10.104.0.41:8443/healthz"
   "Relay|systemctl is-active --quiet aircheck-relay"
+  "Media|systemctl is-active --quiet aircheck-media"
+  "Publisher|systemctl is-active --quiet aircheck-publisher"
+  # One probe per sandbox so an alert names which agent lost its tools. Any JSON spacing.
+  "Agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes airc mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
+  "Demo agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes aircdemo mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
 )
 
 down=()

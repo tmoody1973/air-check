@@ -1,7 +1,12 @@
-import { GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
+import {
+  checkDescriptionChange, formatTrack, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
+  type Track,
+} from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { privateTerms } from "./agentSubmit";
+import { isOpen, liveOf, proposeUpdate, updatesOf } from "./descriptionUpdates";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
@@ -181,6 +186,19 @@ export const confirmPosted = mutation({
   },
 });
 
+/**
+ * Plan 5c: a signed-in real human rewrites the public description while the package awaits review. The sources stay
+ * as the agent gave them; the package re-fingerprints, so Approve needs the new text reviewed (Hard Rule 1).
+ */
+export const editDescription = mutation({
+  args: { packageId: v.string(), description: v.string() },
+  handler: async (ctx, { packageId, description }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    return asResult(() => gateFor(ctx).editDescription(packageId, description, actor, privateTerms()));
+  },
+});
+
 /** A one-time Convex storage upload URL for a cover image. A signed-in real human only. */
 export const coverUploadUrl = mutation({
   args: {},
@@ -201,6 +219,82 @@ export const submit = internalMutation({
       if (e instanceof GateError) throw new ConvexError({ code: e.code, message: e.message });
       throw e;
     }
+  },
+});
+
+/** Why the agent cannot revise a package now, in plain words (R3). A published one gets a proposed update instead. */
+const NOT_REVISABLE: Record<Exclude<PackageStatus, "awaiting_review" | "succeeded">, string> = {
+  preparing_audio: "the MP3 is still being prepared; revise it once the package is waiting for review",
+  approved: "already approved; it can no longer change",
+  publishing: "being published now; it can no longer change",
+  skipped: "skipped by a person; it can no longer change",
+  failed: "the upload failed; a person must reopen it for review first",
+  outcome_unknown: "the upload outcome is unknown; a person must check Mixcloud first",
+};
+
+export type ReviseResult =
+  | { ok: true; status: PackageStatus }
+  | { ok: true; status: "proposed"; updateId: string }
+  | { ok: false; code: "BAD_INPUT"; problems: string[] }
+  | { ok: false; code: "NOT_FOUND" | "NOT_READY" | "PACKAGE_CHANGED"; message: string };
+
+/**
+ * Internal (the agent's /agent/packages/revise): a new description and sources for a package awaiting review in the
+ * token's workspace. Checked like a submit, then the gate's revise with the record's own draft, so hour ids, the MP3,
+ * title and tracks are unchanged; it re-fingerprints and stays in review. On a package already on Mixcloud it proposes
+ * a description update instead (Task 4), which a signed-in human must approve before the publisher sends it.
+ */
+export const revise = internalMutation({
+  args: { workspace: v.union(v.literal("real"), v.literal("demo")), packageId: v.string(), description: v.string(), descriptionSources: v.optional(v.any()) },
+  handler: async (ctx, { workspace, packageId, description, descriptionSources }): Promise<ReviseResult> => {
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    const cur = doc && toRecord(doc);
+    // The other workspace's package answers exactly like a missing one, so a token cannot probe for ids.
+    if (!cur || cur.draft.workspace !== workspace) return { ok: false, code: "NOT_FOUND", message: "no such package" };
+    if (cur.status === "succeeded") {
+      const r = await proposeUpdate(ctx, doc!, description, descriptionSources ?? [], "agent");
+      if (r.ok) return { ok: true, status: "proposed", updateId: r.id };
+      return r.code === "BAD_INPUT" ? { ok: false, code: "BAD_INPUT", problems: r.message.split("; ") } : { ok: false, code: "NOT_READY", message: r.message };
+    }
+    if (cur.status !== "awaiting_review") return { ok: false, code: "NOT_READY", message: NOT_REVISABLE[cur.status] };
+    const problems = checkDescriptionChange(cur.draft, description, descriptionSources, privateTerms());
+    if (problems.length) return { ok: false, code: "BAD_INPUT", problems };
+    const sources = (descriptionSources as { claim: string; source: string }[] | undefined)?.map((e) => ({ claim: e.claim, source: e.source }));
+    try {
+      const next = await gateFor(ctx).revise(packageId, { ...cur.draft, description, descriptionSources: sources });
+      return { ok: true, status: next.status };
+    } catch (e) {
+      if (e instanceof GateError) return { ok: false, code: e.code === "PACKAGE_CHANGED" ? "PACKAGE_CHANGED" : "NOT_READY", message: e.message };
+      throw e;
+    }
+  },
+});
+
+/** Both hours in the package's own spellings, one formatTrack line each; parses back to the same tracks. */
+const tracklistText = (tracks: Track[]) =>
+  ([1, 2] as const).map((h) => [`Hour ${h}`, ...tracks.filter((t) => t.hour === h).map(formatTrack)].join("\n")).join("\n\n");
+
+/**
+ * Internal (the agent's /agent/packages/get): what the agent needs to rewrite a description, read-only, in its token's
+ * workspace only. For a show on Mixcloud the description is the live one (R10) and the open update's status is named.
+ * Only the listed fields leave: never the cover, the MP3 or hour ids, the receipt, the hash or who decided.
+ */
+export const agentGet = internalQuery({
+  args: { workspace: v.union(v.literal("real"), v.literal("demo")), packageId: v.string() },
+  handler: async (ctx, { workspace, packageId }) => {
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    const draft = doc && asDraft(doc.draft);
+    // The other workspace's package answers exactly like a missing one, so a token cannot probe for ids.
+    if (!doc || !draft || draft.workspace !== workspace) return null;
+    const updates = doc.status === "succeeded" ? await updatesOf(ctx, packageId) : [];
+    const live = doc.status === "succeeded" ? liveOf(doc, updates) : draft;
+    const open = updates.find(isOpen);
+    return {
+      packageId: doc.packageId, showDate: draft.showDate, status: doc.status, title: draft.title, tags: draft.tags,
+      tracklistText: tracklistText(draft.tracks), description: live.description,
+      ...(live.descriptionSources?.length && { descriptionSources: live.descriptionSources }),
+      ...(open && { openUpdate: open.status }),
+    };
   },
 });
 

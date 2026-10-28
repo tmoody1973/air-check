@@ -1,3 +1,4 @@
+import { checkDescriptionChange } from "./build";
 import { fingerprint } from "./fingerprint";
 import type { PackageDraft } from "./mixcloud";
 
@@ -65,6 +66,8 @@ export class GateError extends Error {
   constructor(
     readonly code: GateErrorCode,
     message: string,
+    /** BAD_INPUT from a description check: each problem as a plain sentence. */
+    readonly issues?: string[],
   ) {
     super(message);
     this.name = "GateError";
@@ -209,6 +212,28 @@ export class ApprovalGate {
       { draft, fingerprint: await fingerprint(draft) },
     );
     if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while setting the cover`);
+    return next;
+  }
+
+  /**
+   * A signed-in real human rewrites the public description while the package awaits review. It is checked like the
+   * agent's (`privateTerms` come from the server's config; core stays pure), keeps the draft's sources, and
+   * re-fingerprints, so Approve needs the new text reviewed. Never changes the status.
+   */
+  async editDescription(id: string, text: string, actor: Actor, privateTerms: string[]): Promise<PackageRecord> {
+    this.requireStaff(actor);
+    const cur = await this.load(id);
+    if (cur.status !== "awaiting_review") throw new GateError("NOT_READY", `the description of ${id} cannot change now`);
+    const issues = checkDescriptionChange(cur.draft, text, undefined, privateTerms);
+    if (issues.length) throw new GateError("BAD_INPUT", issues.join("; "), issues);
+    const draft = { ...cur.draft, description: text };
+    const next = await this.store.compareAndSwap(
+      id,
+      { status: "awaiting_review", fingerprint: cur.fingerprint },
+      { draft, fingerprint: await fingerprint(draft) },
+    );
+    if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while editing the description`);
+    await this.emit(id, "awaiting_review", "awaiting_review", actorName(actor));
     return next;
   }
 

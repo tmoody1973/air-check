@@ -19,6 +19,10 @@ Environment=XDG_RUNTIME_DIR=/run/user/1001
 # non-fatal and ExecStopPost still runs; the watchdog alerts if the demo Hermes is really down.
 ExecStart=-/home/user/.local/bin/nemohermes aircdemo start
 ExecStart=-/bin/bash -c 'for i in $(seq 1 20); do /home/user/.local/bin/nemohermes aircdemo recover && exit 0; sleep 15; done; echo "aircheck-hermes-demo: Demo Hermes not healthy after 5 min; watchdog will alert"; exit 1'
+# After a restart Hermes comes back with its MCP registrations unwired ("adapter mismatch", 2026-10-28):
+# the tools exist but the agent cannot see package_submit or Crate. Re-wire them; harmless when already wired.
+# `timeout 120` so a hung re-wire cannot eat the unit's start budget.
+ExecStart=-/usr/bin/timeout 120 /home/user/.local/bin/nemohermes aircdemo mcp restart
 # At shutdown, stop the sandbox through OpenShell while the gateway and Docker are still up,
 # or it lands in phase Error (docs/FRICTION_LOG.md, 2026-10-27). ExecStopPost runs even when
 # a shutdown interrupts the start loop or the start times out.

@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
@@ -150,5 +152,40 @@ describe("deploy files", () => {
     const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
     expect(doc).toMatch(/cat > [^\n']*\.wav\.part && mv [^\n']*\.wav\.part [^\n']*\.wav/);
     expect(doc).toMatch(/mkdir -p [^\n]*~\/aircheck-audio\/inbox/);
+  });
+
+  // The watchdog's PROBES array, loaded under `set -u` as the script does, with a stub nemohermes that prints
+  // `status` per sandbox. Returns each named probe's verdict.
+  const runProbes = (names: string[], status: Record<"airc" | "aircdemo", string>) => {
+    const home = mkdtempSync(join(tmpdir(), "watchdog-"));
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    const stub = join(home, ".local/bin/nemohermes");
+    writeFileSync(stub, `#!/bin/sh\ncase "$1" in aircdemo) cat <<'J'\n${status.aircdemo}\nJ\n;; *) cat <<'J'\n${status.airc}\nJ\n;; esac\n`);
+    chmodSync(stub, 0o755);
+    const probes = read("hermes/watchdog.sh").match(/^PROBES=\([\s\S]*?^\)$/m)![0];
+    const script = `set -u\n${probes}\nfor n in ${names.map((n) => `"${n}"`).join(" ")}; do for p in "\${PROBES[@]}"; do [[ "\${p%%|*}" == "$n" ]] || continue; bash -c "\${p#*|}" >/dev/null 2>&1 && echo UP || echo DOWN; done; done`;
+    return execFileSync("bash", ["-c", script], { env: { ...process.env, HOME: home }, encoding: "utf8" }).trim().split("\n");
+  };
+  const reg = (v: string) => `{"name": "aircheck", "adapter": {"registered": ${v}, "detail": "x"}}`;
+
+  it("the Agent tools probe tolerates JSON spacing and goes DOWN on registered false (VM, 2026-10-28)", () => {
+    const up = reg("true");
+    expect(runProbes(["Agent tools"], { airc: `{"adapter": {"registered": true}}`, aircdemo: up })).toEqual(["UP"]);
+    expect(runProbes(["Agent tools"], { airc: `{"adapter": {"registered":true}}`, aircdemo: up })).toEqual(["UP"]);
+    expect(runProbes(["Agent tools"], { airc: `{"adapter": {"registered": false, "detail": "mismatch"}}`, aircdemo: up })).toEqual(["DOWN"]);
+  });
+
+  it("the demo sandbox's tools have their own probe, so an alert names which sandbox", () => {
+    expect(runProbes(["Agent tools", "Demo agent tools"], { airc: reg("true"), aircdemo: reg("false") })).toEqual(["UP", "DOWN"]);
+    expect(runProbes(["Agent tools", "Demo agent tools"], { airc: reg("false"), aircdemo: reg("true") })).toEqual(["DOWN", "UP"]);
+  });
+
+  it("both hermes units re-wire their MCP tools after recover, each bounded by timeout 120", () => {
+    for (const [file, box] of [["hermes/aircheck-hermes.service", "airc"], ["hermes/aircheck-hermes-demo.service", "aircdemo"]] as const) {
+      const unit = read(file);
+      const rewire = `ExecStart=-/usr/bin/timeout 120 /home/user/.local/bin/nemohermes ${box} mcp restart`;
+      expect(unit.split("\n"), file).toContain(rewire);
+      expect(unit.indexOf(rewire), file).toBeGreaterThan(unit.indexOf(`nemohermes ${box} recover`));
+    }
   });
 });
