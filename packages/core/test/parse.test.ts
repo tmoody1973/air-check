@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatTrack, parseTracklist } from "../src/index";
+import { formatTrack, formatTracklist, parseTracklist } from "../src/index";
 import { readFixture } from "./helpers/fixtures";
 
 test("golden 10-2-26 parses to 15 + 16 with closing tracks", () => {
@@ -64,4 +64,14 @@ test("accepts hour marker variants", () => {
 test("a band name starting with # is a track, not a comment", () => {
   const p = parseTracklist('# a comment\nHOUR 1\n#1 Dads - "So Soldier"');
   expect(p.tracks.map((t) => t.artist)).toEqual(["#1 Dads"]);
+});
+
+test("formatTracklist writes both hours under Hour headings and parses back to the same tracks", () => {
+  const p = parseTracklist(readFixture("raw/10-2-26-drive-tracklist.txt"));
+  const text = formatTracklist(p.tracks);
+  expect(text.startsWith("Hour 1\n")).toBe(true);
+  expect(text).toContain("\n\nHour 2\n");
+  const back = parseTracklist(text);
+  expect(back.bad).toEqual([]);
+  expect(back.tracks.map((t) => [t.hour, t.artist, t.title, t.feat, t.closing])).toEqual(p.tracks.map((t) => [t.hour, t.artist, t.title, t.feat, t.closing]));
 });

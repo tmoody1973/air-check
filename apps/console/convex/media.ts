@@ -6,10 +6,10 @@ import { convexPackageStore } from "./packageStore";
 
 // The media service on the VM (joins the two hour WAVs into the MP3) is the only caller. Every function checks
 // MEDIA_TOKEN first, in constant time, and fails closed when it is unset or shorter than 32 characters.
-// One secret for both services would let either act as the other, so equal tokens refuse everything (M7).
+// One secret for two services would let either act as the other, so equal tokens refuse everything (M7, Plan 6).
 function requireMedia(token: string): void {
-  const { MEDIA_TOKEN, PUBLISHER_TOKEN } = process.env;
-  if (MEDIA_TOKEN === PUBLISHER_TOKEN || !sameToken(token, MEDIA_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
+  const { MEDIA_TOKEN, PUBLISHER_TOKEN, INGEST_TOKEN } = process.env;
+  if (MEDIA_TOKEN === PUBLISHER_TOKEN || MEDIA_TOKEN === INGEST_TOKEN || !sameToken(token, MEDIA_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 /** Real packages waiting for their MP3. */

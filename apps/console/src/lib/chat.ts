@@ -9,6 +9,7 @@ const STEP_NAMES: readonly (readonly [string, string])[] = [
   ["package_submit", "Submitting the package"],
   ["package_revise", "Revising the description"],
   ["package_get", "Reading the package"],
+  ["episode_mark_rerun", "Marking a rerun"],
 ];
 
 export function stepName(tool: string): string {

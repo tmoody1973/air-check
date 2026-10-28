@@ -21,6 +21,7 @@ export function initialRun(runId: string): RunState {
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 const TOOL_TEXT: Record<string, string> = {
+  episode_mark_rerun: "Marked a rerun",
   package_get: "Read the package",
   package_revise: "Proposed a new description",
   package_submit: "Submitted the package",

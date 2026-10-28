@@ -1,6 +1,6 @@
 import { DESCRIPTION_SKILL_TEXT } from "@aircheck/core";
 import { describe, expect, it } from "vitest";
-import { packageGetTool, packageReviseTool, packageSubmitTool } from "../src/aircheckTools.js";
+import { episodeMarkRerunTool, packageGetTool, packageReviseTool, packageSubmitTool } from "../src/aircheckTools.js";
 
 const token = "t".repeat(40);
 const input = {
@@ -229,6 +229,66 @@ describe("package_get", () => {
       throw new Error("ECONNREFUSED");
     }) as unknown as typeof globalThis.fetch;
     const r = await packageGetTool({ siteUrl: "https://x.convex.site", token, fetch }).call({ packageId: "x" });
+    expect(r.isError).toBe(true);
+  });
+});
+
+// Plan 6 (R7/R9): "July 17 is a rerun of March 13" in Chat. It records a fact on the episode; it never approves anything.
+describe("episode_mark_rerun", () => {
+  const args = { showDate: "2026-07-17", rerunOf: "2026-03-13" };
+  const tool = (status: number, body: unknown) => {
+    const s = stub(status, body);
+    return { s, ...episodeMarkRerunTool({ siteUrl: "https://x.convex.site/", token, fetch: s.fetch }) };
+  };
+
+  it("takes the show date and the original's date, only on the person's word, and never mentions approve", () => {
+    const { tool: t } = tool(200, {});
+    expect(t.name).toBe("episode_mark_rerun");
+    expect(Object.keys(t.inputSchema.properties ?? {}).sort()).toEqual(["rerunOf", "showDate"]);
+    expect(t.inputSchema.required).toEqual(["showDate", "rerunOf"]);
+    expect(t.description).toMatch(/only when the person says so/i);
+    expect(t.description).not.toMatch(/approv/i);
+  });
+
+  it("sends only those fields with the bearer token to the rerun route", async () => {
+    const { s, call } = tool(200, args);
+    await call({ ...args, rerunSource: "episodes", status: "approved" });
+    expect(s.calls).toHaveLength(1);
+    expect(s.calls[0]!.url).toBe("https://x.convex.site/agent/episodes/rerun");
+    expect(new Headers(s.calls[0]!.init.headers).get("authorization")).toBe(`Bearer ${token}`);
+    expect(JSON.parse(s.calls[0]!.init.body as string)).toEqual(args);
+  });
+
+  it("200: says the week will not be drafted and can be undone on Episodes; never claims approval", async () => {
+    const r = await tool(200, args).call(args);
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).toContain("2026-07-17");
+    expect(textOf(r)).toContain("2026-03-13");
+    expect(textOf(r)).toMatch(/not be drafted/);
+    expect(textOf(r)).toMatch(/Episodes/);
+    expect(textOf(r)).not.toMatch(/approv/i);
+  });
+
+  it("400 lists the problems; 404 says no episodes here; 401/503 not configured without the token", async () => {
+    const bad = await tool(400, { problems: ["rerunOf must be an earlier show than showDate"] }).call(args);
+    expect(bad.isError).toBe(true);
+    expect(textOf(bad)).toContain("earlier show");
+    const missing = await tool(404, { error: "NOT_FOUND" }).call(args);
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toMatch(/no episodes/i);
+    for (const status of [401, 503]) {
+      const r = await tool(status, {}).call(args);
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/not configured/);
+      expect(textOf(r)).not.toContain(token);
+    }
+  });
+
+  it("network failure: an error result, not a throw", async () => {
+    const fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof globalThis.fetch;
+    const r = await episodeMarkRerunTool({ siteUrl: "https://x.convex.site", token, fetch }).call(args);
     expect(r.isError).toBe(true);
   });
 });

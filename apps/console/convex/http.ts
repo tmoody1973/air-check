@@ -74,8 +74,23 @@ const getPackage = httpAction(async (ctx, req) => {
   return pkg ? json(200, pkg) : json(404, { error: "NOT_FOUND" });
 });
 
+// Plan 6 (R7/R9): the agent records "<date> is a rerun of <date>", said in Chat. It stores a fact on the episode (that
+// week is not drafted or fetched; Tarik can undo it on Episodes) and cannot reach a package. Hard Rule 9: the demo
+// workspace has no episodes, so the demo token gets 404. The only function this route may call is
+// internal.episodes.agentMarkRerun.
+const markRerun = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const b = got.body as { showDate?: unknown; rerunOf?: unknown } | null;
+  if (typeof b?.showDate !== "string" || typeof b.rerunOf !== "string") return json(400, { problems: ["body must be showDate and rerunOf, both yyyy-mm-dd"] });
+  const r = await ctx.runMutation(internal.episodes.agentMarkRerun, { workspace: got.workspace, showDate: b.showDate, rerunOf: b.rerunOf });
+  if (r.ok) return json(200, { showDate: b.showDate, rerunOf: b.rerunOf });
+  return r.code === "NOT_FOUND" ? json(404, { error: "NOT_FOUND" }) : json(400, { problems: r.problems });
+});
+
 const http = httpRouter();
 http.route({ path: "/agent/packages", method: "POST", handler: submitPackage });
 http.route({ path: "/agent/packages/revise", method: "POST", handler: revisePackage });
 http.route({ path: "/agent/packages/get", method: "POST", handler: getPackage });
+http.route({ path: "/agent/episodes/rerun", method: "POST", handler: markRerun });
 export default http;

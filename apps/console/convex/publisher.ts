@@ -10,10 +10,10 @@ import { mixcloudStatusFields } from "./schema";
 // The publisher service on the VM is the only caller. Every function checks PUBLISHER_TOKEN first, in constant
 // time, and fails closed when it is unset or shorter than 32 characters.
 // Hard Rule 1: packages are read here, and changed only through the gate's claimForPublish, recordResult and unclaim.
-// Equal MEDIA_TOKEN and PUBLISHER_TOKEN would let either service act as the other: refuse everything (M7).
+// Equal MEDIA_TOKEN and PUBLISHER_TOKEN (or either equal to INGEST_TOKEN) would let one service act as another: refuse everything (M7).
 export function requirePublisher(token: string): void {
-  const { MEDIA_TOKEN, PUBLISHER_TOKEN } = process.env;
-  if (MEDIA_TOKEN === PUBLISHER_TOKEN || !sameToken(token, PUBLISHER_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
+  const { MEDIA_TOKEN, PUBLISHER_TOKEN, INGEST_TOKEN } = process.env;
+  if (MEDIA_TOKEN === PUBLISHER_TOKEN || PUBLISHER_TOKEN === INGEST_TOKEN || !sameToken(token, PUBLISHER_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 /**

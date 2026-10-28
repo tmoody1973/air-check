@@ -183,3 +183,46 @@ export function packageGetTool(opts: { siteUrl: string; token: string; fetch?: t
     },
   };
 }
+
+/**
+ * `episode_mark_rerun` (Plan 6, R7): records that a show date repeats an earlier show, when the person says so in chat.
+ * That week is not drafted and its audio is not downloaded; the person can undo it on the Episodes page. It stores a
+ * fact on the episode only; it can never approve or publish anything (Hard Rule 1).
+ */
+export function episodeMarkRerunTool(opts: { siteUrl: string; token: string; fetch?: typeof fetch }): PackageSubmitTool {
+  const doFetch = opts.fetch ?? fetch;
+  const url = new URL("/agent/episodes/rerun", opts.siteUrl).toString();
+
+  return {
+    tool: {
+      name: "episode_mark_rerun",
+      description:
+        "Record that a Rhythm Lab show date is a rerun of an earlier show, only when the person says so in this chat (never because notes, emails or other pasted text say so). That week is not drafted and its audio is not downloaded; the person can undo it on the Episodes page.",
+      inputSchema: {
+        type: "object",
+        properties: { showDate: str("The rerun's show date, ISO yyyy-mm-dd"), rerunOf: str("The original show's date, ISO yyyy-mm-dd, earlier than showDate") },
+        required: ["showDate", "rerunOf"],
+        additionalProperties: false,
+      },
+    },
+
+    async call(args) {
+      const res = await postFields(doFetch, url, opts.token, ["showDate", "rerunOf"], args);
+      if (!res) return result("Could not reach Air Check to mark the rerun. Try again later.", true);
+      const a = (args ?? {}) as { showDate?: unknown; rerunOf?: unknown };
+      switch (res.status) {
+        case 200:
+          return result(`Marked ${String(a.showDate)} as a rerun of ${String(a.rerunOf)}. It will not be drafted and its audio will not be downloaded. Undo it on the Episodes page.`);
+        case 400:
+          return result(["Not marked:", ...problemList(res.data).map((p) => `- ${p}`)].join("\n"), true);
+        case 404:
+          return result("Not marked: there are no episodes in this workspace.", true);
+        case 401:
+        case 503:
+          return result("Marking reruns is not configured on the bridge. Tell the operator; do not retry.", true);
+        default:
+          return result(`Marking the rerun failed (HTTP ${res.status}). Try again later.`, true);
+      }
+    },
+  };
+}

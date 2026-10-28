@@ -10,7 +10,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { packageGetTool, packageReviseTool, packageSubmitTool } from "./aircheckTools.js";
+import { episodeMarkRerunTool, packageGetTool, packageReviseTool, packageSubmitTool } from "./aircheckTools.js";
 import { bearerOk } from "./auth.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import { createCrateProxy } from "./crateProxy.js";
@@ -94,12 +94,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
   await transport.handleRequest(req, res, body);
 }
 
-/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit, package_revise, read-only package_get),
+/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit, package_revise, read-only package_get, episode_mark_rerun),
  * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   const crate = createCrateProxy(config.crate);
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
-    const tools = [packageSubmitTool, packageReviseTool, packageGetTool].map((make) => make({ siteUrl: config.convexSiteUrl, token: submitToken }));
+    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool].map((make) => make({ siteUrl: config.convexSiteUrl, token: submitToken }));
     return {
       token,
       listTools: async () => tools.map((t) => t.tool),
