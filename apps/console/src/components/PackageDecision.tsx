@@ -6,6 +6,7 @@ import { useState } from "react";
 import { showDateLabel } from "../lib/date";
 import { trackFor } from "../lib/track";
 import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
+import { DescriptionEditor, type DescriptionSaveFn } from "./DescriptionEditor";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl, PublishStatus, type PublishState, type SettleFns, type SettleResult } from "./PublishStatus";
@@ -14,7 +15,7 @@ import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
-export type { CoverChangeFn, PublishState, SettleFns };
+export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -50,6 +51,7 @@ export function PackageDecision({
   publish,
   mixcloudAccount,
   settle,
+  editDescription,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
@@ -64,6 +66,8 @@ export function PackageDecision({
   mixcloudAccount?: string;
   /** Real workspace: reopen or confirm a failed or uncertain upload (I2). */
   settle?: SettleFns;
+  /** Real workspace: rewrite the public description while the package awaits review (re-fingerprints). */
+  editDescription?: DescriptionSaveFn;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
@@ -95,6 +99,15 @@ export function PackageDecision({
       ? async (file) => {
           const res = await cover.change(file);
           // The host picked this cover, so the re-fingerprinted record becomes what they review and approve.
+          if (res.ok) setSnap(res.record);
+          return res;
+        }
+      : undefined;
+  // Same rule as the cover: only the version on screen, and the saved record becomes what the host reviews.
+  const saveDescription: DescriptionSaveFn | undefined =
+    record.status === "awaiting_review" && !changed && !busy && editDescription
+      ? async (text) => {
+          const res = await editDescription(text);
           if (res.ok) setSnap(res.record);
           return res;
         }
@@ -189,10 +202,7 @@ export function PackageDecision({
         </button>
         {open && (
           <div className="mt-2 flex flex-col gap-4 border-t border-line pt-4 text-sm">
-            <div>
-              <p className="whitespace-pre-wrap text-ink-soft [overflow-wrap:anywhere]">{draft.description}</p>
-              <p className="mt-1 font-mono text-xs text-muted">{codePoints(draft.description)} characters</p>
-            </div>
+            <DescriptionEditor draft={draft} onSave={saveDescription} />
             <ol className="flex flex-col gap-1">
               {draft.tracks.map((t) => (
                 <li key={`${t.hour}-${t.position}`} className="flex flex-wrap items-center gap-x-2">

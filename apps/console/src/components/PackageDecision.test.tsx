@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest";
 import type { PackageRecord, Track } from "@aircheck/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PackageDecision, type CoverChangeFn, type DecideFn, type PublishState } from "./PackageDecision";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type PublishState } from "./PackageDecision";
 import { PlayerProvider } from "./PlayerProvider";
 
 afterEach(cleanup);
@@ -448,5 +448,95 @@ describe("PackageDecision: audio failures rebuild the MP3", () => {
     r2.unmount();
     real(withAudio({ status: "failed", result: { error: "UploadLimitExceeded" } }));
     expect(screen.getByText("UploadLimitExceeded")).toBeInTheDocument();
+  });
+});
+
+// Plan 5c: the host edits the public description before approving. Saving re-fingerprints, so Approve needs the new text.
+describe("PackageDecision: edit description", () => {
+  const open = () => fireEvent.click(screen.getByRole("button", { name: /See description and tracklist/ }));
+  const box = () => screen.getByRole("textbox", { name: "Description" });
+
+  it("live count and plain-word issues before saving; Save re-fingerprints and asks for review again", async () => {
+    const decide = vi.fn<DecideFn>(async () => ({ ok: true }));
+    const save = vi.fn<DescriptionSaveFn>(async (text) => ({ ok: true, record: record({ fingerprint: "fp2" }, { description: text }) }));
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} editDescription={save} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(record()));
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    expect(box()).toHaveValue("A show — café");
+    expect(screen.getByRole("button", { name: "Save description" })).toBeDisabled(); // nothing changed yet
+    fireEvent.change(box(), { target: { value: "An upcoming record — 🎷" } });
+    expect(screen.getByText("22 / 999")).toBeInTheDocument(); // code points, not UTF-16 units
+    expect(screen.getByText('Description has a time-relative phrase: "upcoming"')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save description" })).toBeDisabled();
+    fireEvent.change(box(), { target: { value: "Song 1, Song 2 and more, warm and patient." } });
+    expect(screen.queryByText(/time-relative/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save description" }));
+    expect(await screen.findByText("Changed: review again")).toBeInTheDocument();
+    expect(save).toHaveBeenCalledWith("Song 1, Song 2 and more, warm and patient.");
+    expect(screen.queryByRole("textbox", { name: "Description" })).not.toBeInTheDocument();
+    expect(screen.getByText("Song 1, Song 2 and more, warm and patient.")).toBeInTheDocument();
+    // Convex delivers the re-fingerprinted record; Approve sends the new fingerprint.
+    rerender(ui(record({ fingerprint: "fp2" }, { description: "Song 1, Song 2 and more, warm and patient." })));
+    expect(screen.queryByText("This package changed. Open the latest version.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(decide).toHaveBeenCalledWith("approve", "fp2");
+  });
+
+  it("over 999 characters: the count turns to a problem and Save stays off", () => {
+    real(record(), { editDescription: vi.fn() });
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    fireEvent.change(box(), { target: { value: "é".repeat(1000) } });
+    expect(screen.getByText("1000 / 999")).toHaveClass("text-problem-text");
+    expect(screen.getByText(/must be under 1,000/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save description" })).toBeDisabled();
+  });
+
+  it("a refused save shows why and keeps the text; Cancel puts the description back", async () => {
+    const save = vi.fn<DescriptionSaveFn>(async () => ({ ok: false, message: "description contains a private term" }));
+    real(record(), { editDescription: save });
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
+    fireEvent.change(box(), { target: { value: "Thanks to someone private." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save description" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Description contains a private term");
+    expect(box()).toHaveValue("Thanks to someone private.");
+    expect(screen.queryByText("Changed: review again")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("A show — café")).toBeInTheDocument();
+  });
+
+  it("no edit after a decision, on a stale page, or without the edit action (demo)", () => {
+    const { unmount } = real(withAudio({ status: "approved" }), { editDescription: vi.fn(), publish: connected });
+    open();
+    expect(screen.queryByRole("button", { name: "Edit description" })).not.toBeInTheDocument();
+    unmount();
+    const ui = (r: PackageRecord) => <PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} editDescription={vi.fn()} /></PlayerProvider>;
+    const stale = render(ui(record()));
+    open();
+    expect(screen.getByRole("button", { name: "Edit description" })).toBeInTheDocument();
+    stale.rerender(ui(record({ fingerprint: "fpX" })));
+    expect(screen.queryByRole("button", { name: "Edit description" })).not.toBeInTheDocument();
+    stale.unmount();
+    render(<PlayerProvider><PackageDecision record={record()} workspace="demo" decide={ok} /></PlayerProvider>);
+    open();
+    expect(screen.queryByRole("button", { name: "Edit description" })).not.toBeInTheDocument();
+  });
+
+  it("the private sources show under the description, marked not published", () => {
+    real(record({}, { descriptionSources: [{ claim: "Played bass with Ezra Collective", source: "crate: musicbrainz artist lookup" }] }));
+    open();
+    expect(screen.getByText("Sources (not published)")).toBeInTheDocument();
+    expect(screen.getByText("Played bass with Ezra Collective")).toBeInTheDocument();
+    expect(screen.getByText("crate: musicbrainz artist lookup")).toBeInTheDocument();
+  });
+
+  it("no sources: no sources heading", () => {
+    real(record());
+    open();
+    expect(screen.queryByText("Sources (not published)")).not.toBeInTheDocument();
   });
 });

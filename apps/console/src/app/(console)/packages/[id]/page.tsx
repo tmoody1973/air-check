@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
-import { PackageDecision, type CoverChangeFn, type DecideFn, type SettleFns } from "@/components/PackageDecision";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type SettleFns } from "@/components/PackageDecision";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { uploadCover } from "@/lib/cover";
 import { useChicagoDayKey } from "@/lib/date";
@@ -24,6 +24,7 @@ export default function PackagePage() {
   const setCover = useMutation(api.packages.setCover);
   const reopenMutation = useMutation(api.packages.reopen);
   const confirmMutation = useMutation(api.packages.confirmPosted);
+  const editDescriptionMutation = useMutation(api.packages.editDescription);
 
   // The fingerprint is the one the host reviewed (pinned in PackageDecision), not the live one.
   const decide: DecideFn = async (decision, fingerprint) => {
@@ -42,6 +43,9 @@ export default function PackagePage() {
     confirmPosted: (url) => confirmMutation({ packageId: id, url }),
   };
 
+  // Plan 5c: the host rewrites the description before approving. Convex refuses anyone but a signed-in real human.
+  const editDescription: DescriptionSaveFn = (description) => editDescriptionMutation({ packageId: id, description });
+
   return (
     <Shell title="Package">
       {record === undefined ? (
@@ -56,6 +60,7 @@ export default function PackagePage() {
           publish={publish && { ...publish, today }}
           mixcloudAccount={mixcloud?.account}
           settle={workspace === "real" ? settle : undefined}
+          editDescription={workspace === "real" ? editDescription : undefined}
         />
       )}
     </Shell>
