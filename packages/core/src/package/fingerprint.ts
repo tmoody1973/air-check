@@ -27,6 +27,8 @@ export async function fingerprint(p: PackageDraft): Promise<string> {
     picture: p.picture,
     // Undefined keys are dropped, so a draft with no cover hashes exactly as it did before covers existed.
     coverStorageId: p.coverStorageId,
+    // Same for sources: only present when the draft carries them.
+    descriptionSources: p.descriptionSources,
   };
   // Web Crypto, not node:crypto: this also runs inside Convex functions
   const bytes = new TextEncoder().encode(JSON.stringify(canonical(content)));

@@ -6,6 +6,11 @@ export interface Section {
   song: string;
 }
 
+export interface DescriptionSource {
+  claim: string;
+  source: string;
+}
+
 export interface PackageDraft {
   id: string;
   workspace: "real" | "demo";
@@ -18,6 +23,8 @@ export interface PackageDraft {
   picture?: string;
   /** Convex file-storage id of the cover a human picked (packages.setCover). The agent never sets it. */
   coverStorageId?: string;
+  /** Where each fact in the description came from. Shown to the reviewer; never sent to Mixcloud. */
+  descriptionSources?: DescriptionSource[];
   /** Notes for the reviewer. Display only: never in the fingerprint or the upload. */
   flags?: string[];
   /** Other title options. Display only: never in the fingerprint or the upload. */

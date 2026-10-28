@@ -11,6 +11,11 @@ const properties: Record<keyof AgentPackageInput, object> = {
   leads: strs("Title artists, in order"),
   tags: strs("Mixcloud tags"),
   description: str("Public description, under 1,000 characters"),
+  descriptionSources: {
+    type: "array",
+    description: "Private: where each fact in the description came from. Up to 12 entries, each field under 300 characters",
+    items: { type: "object", properties: { claim: str("The fact"), source: str("The Crate result it came from") }, required: ["claim", "source"], additionalProperties: false },
+  },
   hour1Id: str("Hour 1 audio file id"),
   hour2Id: str("Hour 2 audio file id"),
 };
@@ -33,7 +38,7 @@ export function packageSubmitTool(opts: { siteUrl: string; token: string; fetch?
       name: "package_submit",
       description:
         "Submit a Mixcloud package draft. Air Check rebuilds and checks it; a person reviews it in the console.",
-      inputSchema: { type: "object", properties, required: FIELDS, additionalProperties: false },
+      inputSchema: { type: "object", properties, required: FIELDS.filter((k) => k !== "descriptionSources"), additionalProperties: false },
     },
 
     async call(args) {

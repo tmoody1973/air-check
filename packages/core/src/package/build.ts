@@ -1,6 +1,6 @@
 import { parseTracklist } from "../tracklist/parse";
 import { checkDescription, type DescriptionIssue } from "./description";
-import type { PackageDraft } from "./mixcloud";
+import type { DescriptionSource, PackageDraft } from "./mixcloud";
 import { buildTitle, checkTags, checkTitleArtists } from "./title";
 
 export interface AgentPackageInput {
@@ -9,18 +9,36 @@ export interface AgentPackageInput {
   leads: string[]; // title artists, in order
   tags: string[];
   description: string;
+  descriptionSources?: DescriptionSource[]; // private: where each fact came from
   hour1Id: string;
   hour2Id: string;
 }
 
 export type BuildResult = { ok: true; draft: PackageDraft } | { ok: false; problems: string[] };
 
+const MAX_SOURCES = 12;
+const MAX_SOURCE_TEXT = 300;
+
+/** Plain-message problems with the private source list; empty when fine or absent. */
+function checkSources(v: unknown): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) return ["descriptionSources must be a list"];
+  if (v.length > MAX_SOURCES) return [`descriptionSources has ${v.length} entries, at most ${MAX_SOURCES}`];
+  const out: string[] = [];
+  v.forEach((e, i) => {
+    for (const k of ["claim", "source"] as const) {
+      const t = (e as Record<string, unknown> | null)?.[k];
+      if (typeof t !== "string" || !t.trim()) out.push(`descriptionSources entry ${i + 1}: ${k} is empty`);
+      else if ([...t].length > MAX_SOURCE_TEXT) out.push(`descriptionSources entry ${i + 1}: ${k} is over ${MAX_SOURCE_TEXT} characters`);
+    }
+  });
+  return out;
+}
+
 function describeIssue(i: DescriptionIssue): string {
   switch (i.kind) {
     case "too-long":
       return `description is ${i.length} characters, must be under 1,000`;
-    case "first-line":
-      return "description must start with the standard first line";
     case "time-relative":
       return `description has a time-relative phrase: "${i.phrase}"`;
     case "tracklist":
@@ -55,11 +73,12 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   for (const lead of checkTitleArtists(input.leads, tracks)) problems.push(`title artist not in the tracklist: ${lead}`);
   for (const p of checkTags(input.tags)) problems.push(`tags: ${p}`);
   for (const i of checkDescription(input.description, {
-    showDate: input.showDate,
     trackTitles: tracks.map((t) => t.title),
     privateTerms: opts.privateTerms,
   }))
     problems.push(describeIssue(i));
+
+  problems.push(...checkSources(input.descriptionSources));
 
   let title = "";
   try {
@@ -80,6 +99,7 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
       title,
       tags: [...input.tags],
       description: input.description,
+      ...(input.descriptionSources && { descriptionSources: input.descriptionSources.map((e) => ({ claim: e.claim, source: e.source })) }),
       tracks,
       audio: { hour1Id: input.hour1Id, hour2Id: input.hour2Id },
     },

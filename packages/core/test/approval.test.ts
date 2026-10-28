@@ -220,6 +220,14 @@ test("a draft with no cover keeps today's fingerprint; a cover changes it", asyn
   expect(await fingerprint({ ...d, coverStorageId: COVER })).not.toBe(await fingerprint(d));
 });
 
+test("a draft without description sources keeps today's fingerprint; sources change it", async () => {
+  const d = goldenDraft();
+  expect(await fingerprint({ ...d, descriptionSources: undefined })).toBe(await fingerprint(d));
+  const a = await fingerprint({ ...d, descriptionSources: [{ claim: "c", source: "s" }] });
+  expect(a).not.toBe(await fingerprint(d));
+  expect(await fingerprint({ ...d, descriptionSources: [{ claim: "c", source: "other" }] })).not.toBe(a);
+});
+
 test("MP3 size is stored with the audio but not fingerprinted", async () => {
   const rec = await gate.submit(goldenDraft());
   const { hour1Id, hour2Id } = rec.draft.audio;

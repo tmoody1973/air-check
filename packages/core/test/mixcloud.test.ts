@@ -18,3 +18,10 @@ test("never sends start times or unlisted", () => {
 test("refuses bad tags", () => {
   expect(() => toMixcloudFields(goldenDraft({ tags: ["a", "b", "c", "d", "e", "f"] }))).toThrow(/more than 5 tags/);
 });
+
+test("descriptionSources are private: never in the Mixcloud fields", () => {
+  const d = goldenDraft();
+  const withSources = { ...d, descriptionSources: [{ claim: "SECRETCLAIM", source: "SECRETSOURCE" }] };
+  expect(toMixcloudFields(withSources)).toEqual(toMixcloudFields(d));
+  expect(JSON.stringify(toMixcloudFields(withSources))).not.toMatch(/SECRET/);
+});

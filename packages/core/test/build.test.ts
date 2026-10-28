@@ -108,4 +108,36 @@ describe("buildPackageDraft", () => {
     expect(r).toEqual({ ok: false, problems: ["showDate is not a real date: 2026-02-30"] });
     expect(buildPackageDraft(input({ showDate: "2026-13-01" }), opts).ok).toBe(false);
   });
+
+  describe("descriptionSources", () => {
+    const good = { claim: "Antibalas is a Brooklyn Afrobeat band", source: "MusicBrainz: Antibalas" };
+    const build = (descriptionSources: unknown) =>
+      buildPackageDraft(input({ tracklistText: reconciledText(), descriptionSources: descriptionSources as AgentPackageInput["descriptionSources"] }), opts);
+
+    test("accepted sources land on the draft", () => {
+      const r = build([good]);
+      expect(r.ok && r.draft.descriptionSources).toEqual([good]);
+    });
+    test("absent means no key on the draft", () => {
+      const r = buildPackageDraft(input({ tracklistText: reconciledText() }), opts);
+      expect(r.ok && "descriptionSources" in r.draft).toBe(false);
+    });
+    test.each([
+      ["empty claim", [{ ...good, claim: " " }]],
+      ["empty source", [{ ...good, source: "" }]],
+      ["claim over 300", [{ ...good, claim: "x".repeat(301) }]],
+      ["source over 300", [{ ...good, source: "x".repeat(301) }]],
+      ["13 entries", Array.from({ length: 13 }, () => good)],
+      ["not an array", "nope"],
+      ["wrong entry shape", [{ claim: 1, source: 2 }]],
+    ])("rejects %s with a plain message", (_n, v) => {
+      const r = build(v);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.problems.some((p) => p.startsWith("descriptionSources"))).toBe(true);
+    });
+    test("12 entries of exactly 300 characters are fine", () => {
+      const max = { claim: "c".repeat(300), source: "s".repeat(300) };
+      expect(build(Array.from({ length: 12 }, () => max)).ok).toBe(true);
+    });
+  });
 });

@@ -24,10 +24,10 @@ function stub(status: number, body: unknown) {
 const textOf = (r: { content: unknown }) => (r.content as { text: string }[]).map((c) => c.text).join("\n");
 
 describe("package_submit", () => {
-  it("describes the seven fields in its schema", () => {
+  it("describes the seven fields (plus optional sources) in its schema", () => {
     const { tool } = packageSubmitTool({ siteUrl: "https://x.convex.site", token, fetch: stub(201, {}).fetch });
     expect(tool.name).toBe("package_submit");
-    expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(Object.keys(input).sort());
+    expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual([...Object.keys(input), "descriptionSources"].sort());
   });
 
   it("sends only the seven fields with the bearer token", async () => {
