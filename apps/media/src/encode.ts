@@ -5,8 +5,17 @@ import { createHash } from "node:crypto";
 /** Runs a program with an args array, no shell. Injected so tests never need ffmpeg. */
 export type Exec = (file: string, args: string[]) => Promise<{ stdout: string }>;
 
+export const ENCODE_TIMEOUT_MS = 30 * 60_000;
+export const PROBE_TIMEOUT_MS = 60_000;
+
+/** A hung child is killed, so its rejection reaches the caller as an ordinary failure. */
+export const execOptions = (file: string) => ({
+  maxBuffer: 1 << 20, killSignal: "SIGKILL" as const,
+  timeout: file === "ffprobe" ? PROBE_TIMEOUT_MS : ENCODE_TIMEOUT_MS,
+});
+
 export const realExec: Exec = (file, args) =>
-  new Promise((resolve, reject) => execFile(file, args, { maxBuffer: 1 << 20 }, (err, stdout) => (err ? reject(err) : resolve({ stdout }))));
+  new Promise((resolve, reject) => execFile(file, args, execOptions(file), (err, stdout) => (err ? reject(err) : resolve({ stdout }))));
 
 /** Real length of one WAV, in whole seconds. A non-numeric answer is a failure. */
 export async function probeSeconds(exec: Exec, wav: string): Promise<number> {

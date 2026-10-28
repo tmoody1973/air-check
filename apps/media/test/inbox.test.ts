@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -180,5 +180,27 @@ describe("runPass", () => {
       expect(calls.filter((c) => c.file === "ffmpeg")).toHaveLength(1);
       expect(convex.waitingCalls.at(-1)).toEqual(reason);
     });
+  });
+
+  test("an unreadable folder is reported and the next folder still encodes", async () => {
+    await addShow("2026-10-01");
+    await addShow("2026-10-02");
+    await chmod(join(inboxDir, "2026-10-01"), 0o000);
+    try {
+      const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);
+      await pass(convex, okExec());
+      expect(convex.attachedCalls).toHaveLength(1);
+      expect(convex.waitingCalls).toEqual([[{ showDate: "2026-10-01", reason: "2026-10-01 folder could not be read" }]]);
+    } finally { await chmod(join(inboxDir, "2026-10-01"), 0o755); }
+  });
+
+  test("a timed-out ffmpeg is an ordinary encode failure with backoff", async () => {
+    await addShow("2026-10-02");
+    const timedOut: Exec = async () => { throw Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL" }); };
+    const extra = { failedAt: new Map<string, number>(), now: () => 0 };
+    const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);
+    await pass(convex, timedOut, undefined, extra);
+    expect(convex.waitingCalls[0]).toEqual([{ showDate: "2026-10-02", reason: "Encoding failed for 2026-10-02; will retry" }]);
+    expect(extra.failedAt.has("pkg-10-2-26")).toBe(true);
   });
 });

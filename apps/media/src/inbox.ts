@@ -82,7 +82,9 @@ export async function runPass(deps: PassDeps): Promise<void> {
   for (const entry of folders.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
     const date = entry.name;
     const dir = join(deps.inboxDir, date);
-    const m = matchInbox(date, await readdir(dir));
+    const files = await readdir(dir).catch(() => null);
+    if (!files) { waiting.push({ showDate: date, reason: `${date} folder could not be read` }); continue; }
+    const m = matchInbox(date, files);
     if (!m.ok) { waiting.push({ showDate: date, reason: m.reason }); continue; }
     const pkg = pending.find((p) => p.showDate === date)?.packageId;
     if (!pkg) {
