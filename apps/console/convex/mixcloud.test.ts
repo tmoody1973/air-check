@@ -37,4 +37,21 @@ describe("mixcloud status", () => {
     expect(await t.query(api.mixcloud.get, {})).toBeNull();
     expect(await t.withIdentity(demo).query(api.mixcloud.get, {})).toBeNull();
   });
+  test("a signed-in human disconnects: state not_connected, account and error cleared", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    await as.mutation(api.mixcloud.connected, { account: "rhythmlab" });
+    await t.mutation(api.publisher.setMixcloud, { token: "p".repeat(48), state: "needs_reconnect", account: "rhythmlab", lastError: "invalid_token" });
+    await as.mutation(api.mixcloud.disconnected, {});
+    expect(await as.query(api.mixcloud.get, {})).toEqual({ state: "not_connected" });
+    expect(await t.run((ctx) => ctx.db.query("mixcloudStatus").collect())).toHaveLength(1);
+  });
+
+  test("anonymous and demo callers cannot disconnect", async () => {
+    const t = convexTest(schema, modules);
+    await t.withIdentity(human).mutation(api.mixcloud.connected, { account: "rhythmlab" });
+    await expect(t.mutation(api.mixcloud.disconnected, {})).rejects.toThrow();
+    await expect(t.withIdentity(demo).mutation(api.mixcloud.disconnected, {})).rejects.toThrow();
+    expect(await t.withIdentity(human).query(api.mixcloud.get, {})).toMatchObject({ state: "connected" });
+  });
 });

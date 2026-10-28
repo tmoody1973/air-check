@@ -32,7 +32,7 @@ test("the public writes are exactly the allowlist", async () => {
       "packages.setCover", "packages.coverUploadUrl",
       "media.attached", "media.waiting",
       "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud",
-      "mixcloud.connected",
+      "mixcloud.connected", "mixcloud.disconnected",
     ].sort(),
   );
   expect(internal.sort()).toEqual(

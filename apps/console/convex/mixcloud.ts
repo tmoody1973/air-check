@@ -24,6 +24,15 @@ export const connected = mutation({
   },
 });
 
+/** The console's Disconnect, after it deleted the token file. A signed-in real human only; clears account and lastError. */
+export const disconnected = mutation({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") throw new ConvexError({ code: "FORBIDDEN" });
+    await writeMixcloudStatus(ctx, { state: "not_connected" });
+  },
+});
+
 /** Real workspace only; demo and anonymous callers get null. */
 export const get = query({
   args: {},

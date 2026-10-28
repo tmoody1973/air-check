@@ -6,3 +6,8 @@ export function showDateLabel(iso: string): string {
   if (!m) return iso;
   return `${MONTHS[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}, ${m[1]}`;
 }
+
+/** An instant (ms) as its calendar date in Milwaukee, the station's time zone: "Oct 27, 2026". */
+export function chicagoDateLabel(ms: number): string {
+  return showDateLabel(new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/Chicago" }));
+}

@@ -24,6 +24,11 @@ describe("deploy files", () => {
     expect(web.env_file).toBe("${HOME}/.aircheck/console.env");
   });
 
+  it("console mounts only the Mixcloud token folder (rw) and the prepared audio (ro)", () => {
+    expect(web.read_only).toBe(true);
+    expect(web.volumes).toEqual(["${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/aircheck-audio/prepared:/audio:ro"]);
+  });
+
   it("caddy keeps only the bind capability", () => {
     expect(caddy.cap_drop).toEqual(["ALL"]);
     expect(caddy.cap_add).toEqual(["NET_BIND_SERVICE"]);
@@ -87,6 +92,7 @@ describe("deploy files", () => {
     expect(lines.map((l) => l.split("=")[0])).toEqual([
       "NEXT_PUBLIC_CONVEX_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_APP_URL",
       "CLERK_SECRET_KEY", "AIRCHECK_DEMO_USER_ID", "NEXT_TELEMETRY_DISABLED", "CLERK_TELEMETRY_DISABLED",
+      "MIXCLOUD_CLIENT_ID", "MIXCLOUD_CLIENT_SECRET", "MIXCLOUD_TOKEN_FILE",
     ]);
   });
 

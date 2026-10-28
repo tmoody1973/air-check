@@ -170,4 +170,14 @@ describe("PackageDecision", () => {
     expect(screen.getByRole("heading", { name: "Title B" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Published" })).toBeInTheDocument();
   });
+  it("not connected to Mixcloud: points to Settings next to Approve, and Approve stays enabled", () => {
+    const ui = (needsMixcloud: boolean) => (
+      <PlayerProvider><PackageDecision record={record()} workspace="real" decide={ok} needsMixcloud={needsMixcloud} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(true));
+    expect(screen.getByRole("link", { name: "Connect Mixcloud to publish" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    rerender(ui(false));
+    expect(screen.queryByRole("link", { name: "Connect Mixcloud to publish" })).not.toBeInTheDocument();
+  });
 });

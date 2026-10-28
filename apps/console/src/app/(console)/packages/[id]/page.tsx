@@ -11,6 +11,8 @@ export default function PackagePage() {
   const workspace = useWorkspace();
   const record = useQuery(api.packages.get, { packageId: id });
   const decideMutation = useMutation(api.packages.decide);
+  // Null for demo and non-staff callers, so the hint only ever shows in the real workspace.
+  const mixcloud = useQuery(api.mixcloud.get, {});
 
   // The fingerprint is the one the host reviewed (pinned in PackageDecision), not the live one.
   const decide: DecideFn = async (decision, fingerprint) => {
@@ -20,7 +22,7 @@ export default function PackagePage() {
 
   return (
     <Shell title="Package">
-      {record === undefined ? <p className="text-ink-soft">Loading…</p> : <PackageDecision record={record} workspace={workspace} decide={decide} />}
+      {record === undefined ? <p className="text-ink-soft">Loading…</p> : <PackageDecision record={record} workspace={workspace} decide={decide} needsMixcloud={!!mixcloud && mixcloud.state !== "connected"} />}
     </Shell>
   );
 }

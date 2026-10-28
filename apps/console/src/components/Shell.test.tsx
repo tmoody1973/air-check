@@ -11,7 +11,7 @@ vi.mock("@clerk/nextjs", () => ({
 
 afterEach(cleanup);
 
-const LABELS = ["Today", "Chat", "Plan", "Tracklist", "Episodes", "Release radar", "Trust", "Skills and memory"];
+const LABELS = ["Today", "Chat", "Plan", "Tracklist", "Episodes", "Release radar", "Trust", "Skills and memory", "Settings"];
 
 describe("Shell", () => {
   it("nav order matches spec", () => {

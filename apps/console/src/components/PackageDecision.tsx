@@ -42,10 +42,13 @@ export function PackageDecision({
   record: live,
   workspace,
   decide,
+  needsMixcloud = false,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
   decide: DecideFn;
+  /** Real workspace with no working Mixcloud connection: Approve still works, the package waits in the queue. */
+  needsMixcloud?: boolean;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
@@ -180,6 +183,12 @@ export function PackageDecision({
 
       {deciding && (
         <>
+          {needsMixcloud && workspace === "real" && (
+            <p className="text-[12.5px] text-ink-soft">
+              <Link href="/settings" className="font-medium text-signal underline underline-offset-2">Connect Mixcloud to publish</Link>
+              . Approving still works: the show waits in the queue until Mixcloud is connected.
+            </p>
+          )}
           {!ready && record.status === "preparing_audio" && (
             <p className="text-[12.5px] text-muted">The audio is still being prepared.</p>
           )}

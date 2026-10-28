@@ -54,9 +54,21 @@ unset CONVEX_DEPLOY_KEY
 
 ### The VM's env file
 
-Copy `deploy/console.env.example` to `~/.aircheck/console.env` on the VM, fill in the values, then `chmod 600` it. It holds seven names: the Convex URL, the Clerk publishable and secret keys, the app URL, the demo user id, and two telemetry-off switches. It has no Convex deploy key.
+Copy `deploy/console.env.example` to `~/.aircheck/console.env` on the VM, fill in the values, then `chmod 600` it. It holds ten names: the Convex URL, the Clerk publishable and secret keys, the app URL, the demo user id, two telemetry-off switches, and the three Mixcloud settings (`MIXCLOUD_CLIENT_ID`, `MIXCLOUD_CLIENT_SECRET`, and `MIXCLOUD_TOKEN_FILE`, which stays empty to mean `/mixcloud/token.json`). It has no Convex deploy key. In the Mixcloud app settings, the redirect URI must be exactly the app URL followed by `/api/mixcloud/callback`.
 
 The `NEXT_PUBLIC_*` values are baked into the image when it is built, so changing one needs a rebuild, not just a restart.
+
+### The Mixcloud token folder
+
+"Connect Mixcloud" in the console's Settings page writes the Mixcloud access token to `~/.aircheck/mixcloud/token.json`. The publisher (a separate service on the VM) is the only other thing that reads it. The token is never stored in Convex. The console container runs as user id 1000 and the VM's own user is 1001, so the folder is shared through its group. Create it before the first `up`, because Docker would otherwise create it owned by root and the console could not write to it:
+
+```sh
+mkdir -p ~/.aircheck/mixcloud ~/aircheck-audio/prepared
+sudo chown 1000:1001 ~/.aircheck/mixcloud
+sudo chmod 2770 ~/.aircheck/mixcloud   # owner 1000, group 1001; the 2 (setgid) makes new files group 1001
+```
+
+The console writes `token.json` with mode 640: the console can rewrite it and the publisher (group 1001) can read it, and no one else can. Check after connecting with `ls -ln ~/.aircheck/mixcloud` (expect `-rw-r----- 1000 1001`). "Disconnect" in Settings deletes the file. The container only mounts this folder read-write, plus `~/aircheck-audio/prepared` read-only for the player; the rest of the container stays read-only.
 
 ## Everyday commands (on the VM)
 
@@ -138,7 +150,7 @@ dc down
 ### Redo from scratch on a new VM
 
 1. Set up Docker and the firewall as in `docs/NEBIUS_SETUP.md`.
-2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above.
+2. Make the folder for secrets: `mkdir -p ~/.aircheck && chmod 700 ~/.aircheck`, then create `console.env` as described above, and the Mixcloud token folder as in "The Mixcloud token folder".
 3. Point the `aircheck` A record at the new VM's IP, and wait until it resolves. It must resolve before the first `up`, or the certificate request fails.
 4. `git clone https://github.com/tmoody1973/air-check ~/air-check`, then run the start command.
 5. The agent side (Hermes, bridge, watchdog) has its own steps, each described in the sections below:

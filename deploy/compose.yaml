@@ -19,6 +19,11 @@ services:
     tmpfs:
       - /app/apps/console/.next/cache:uid=1000,gid=1000,mode=0700
       - /tmp
+    # The only writable host path: Connect Mixcloud writes token.json here for the publisher (docs/DEPLOY.md, Mixcloud token).
+    # Prepared show MP3s are read-only, for the package page's player.
+    volumes:
+      - ${HOME}/.aircheck/mixcloud:/mixcloud:rw
+      - ${HOME}/aircheck-audio/prepared:/audio:ro
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 768m
