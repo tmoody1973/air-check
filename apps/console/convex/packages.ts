@@ -1,7 +1,7 @@
 import { GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
@@ -132,6 +132,48 @@ export const setCover = mutation({
       if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
       throw e;
     }
+  },
+});
+
+/** A real package for a signed-in real human, or why not. Same FORBIDDEN for a demo package as for a demo caller. */
+async function staffOn(ctx: MutationCtx, packageId: string) {
+  const actor = await actorOf(ctx);
+  if (workspaceOf(actor) !== "real") return null;
+  const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+  return doc && doc.workspace !== "real" ? null : actor!;
+}
+
+const asResult = async (call: () => Promise<PackageRecord>): Promise<DecideResult> => {
+  try {
+    return { ok: true, record: await call() };
+  } catch (e) {
+    if (e instanceof GateError) return { ok: false, code: e.code, message: e.message };
+    throw e;
+  }
+};
+
+const STAFF_ONLY = { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can do this" } as const;
+
+/**
+ * I2: a failed or uncertain upload goes back to review (awaiting_review), so the host can fix it and approve again.
+ * A signed-in real human only; it never makes a package approved (Hard Rule 1).
+ */
+export const reopen = mutation({
+  args: { packageId: v.string() },
+  handler: async (ctx, { packageId }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    return asResult(() => gateFor(ctx).reopen(packageId, actor));
+  },
+});
+
+/** I2: the host checked Mixcloud and an uncertain upload is there: record its address as the receipt. */
+export const confirmPosted = mutation({
+  args: { packageId: v.string(), url: v.string() },
+  handler: async (ctx, { packageId, url }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    return asResult(() => gateFor(ctx).confirmPosted(packageId, url.trim(), actor));
   },
 });
 

@@ -30,6 +30,8 @@ test("the public writes are exactly the allowlist", async () => {
       "chat.send", "packages.decide", "relay.activity", "relay.events", "relay.finished", "relay.started", "relay.status", "runs.requestStop", "tracklist.draft",
       // Plan 5: the cover (signed-in human), the media and publisher services (each with its own token), Mixcloud status.
       "packages.setCover", "packages.coverUploadUrl",
+      // I2: a signed-in real human settles a finished upload (reopen for review, or confirm it is on Mixcloud).
+      "packages.reopen", "packages.confirmPosted",
       "media.attached", "media.waiting",
       "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud", "publisher.unclaim",
       "mixcloud.connected", "mixcloud.disconnected",
@@ -122,6 +124,12 @@ test("the publisher reaches packages only through claimForPublish, recordResult 
   expect(text).not.toMatch(/\.(?:patch|insert|replace|delete)\(/);
 });
 
+test("media, publisher and mixcloud code never reopen or confirm a package", () => {
+  for (const name of SERVICE_FILES) {
+    for (const banned of ["reopen", "confirmPosted"]) expect(src(name), `${name}.ts mentions ${banned}`).not.toContain(banned);
+  }
+});
+
 test("media and mixcloud code never claim or record a publish result", () => {
   for (const name of ["media", "mixcloud"]) {
     for (const banned of ["claimForPublish", "recordResult", "unclaim"]) expect(src(name), `${name}.ts mentions ${banned}`).not.toContain(banned);
@@ -191,8 +199,53 @@ test("the relay's and the agent's tokens are refused by every media and publishe
       t.mutation(api.publisher.setMixcloud, { token, state: "connected" }),
       t.mutation(api.publisher.unclaim, { token, packageId: id }),
       t.query(api.publisher.awaitingReview, { token }),
+      t.query(api.media.statuses, { token, packageIds: [id] }),
     ];
     for (const call of calls) await expect(call).rejects.toThrow(/UNAUTHORIZED/);
   }
   expect(await t.run((ctx) => ctx.db.query("packages").collect())).toEqual(before);
+});
+
+// I2: reopen and confirmPosted are human-only and never hand the publisher an approved package.
+test("reopen never yields approved, and the service tokens, the demo login and no login cannot reopen or confirm", async () => {
+  vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
+  vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+  const t = convexTest(schema, modules);
+  const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.mutation(internal.packages.submit, { draft });
+  await t.mutation(api.media.attached, { token: "m".repeat(48), packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 });
+  const staff = t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true });
+  const fp = (await t.run((ctx) => ctx.db.query("packages").first()))!.fingerprint!;
+  await staff.mutation(api.packages.decide, { packageId: draft.id, fingerprint: fp, decision: "approve" });
+  await t.mutation(api.publisher.claim, { token: "p".repeat(48), packageId: draft.id });
+  await t.mutation(api.publisher.result, { token: "p".repeat(48), packageId: draft.id, result: { status: "outcome_unknown" } });
+  // No login (how every service and the agent reach Convex) and the demo login are refused, whatever they send.
+  for (const as of [t, t.withIdentity({ subject: "d1", role: "demo" })]) {
+    expect(await as.mutation(api.packages.reopen, { packageId: draft.id })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(await as.mutation(api.packages.confirmPosted, { packageId: draft.id, url: "https://www.mixcloud.com/x/y/" })).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  }
+  // The functions take no token at all, so a service token cannot even be passed.
+  await expect(t.mutation(api.packages.reopen, { packageId: draft.id, token: "p".repeat(48) } as never)).rejects.toThrow();
+  const r = await staff.mutation(api.packages.reopen, { packageId: draft.id });
+  expect(r.ok && r.record.status).toBe("awaiting_review");
+  await expect(t.mutation(api.publisher.claim, { token: "p".repeat(48), packageId: draft.id })).rejects.toThrow(/NOT_READY/);
+  expect((await t.run((ctx) => ctx.db.query("packages").first()))?.status).toBe("awaiting_review");
+});
+
+test("packages.reopen and packages.confirmPosted check the signed-in actor and the workspace before the gate", () => {
+  const text = src("packages");
+  for (const name of ["reopen", "confirmPosted"]) {
+    const body = text.slice(text.indexOf(`export const ${name} = mutation(`));
+    const end = body.indexOf("\n});");
+    const fn = body.slice(0, end);
+    const gate = fn.indexOf(`gateFor(ctx).${name}(`);
+    expect(gate, name).toBeGreaterThan(0);
+    for (const check of ["await staffOn(ctx, packageId)", `workspaceOf(actor) !== "real"`]) {
+      expect(fn.indexOf(check), `${name}: ${check}`).toBeGreaterThan(0);
+      expect(fn.indexOf(check), `${name}: ${check}`).toBeLessThan(gate);
+    }
+  }
+  const staffOn = text.slice(text.indexOf("async function staffOn("), text.indexOf("\n}\n", text.indexOf("async function staffOn(")));
+  expect(staffOn).toMatch(/await actorOf\(ctx\)/);
+  expect(staffOn).toMatch(/workspaceOf\(actor\) !== "real"/);
 });

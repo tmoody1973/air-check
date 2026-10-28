@@ -58,7 +58,8 @@ export type GateErrorCode =
   | "PACKAGE_CHANGED"
   | "NOT_READY"
   | "DEMO_CANNOT_PUBLISH"
-  | "ALREADY_EXISTS";
+  | "ALREADY_EXISTS"
+  | "BAD_INPUT";
 
 export class GateError extends Error {
   constructor(
@@ -82,6 +83,9 @@ function mayDecide(actor: Actor, workspace: PackageDraft["workspace"]): boolean 
   if (actor.kind === "human") return actor.email.toLowerCase().endsWith(APPROVER_DOMAIN);
   return actor.kind === "demo" && workspace === "demo";
 }
+
+/** A show's address on Mixcloud's own site (the only receipt URL the console links). */
+export const MIXCLOUD_SHOW_PREFIX = "https://www.mixcloud.com/";
 
 function actorName(actor: Actor): string {
   return actor.kind === "human" ? actor.email : actor.kind === "demo" ? `demo:${actor.userId}` : "agent";
@@ -200,6 +204,51 @@ export class ApprovalGate {
       { draft, fingerprint: await fingerprint(draft) },
     );
     if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while setting the cover`);
+    return next;
+  }
+
+  /** reopen and confirmPosted settle a finished upload: a signed-in real-workspace human only (never agent or demo). */
+  private requireStaff(actor: Actor): void {
+    if (actor.kind !== "human" || !mayDecide(actor, "real"))
+      throw new GateError("FORBIDDEN", "only a signed-in Radio Milwaukee user can do this");
+  }
+
+  /**
+   * failed or outcome_unknown -> awaiting_review, so a human can fix what went wrong and approve again. Hard Rule 1:
+   * this never yields approved; the decision, result and fingerprint start over.
+   */
+  async reopen(id: string, actor: Actor): Promise<PackageRecord> {
+    this.requireStaff(actor);
+    const cur = await this.load(id);
+    if (cur.status !== "failed" && cur.status !== "outcome_unknown")
+      throw new GateError("NOT_READY", `package ${id} can only be reopened after a failed or uncertain upload`);
+    const next = await this.store.compareAndSwap(
+      id,
+      { status: cur.status, fingerprint: cur.fingerprint },
+      { status: "awaiting_review", fingerprint: await fingerprint(cur.draft), result: undefined, decidedBy: undefined, decidedAt: undefined },
+    );
+    if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while reopening`);
+    await this.emit(id, cur.status, "awaiting_review", actorName(actor));
+    return next;
+  }
+
+  /**
+   * outcome_unknown -> succeeded: a human checked Mixcloud and the show is there. `at` is when they confirmed (the
+   * real post time is unknown), and it counts toward that Chicago day's pacing like any other success.
+   */
+  async confirmPosted(id: string, url: string, actor: Actor): Promise<PackageRecord> {
+    this.requireStaff(actor);
+    if (!url.startsWith(MIXCLOUD_SHOW_PREFIX) || url.length <= MIXCLOUD_SHOW_PREFIX.length)
+      throw new GateError("BAD_INPUT", `the show's address must start with ${MIXCLOUD_SHOW_PREFIX}`);
+    const cur = await this.load(id);
+    if (cur.status !== "outcome_unknown") throw new GateError("NOT_READY", `package ${id} is not waiting for a check on Mixcloud`);
+    const next = await this.store.compareAndSwap(
+      id,
+      { status: "outcome_unknown" },
+      { status: "succeeded", result: { url, at: this.now().toISOString() } },
+    );
+    if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while confirming`);
+    await this.emit(id, "outcome_unknown", "succeeded", actorName(actor));
     return next;
   }
 

@@ -313,6 +313,15 @@ describe("fail closed", () => {
     expect(await snapshot(t)).toEqual(before);
   });
 
+  test("PUBLISHER_TOKEN equal to MEDIA_TOKEN: everything is refused (fail closed)", async () => {
+    const t = convexTest(schema, modules);
+    const id = await approved(t);
+    vi.stubEnv("MEDIA_TOKEN", PUB);
+    const before = await snapshot(t);
+    for (const call of await calls(t, PUB, id)) expect(await errorCode(call)).toBe("UNAUTHORIZED");
+    expect(await snapshot(t)).toEqual(before);
+  });
+
   test.each([["unset", undefined], ["31 characters", "p".repeat(31)]])("PUBLISHER_TOKEN %s: everything is refused", async (_n, env) => {
     const t = convexTest(schema, modules);
     const id = await approved(t);

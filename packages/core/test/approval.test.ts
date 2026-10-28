@@ -289,3 +289,74 @@ test("unclaim: publishing -> approved only, after Mixcloud refused the key (noth
   expect(await code(gate.unclaim(id, "invalid_token"))).toBe("NOT_READY"); // a result is final
   expect(await code(gate.unclaim("nope", "invalid_token"))).toBe("NOT_READY");
 });
+
+// I2: failed and outcome_unknown are not dead ends. A human reopens (back to review, approve again) or confirms the post.
+const URL_OK = "https://www.mixcloud.com/rhythmlab/rlr-10-2-26/";
+async function settled(r: "failed" | "outcome_unknown") {
+  const { id, fp } = await ready({ id: `pkg-${r}` });
+  await gate.decide(id, fp, "approve", tarik);
+  await gate.claimForPublish(id);
+  await gate.recordResult(id, r === "failed" ? { status: "failed", error: "audio changed since approval" } : { status: "outcome_unknown" });
+  return { id, fp };
+}
+
+test("reopen: failed or outcome_unknown -> awaiting_review, cleared and re-fingerprinted; Approve is needed again", async () => {
+  for (const r of ["failed", "outcome_unknown"] as const) {
+    const { id } = await settled(r);
+    const back = await gate.reopen(id, tarik);
+    expect(back.status).toBe("awaiting_review");
+    expect(back.result).toBeUndefined();
+    expect(back.decidedBy).toBeUndefined();
+    expect(back.decidedAt).toBeUndefined();
+    expect(back.fingerprint).toBe(await fingerprint(back.draft));
+    expect(transitions.at(-1)).toMatchObject({ id, from: r, to: "awaiting_review", by: "tarik@radiomilwaukee.org" });
+    expect(await gate.claimForPublish(id)).toBeNull(); // Hard Rule 1: reopening never yields approved
+    const again = await gate.decide(id, back.fingerprint!, "approve", tarik);
+    expect(again.status).toBe("approved");
+  }
+});
+
+test("reopen: only from failed or outcome_unknown, only a real-workspace human", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // awaiting review
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // approved
+  await gate.claimForPublish(id);
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // publishing
+  await gate.recordResult(id, { status: "succeeded", url: URL_OK });
+  expect(await code(gate.reopen(id, tarik))).toBe("NOT_READY"); // succeeded is final
+  expect(await code(gate.reopen("nope", tarik))).toBe("NOT_FOUND");
+});
+
+test("reopen and confirmPosted refuse the agent, the demo login and outside domains", async () => {
+  const { id } = await settled("outcome_unknown");
+  for (const actor of [{ kind: "agent" } as Actor, judge, { kind: "human", userId: "u2", email: "x@gmail.com" } as Actor]) {
+    expect(await code(gate.reopen(id, actor))).toBe("FORBIDDEN");
+    expect(await code(gate.confirmPosted(id, URL_OK, actor))).toBe("FORBIDDEN");
+  }
+});
+
+test("confirmPosted: outcome_unknown -> succeeded with the URL, stamped now (counts toward that day's pacing)", async () => {
+  const at = new Date("2026-10-28T15:00:00Z");
+  const timed = new ApprovalGate(memoryStore(), { now: () => at, onTransition: async (t) => void transitions.push(t) });
+  const rec = await timed.submit(goldenDraft());
+  const { hour1Id, hour2Id } = rec.draft.audio;
+  const { fingerprint: fp } = await timed.attachAudio(rec.draft.id, { hour1Id, hour2Id, mp3Sha256: MP3 });
+  const id = rec.draft.id;
+  await timed.decide(id, fp!, "approve", tarik);
+  expect(await code(timed.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY"); // approved
+  await timed.claimForPublish(id);
+  await timed.recordResult(id, { status: "outcome_unknown" });
+  for (const bad of ["http://www.mixcloud.com/x/", "https://mixcloud.com/x/", "https://www.mixcloud.com.evil.com/x", "javascript:alert(1)", ""])
+    expect(await code(timed.confirmPosted(id, bad, tarik))).toBe("BAD_INPUT");
+  const done = await timed.confirmPosted(id, URL_OK, tarik);
+  expect(done.status).toBe("succeeded");
+  expect(done.result).toEqual({ url: URL_OK, at: at.toISOString() });
+  expect(transitions.at(-1)).toMatchObject({ id, from: "outcome_unknown", to: "succeeded", by: "tarik@radiomilwaukee.org" });
+  expect(await code(timed.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY"); // already succeeded
+});
+
+test("confirmPosted: a failed upload cannot be marked posted (it was refused, so it is not up)", async () => {
+  const { id } = await settled("failed");
+  expect(await code(gate.confirmPosted(id, URL_OK, tarik))).toBe("NOT_READY");
+});

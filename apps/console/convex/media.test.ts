@@ -96,6 +96,31 @@ describe("media.waiting", () => {
   });
 });
 
+describe("media.waiting: an unchanged set writes nothing", () => {
+  test("the same items (in any order) leave the stored rows as they are", async () => {
+    const t = convexTest(schema, modules);
+    const items = [{ showDate: "2026-10-09", reason: "a" }, { showDate: "2026-10-16", reason: "b" }];
+    await t.mutation(api.media.waiting, { token: MEDIA, items });
+    const before = await t.run((ctx) => ctx.db.query("audioIssues").collect());
+    await t.mutation(api.media.waiting, { token: MEDIA, items: [...items].reverse() });
+    expect(await t.run((ctx) => ctx.db.query("audioIssues").collect())).toEqual(before); // same _ids: no delete/re-insert
+    await t.mutation(api.media.waiting, { token: MEDIA, items: [items[0]!, { showDate: "2026-10-16", reason: "c" }] });
+    const after = await t.run((ctx) => ctx.db.query("audioIssues").collect());
+    expect(after.map(({ showDate, reason }) => ({ showDate, reason }))).toEqual([items[0], { showDate: "2026-10-16", reason: "c" }]);
+  });
+});
+
+describe("media.statuses", () => {
+  test("the status of each real package asked about; demo and unknown ids are left out", async () => {
+    const t = convexTest(schema, modules);
+    const id = await submitted(t);
+    await attach(t, id);
+    await submitted(t, { id: "demo-10-2-26", workspace: "demo" });
+    const got = await t.query(api.media.statuses, { token: MEDIA, packageIds: [id, "demo-10-2-26", "pkg-1-1-99"] });
+    expect(got).toEqual([{ packageId: id, status: "awaiting_review" }]);
+  });
+});
+
 describe("media.cleanup", () => {
   test("returns only skipped and succeeded real packages", async () => {
     const t = convexTest(schema, modules);
@@ -123,6 +148,7 @@ describe("fail closed", () => {
     attach(t, id, token),
     t.mutation(api.media.waiting, { token, items: [{ showDate: "2026-10-09", reason: "x" }] }),
     t.query(api.media.cleanup, { token }),
+    t.query(api.media.statuses, { token, packageIds: [id] }),
   ];
   const snapshot = (t: ReturnType<typeof convexTest>) => t.run(async (ctx) => [await ctx.db.query("packages").collect(), await ctx.db.query("audioIssues").collect()]);
 
@@ -136,6 +162,15 @@ describe("fail closed", () => {
     const id = await submitted(t);
     const before = await snapshot(t);
     for (const call of calls(t, token, id)) expect(await errorCode(call)).toBe("UNAUTHORIZED");
+    expect(await snapshot(t)).toEqual(before);
+  });
+
+  test("MEDIA_TOKEN equal to PUBLISHER_TOKEN: everything is refused (fail closed)", async () => {
+    vi.stubEnv("PUBLISHER_TOKEN", MEDIA);
+    const t = convexTest(schema, modules);
+    const id = await submitted(t);
+    const before = await snapshot(t);
+    for (const call of calls(t, MEDIA, id)) expect(await errorCode(call)).toBe("UNAUTHORIZED");
     expect(await snapshot(t)).toEqual(before);
   });
 

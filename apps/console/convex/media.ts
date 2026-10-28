@@ -6,8 +6,10 @@ import { convexPackageStore } from "./packageStore";
 
 // The media service on the VM (joins the two hour WAVs into the MP3) is the only caller. Every function checks
 // MEDIA_TOKEN first, in constant time, and fails closed when it is unset or shorter than 32 characters.
+// One secret for both services would let either act as the other, so equal tokens refuse everything (M7).
 function requireMedia(token: string): void {
-  if (!sameToken(token, process.env.MEDIA_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
+  const { MEDIA_TOKEN, PUBLISHER_TOKEN } = process.env;
+  if (MEDIA_TOKEN === PUBLISHER_TOKEN || !sameToken(token, MEDIA_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 /** Real packages waiting for their MP3. */
@@ -50,6 +52,9 @@ export const waiting = mutation({
   args: { token: v.string(), items: v.array(v.object({ showDate: v.string(), reason: v.string() })) },
   handler: async (ctx, { token, items }) => {
     requireMedia(token);
+    // Every pass sends the set; an unchanged one writes nothing (M8).
+    const key = (xs: { showDate: string; reason: string }[]) => JSON.stringify(xs.map((x) => [x.showDate, x.reason]).sort());
+    if (key(await ctx.db.query("audioIssues").collect()) === key(items)) return;
     for (const row of await ctx.db.query("audioIssues").collect()) await ctx.db.delete(row._id);
     const updatedAt = Date.now();
     for (const item of items) await ctx.db.insert("audioIssues", { ...item, updatedAt });
@@ -64,6 +69,23 @@ export const cleanup = query({
     const byStatus = (status: "skipped" | "succeeded") =>
       ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
     return (await Promise.all([byStatus("skipped"), byStatus("succeeded")])).flat().map((d) => d.packageId);
+  },
+});
+
+/**
+ * I2: the status of each real package asked about (the prepared MP3s on disk), so media can say which shows hold
+ * the prepared slots. Read only; demo and unknown ids are left out.
+ */
+export const statuses = query({
+  args: { token: v.string(), packageIds: v.array(v.string()) },
+  handler: async (ctx, { token, packageIds }) => {
+    requireMedia(token);
+    const out: { packageId: string; status: string }[] = [];
+    for (const packageId of packageIds.slice(0, 50)) {
+      const d = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+      if (d?.workspace === "real") out.push({ packageId, status: d.status });
+    }
+    return out;
   },
 });
 
