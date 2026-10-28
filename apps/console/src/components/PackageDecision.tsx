@@ -8,13 +8,13 @@ import { trackFor } from "../lib/track";
 import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
-import { isMixcloudUrl, PublishStatus, type PublishState } from "./PublishStatus";
+import { isMixcloudUrl, PublishStatus, type PublishState, type SettleFns, type SettleResult } from "./PublishStatus";
 import { SampleTag } from "./SampleTag";
 import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
-export type { CoverChangeFn, PublishState };
+export type { CoverChangeFn, PublishState, SettleFns };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -49,6 +49,7 @@ export function PackageDecision({
   cover,
   publish,
   mixcloudAccount,
+  settle,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
@@ -61,6 +62,8 @@ export function PackageDecision({
   publish?: PublishState | null;
   /** The connected Mixcloud account, for the "check your uploads" link. */
   mixcloudAccount?: string;
+  /** Real workspace: reopen or confirm a failed or uncertain upload (I2). */
+  settle?: SettleFns;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
   const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
@@ -96,6 +99,19 @@ export function PackageDecision({
           return res;
         }
       : undefined;
+  // A reopened package is reviewed afresh: this session's earlier Approve no longer locks the buttons.
+  const settleHere: SettleFns | undefined = settle && {
+    confirmPosted: settle.confirmPosted,
+    reopen: async (): Promise<SettleResult> => {
+      const res = await settle.reopen();
+      if (res.ok) {
+        setDecided(false);
+        setSnap(res.record);
+        setNotice(null);
+      }
+      return res;
+    },
+  };
   const reload = () => {
     setSnap(live);
     setNotice(null);
@@ -200,7 +216,7 @@ export function PackageDecision({
 
       {workspace === "real" && cover && <CoverPicker url={cover.url} custom={!!draft.coverStorageId} onChange={changeCover} />}
 
-      {workspace === "real" && !deciding && <PublishStatus record={record} publish={publish} mixcloudAccount={mixcloudAccount} />}
+      {workspace === "real" && !deciding && <PublishStatus record={record} publish={publish} mixcloudAccount={mixcloudAccount} settle={settleHere} />}
 
       {workspace === "demo" ? (
         <p className="text-[12.5px] text-ink-soft">Demo workspace · Sample data. Publishing to Mixcloud is switched off.</p>

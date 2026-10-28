@@ -307,10 +307,12 @@ describe("PackageDecision: queue and receipt", () => {
     expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
   });
 
-  it("failed: the reason, and approve again after fixing", () => {
-    real(withAudio({ status: "failed", result: { error: "Mixcloud refused the cover image", at: "2026-10-28T03:04:00.000Z" } }));
+  it("failed: the reason and a Reopen for review button; no promise of an Approve that isn't there", () => {
+    real(withAudio({ status: "failed", result: { error: "Mixcloud refused the cover image", at: "2026-10-28T03:04:00.000Z" } }), { settle: settleFns() });
     expect(screen.getByText("Mixcloud refused the cover image")).toBeInTheDocument();
-    expect(screen.getByText("Approve again after fixing.")).toBeInTheDocument();
+    expect(screen.getByText("Reopen to review again. You'll need to approve it again.")).toBeInTheDocument();
+    expect(screen.queryByText("Approve again after fixing.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen for review" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
@@ -324,6 +326,15 @@ describe("PackageDecision: queue and receipt", () => {
     expect(screen.queryByRole("link", { name: "Your Mixcloud uploads" })).not.toBeInTheDocument();
   });
 
+  it("approved and paused by the cover: says why", () => {
+    const { unmount } = real(withAudio({ status: "approved" }), { publish: { ...connected, lastError: "cover_unavailable" } });
+    expect(screen.getByText("Queued: posts today")).toBeInTheDocument();
+    expect(screen.getByText("Publishing is paused: the cover image couldn't be downloaded. It tries again on its own.")).toBeInTheDocument();
+    unmount();
+    real(withAudio({ status: "approved" }), { publish: { ...connected, lastError: "bad_cover" } });
+    expect(screen.getByText("Publishing is paused: the standard cover isn't an image Mixcloud takes. Replace it to continue.")).toBeInTheDocument();
+  });
+
   it("demo shows none of the queue states", () => {
     render(
       <PlayerProvider>
@@ -331,5 +342,83 @@ describe("PackageDecision: queue and receipt", () => {
       </PlayerProvider>,
     );
     expect(screen.queryByText(/Queued/)).not.toBeInTheDocument();
+  });
+});
+
+// I2: a failed or uncertain upload is settled from the package page.
+type Settle = NonNullable<Parameters<typeof PackageDecision>[0]["settle"]>;
+function settleFns(over: Partial<Settle> = {}): Settle {
+  return {
+    reopen: vi.fn<Settle["reopen"]>(async () => ({ ok: true, record: withAudio({ status: "awaiting_review", fingerprint: "fp9" }) })),
+    confirmPosted: vi.fn<Settle["confirmPosted"]>(async (url) => ({ ok: true, record: withAudio({ status: "succeeded", result: { url, at: "2026-10-28T03:04:00.000Z" } }) })),
+    ...over,
+  };
+}
+
+describe("PackageDecision: settling a failed or uncertain upload", () => {
+  it("failed: Reopen for review goes back to review, and Approve works again with the new fingerprint", async () => {
+    const settle = settleFns();
+    const decide = vi.fn<DecideFn>(async () => ({ ok: true }));
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={decide} settle={settle} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(withAudio({ status: "failed", result: { error: "audio changed since approval" } })));
+    fireEvent.click(screen.getByRole("button", { name: "Reopen for review" }));
+    expect(settle.reopen).toHaveBeenCalledTimes(1);
+    rerender(ui(withAudio({ status: "awaiting_review", fingerprint: "fp9" })));
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    expect(approve).toBeEnabled();
+    fireEvent.click(approve);
+    expect(decide).toHaveBeenCalledWith("approve", "fp9");
+  });
+
+  it("after approving in this session, a later reopen still unlocks Approve", async () => {
+    const settle = settleFns();
+    const ui = (r: PackageRecord) => (
+      <PlayerProvider><PackageDecision record={r} workspace="real" decide={ok} settle={settle} /></PlayerProvider>
+    );
+    const { rerender } = render(ui(withAudio()));
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await act(async () => {});
+    rerender(ui(withAudio({ status: "failed", result: { error: "audio file missing" } })));
+    fireEvent.click(screen.getByRole("button", { name: "Reopen for review" }));
+    await act(async () => {});
+    rerender(ui(withAudio({ status: "awaiting_review", fingerprint: "fp9" })));
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
+  it("a refused reopen shows why, and the button comes back", async () => {
+    const settle = settleFns({ reopen: vi.fn(async () => ({ ok: false as const, code: "FORBIDDEN" as const, message: "only a signed-in Radio Milwaukee user can do this" })) });
+    real(withAudio({ status: "failed", result: { error: "x" } }), { settle });
+    fireEvent.click(screen.getByRole("button", { name: "Reopen for review" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("only a signed-in Radio Milwaukee user can do this");
+    expect(screen.getByRole("button", { name: "Reopen for review" })).toBeEnabled();
+  });
+
+  it("outcome unknown: It's on Mixcloud takes the show's address, checked here before it is sent", async () => {
+    const settle = settleFns();
+    real(withAudio({ status: "outcome_unknown" }), { settle, mixcloudAccount: "rhythmlab" });
+    expect(screen.getByText("We don't know if it posted. Check Mixcloud before doing anything.")).toBeInTheDocument();
+    const input = screen.getByLabelText("Show address on Mixcloud");
+    fireEvent.change(input, { target: { value: "https://evil.example/rlr" } });
+    fireEvent.click(screen.getByRole("button", { name: "It's on Mixcloud" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Paste the show's address from Mixcloud. It starts with https://www.mixcloud.com/");
+    expect(settle.confirmPosted).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "  https://www.mixcloud.com/rhythmlab/rlr-10-2-26/ " } });
+    fireEvent.click(screen.getByRole("button", { name: "It's on Mixcloud" }));
+    expect(settle.confirmPosted).toHaveBeenCalledWith("https://www.mixcloud.com/rhythmlab/rlr-10-2-26/");
+  });
+
+  it("outcome unknown: It isn't — reopen sends it back to review", () => {
+    const settle = settleFns();
+    real(withAudio({ status: "outcome_unknown" }), { settle });
+    fireEvent.click(screen.getByRole("button", { name: "It isn't — reopen" }));
+    expect(settle.reopen).toHaveBeenCalledTimes(1);
+  });
+
+  it("without the settle actions (demo), no buttons are offered", () => {
+    real(withAudio({ status: "outcome_unknown" }));
+    expect(screen.queryByRole("button", { name: "It isn't — reopen" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Show address on Mixcloud")).not.toBeInTheDocument();
   });
 });

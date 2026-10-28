@@ -48,6 +48,15 @@ const published = async (t: T, id: string) => {
 };
 
 describe("packages.publishState (R2)", () => {
+  test("I3: carries the publisher's last error code, so the page can say why posting is paused", async () => {
+    vi.stubEnv("STANDARD_COVER_STORAGE_ID", "standard-cover");
+    const t = convexTest(schema, modules);
+    const id = await approved(t);
+    await t.mutation(api.publisher.setMixcloud, { token: PUB, state: "connected", account: "rhythmlab", lastError: "cover_unavailable" });
+    expect(await t.withIdentity(human).query(api.packages.publishState, { packageId: id, today: TODAY }))
+      .toEqual({ dayOffset: 0, mixcloudState: "connected", lastError: "cover_unavailable" });
+  });
+
   test("day offset follows the publisher's order (oldest show first, 3 a day) and counts today's posts", async () => {
     vi.stubEnv("STANDARD_COVER_STORAGE_ID", "standard-cover");
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -44,7 +44,7 @@ async function realPackage(ctx: QueryCtx, packageId: string) {
 
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
-export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudStatus["state"] };
+export type PublishState = { dayOffset: number | null; mixcloudState: MixcloudStatus["state"]; lastError?: string };
 
 /**
  * R2: which Chicago day an approved package should go up (0 = today), from the same queue and count the publisher
@@ -62,8 +62,12 @@ export const publishState = query({
     const approved = packages
       .filter((p) => p.coverStorageId)
       .map((p) => ({ packageId: p.packageId, showDate: p.showDate, approvedAt: p.decidedAt ?? "" }));
-    const mixcloudState = (await ctx.db.query("mixcloudStatus").first())?.state ?? "not_connected";
-    return { dayOffset: publishDayOffset(approved, publishedToday, packageId, 3), mixcloudState };
+    const status = await ctx.db.query("mixcloudStatus").first();
+    // I3: a short code only (e.g. cover_unavailable), never a credential (Hard Rule 2 keeps those out of the row).
+    return {
+      dayOffset: publishDayOffset(approved, publishedToday, packageId, 3), mixcloudState: status?.state ?? "not_connected",
+      ...(status?.lastError ? { lastError: status.lastError } : {}),
+    };
   },
 });
 
