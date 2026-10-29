@@ -1,0 +1,205 @@
+import { isShowDate } from "../episode/dates";
+import { chicagoDayKey } from "../publish/pacing";
+import { normalize } from "../tracklist/normalize";
+
+export interface ReleaseFields {
+  artist: string;
+  title: string;
+  label?: string;
+  type?: "album" | "single" | "ep";
+  releasedOn?: string;
+  genre?: string;
+  embargo?: { until: string | null };
+}
+
+/** Text sent to the model is cut to this. */
+export const MAX_EMAIL_CHARS = 12_000;
+const MAX_FIELD_CHARS = 200;
+
+/** Lowercase, accents and punctuation folded to spaces. Unlike normalize, keeps a "feat." clause, so it is safe on prose. */
+export function foldText(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+const MONTH = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b\\.?";
+const ORD = "(?:st|nd|rd|th)?";
+const YEAR = "(?:,?\\s+(\\d{4})\\b)?";
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const monthOf = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase()) + 1;
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** [match position, month, day, year?] for each date-shaped run. */
+function dateParts(text: string): [number, number, number, number | undefined][] {
+  const out: [number, number, number, number | undefined][] = [];
+  for (const m of text.matchAll(/(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g)) out.push([m.index!, +m[2]!, +m[3]!, +m[1]!]);
+  for (const m of text.matchAll(new RegExp(`\\b${MONTH}\\s+(\\d{1,2})${ORD}\\b${YEAR}`, "gi")))
+    out.push([m.index!, monthOf(m[1]!), +m[2]!, m[3] ? +m[3] : undefined]);
+  for (const m of text.matchAll(new RegExp(`\\b(\\d{1,2})${ORD}\\s+${MONTH}${YEAR}`, "gi")))
+    out.push([m.index!, monthOf(m[2]!), +m[1]!, m[3] ? +m[3] : undefined]);
+  for (const m of text.matchAll(/(?<![\d/])(\d{1,2})\/(\d{1,2})\/(\d{4})(?![\d/])/g)) out.push([m.index!, +m[1]!, +m[2]!, +m[3]!]);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+/** ISO dates in order of appearance. Without receivedAt, a date with no year is skipped. */
+function datesIn(text: string, receivedAt?: number): string[] {
+  const today = receivedAt === undefined ? undefined : chicagoDayKey(receivedAt);
+  const out = dateParts(text).flatMap(([, month, day, year]) => {
+    if (year !== undefined) {
+      const iso = `${year}-${pad(month)}-${pad(day)}`;
+      return isShowDate(iso) ? [iso] : [];
+    }
+    if (!today) return [];
+    const y = Number(today.slice(0, 4));
+    // A date with no year is the next one on or after the day the email arrived.
+    const iso = [y, y + 1].map((yy) => `${yy}-${pad(month)}-${pad(day)}`).find((d) => isShowDate(d) && d >= today);
+    return iso ? [iso] : [];
+  });
+  return [...new Set(out)];
+}
+
+/** ISO dates from 2026-11-07, November 7(, 2026), 7 November 2026 and 11/7/2026. A year-less date takes the next one on or after receipt (America/Chicago). */
+export function findDates(text: string, receivedAt: number): string[] {
+  return datesIn(text, receivedAt);
+}
+
+const EMBARGO = /\bembargo|\bnot for (?:broadcast|airplay) before\b|\bdo not (?:play|post) before\b|\bhold until\b/i;
+const NO_EMBARGO = /\b(?:no|not|without)\s+(?:an?\s+)?embargo\w*/gi;
+const SENTENCES = /\n+|(?<=[.!?])\s+(?=[A-Z"'“(\[])/;
+
+/**
+ * Embargo wording and a date in the same sentence. Wording with no readable date is { until: null }, which stays active
+ * until a person dates or clears it. Several dated sentences take the latest date (a late date holds a post back; an
+ * early one would let it out).
+ */
+export function findEmbargo(text: string, receivedAt: number): { until: string | null } | null {
+  let found = false;
+  const dates: string[] = [];
+  for (const sentence of text.split(SENTENCES)) {
+    if (!EMBARGO.test(sentence.replace(NO_EMBARGO, " "))) continue;
+    found = true;
+    dates.push(...findDates(sentence, receivedAt));
+  }
+  if (!found) return null;
+  return { until: dates.length ? dates.sort().at(-1)! : null };
+}
+
+const unquote = (s: string | undefined) => (s ?? "").trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, "").trim();
+// ponytail: written against SYNTHETIC fixtures (fixtures/email/bandcamp-*.json). Re-fit to real Bandcamp mail in Task 7.
+const BANDCAMP_LINE = /^\s*(.+?)\s+just\s+(?:released|announced)\s+(.+?)(?:\s+by\s+(.+?))?(?:,?\s+available for pre-?order)?\s*[.!]?\s*$/i;
+
+/**
+ * Bandcamp's new-release template, read in code: "<actor> just released|announced <title>( by <artist>)". When a
+ * "by" is present the actor is the label; otherwise the actor is the artist. Null when the template does not match.
+ */
+export function parseBandcampEmail(_subject: string, text: string): ReleaseFields | null {
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const m = line.match(BANDCAMP_LINE);
+    if (!m) continue;
+    const [actor, title, by] = [unquote(m[1]), unquote(m[2]), unquote(m[3])];
+    if (!actor || !title) continue;
+    const releasedOn = lines.filter((l) => /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
+    return { artist: by || actor, title, ...(by ? { label: actor } : {}), ...(releasedOn ? { releasedOn } : {}) };
+  }
+  return null;
+}
+
+export type Extraction = { ok: true; release: ReleaseFields; notes: string[] } | { ok: false; notRelease: true } | { ok: false; reasons: string[] };
+
+const LINKISH = /https?:|:\/\/|www\.|@|\[link\]|\[email\]/i;
+const TYPES = new Set(["album", "single", "ep"]);
+const field = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+
+/**
+ * The model's reading of a co-sign, checked in code. Artist and title must be in the email; a label or genre not in
+ * the email (or shaped like a link) is dropped with a note; a release date must be one code found; any other key is
+ * dropped. The embargo is set when code or the model finds one, and its date is kept only if code found it in the email.
+ */
+export function checkExtraction(candidate: unknown, emailText: string, receivedAt: number): Extraction {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return { ok: false, reasons: ["The reader's reply was not a JSON object"] };
+  const c = candidate as Record<string, unknown>;
+  if (c.notRelease === true) return { ok: false, notRelease: true };
+
+  const haystack = ` ${foldText(emailText)} `;
+  const inEmail = (v: string) => {
+    const n = normalize(v);
+    return n.length > 0 && haystack.includes(` ${n} `);
+  };
+  const reasons: string[] = [];
+  const notes: string[] = [];
+
+  const required = (key: "artist" | "title") => {
+    const v = field(c[key]);
+    if (!v) reasons.push(`The ${key} is missing`);
+    else if (LINKISH.test(v)) reasons.push(`The ${key} looks like a link or an address`);
+    else if (v.length > MAX_FIELD_CHARS) reasons.push(`The ${key} is too long`);
+    else if (!inEmail(v)) reasons.push(`The ${key} '${v}' is not in the email`);
+    else return v;
+    return "";
+  };
+  // Dropped values are never echoed into a note: a note is stored text and must not carry a link.
+  const grounded = (key: "label" | "genre") => {
+    if (c[key] === undefined || c[key] === null) return undefined;
+    const v = field(c[key]);
+    if (v && !LINKISH.test(v) && v.length <= MAX_FIELD_CHARS && inEmail(v)) return v;
+    notes.push(`The ${key} was left out: it is not in the email.`);
+    return undefined;
+  };
+
+  const artist = required("artist");
+  const title = required("title");
+  const label = grounded("label");
+  const genre = grounded("genre");
+
+  let type: ReleaseFields["type"];
+  if (c.type !== undefined && c.type !== null) {
+    const t = field(c.type).toLowerCase();
+    if (TYPES.has(t)) type = t as ReleaseFields["type"];
+    else notes.push("The type was left out: it is not album, single or EP.");
+  }
+
+  const dates = findDates(emailText, receivedAt);
+  let releasedOn: string | undefined;
+  if (c.releasedOn !== undefined && c.releasedOn !== null) {
+    const d = field(c.releasedOn);
+    if (dates.includes(d)) releasedOn = d;
+    else notes.push("The release date was left out: code did not find that date in the email.");
+  }
+
+  const embargo = embargoOf(c.embargo, findEmbargo(emailText, receivedAt), dates, notes);
+
+  if (reasons.length) return { ok: false, reasons };
+  return {
+    ok: true,
+    release: {
+      artist,
+      title,
+      ...(label ? { label } : {}),
+      ...(type ? { type } : {}),
+      ...(releasedOn ? { releasedOn } : {}),
+      ...(genre ? { genre } : {}),
+      ...(embargo ? { embargo } : {}),
+    },
+    notes,
+  };
+}
+
+function embargoOf(model: unknown, code: { until: string | null } | null, dates: string[], notes: string[]): { until: string | null } | undefined {
+  const modelFound = model === true || (typeof model === "object" && model !== null);
+  if (!code && !modelFound) return undefined;
+  const claimed = modelFound && typeof model === "object" ? field((model as Record<string, unknown>).until) : "";
+  if (claimed && !dates.includes(claimed)) notes.push("The embargo date was left out: code did not find that date in the email. It stays embargoed until someone dates it.");
+  const known = [code?.until, claimed && dates.includes(claimed) ? claimed : null].filter((d): d is string => Boolean(d));
+  return { until: known.length ? known.sort().at(-1)! : null };
+}
+
+/** The key two emails about the same release share: core's normalize of each part, joined by |. */
+export function releaseKey(artist: string, title: string): string {
+  return `${normalize(artist)}|${normalize(title)}`;
+}

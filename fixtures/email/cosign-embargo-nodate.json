@@ -1,0 +1,11 @@
+{
+  "_note": "SYNTHETIC fixture in the AgentMail message shape (Plan 8 Task 1). Not a real email. Confirm against a live sample in Task 7.",
+  "message_id": "<fwd-cosign-0007@radiomilwaukee.example.invalid>",
+  "from_": "Tarik Moody <tarik@radiomilwaukee.org>",
+  "subject": "Fwd: [Artist Name] - [EP Title] (advance)",
+  "text": "Begin forwarded message:\n\nFrom: [Publicist] <press@label.example.invalid>\nSubject: [Artist Name] - [EP Title] (advance)\nDate: October 28, 2026 at 2:01:44 PM CDT\nTo: Tarik Moody <tarik@radiomilwaukee.org>\n\nHi Tarik,\n\nAdvance of [EP Title], the new EP from [Artist Name] on [Label Name]. Strictly embargoed, please hold.\n\n[Publicist]\n",
+  "headers": {
+    "Authentication-Results": "mx.agentmail.invalid; dkim=pass header.i=@radiomilwaukee.org header.s=google header.b=XyZ123; spf=pass smtp.mailfrom=radiomilwaukee.org; dmarc=pass header.from=radiomilwaukee.org"
+  },
+  "attachments": []
+}

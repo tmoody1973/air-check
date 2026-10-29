@@ -27,3 +27,7 @@ export * from "./episode/pacing";
 export * from "./episode/paper";
 export * from "./episode/dates";
 export * from "./episode/rerun";
+export * from "./radar/email";
+export * from "./radar/bandcamp";
+export * from "./radar/extract";
+export * from "./radar/embargo";

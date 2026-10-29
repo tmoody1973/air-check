@@ -1,0 +1,225 @@
+import { BANDCAMP_DOMAIN, bandcampPageUrl } from "./bandcamp";
+
+/** As much of an AgentMail message as the radar reads. Attachments are counted, never read. */
+export interface InboundMail {
+  messageId: string;
+  from: string;
+  subject: string;
+  text: string;
+  hrefs: string[];
+  headers: Record<string, string>;
+  attachmentCount: number;
+  bodyMissing: boolean;
+}
+
+export type RadarTab = "bandcamp" | "cosign";
+export type SenderDecision = { ok: true; tab: RadarTab; address: string } | { ok: false; reason: string };
+export interface CleanMail {
+  tab: RadarTab;
+  sender?: { name?: string; address?: string };
+  subject: string;
+  body: string;
+  links: string[];
+  bandcampPages: string[];
+  hosts: string[];
+}
+
+export const MAX_STORED_CHARS = 20_000;
+const MAX_LINKS = 20;
+const MAX_LINK_CHARS = 500;
+const MAX_PAGES = 3;
+const MAX_HOSTS = 3;
+
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+/**
+ * The fields the radar needs from an AgentMail message (`from_` is what arrives on the wire).
+ * Never reads `extracted_text`, which can drop the forwarded part. Null with no message id or sender.
+ */
+export function pickInbound(message: unknown): InboundMail | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as Record<string, unknown>;
+  const messageId = str(m.message_id)?.trim();
+  const from = (str(m.from_) ?? str(m.from))?.trim();
+  if (!messageId || !from) return null;
+  const html = str(m.html);
+  const text = str(m.text);
+  const fromHtml = html === undefined ? undefined : htmlToText(html);
+  return {
+    messageId,
+    from,
+    subject: str(m.subject) ?? "",
+    text: text?.trim() ? text : (fromHtml?.text ?? ""),
+    hrefs: fromHtml?.hrefs ?? [],
+    headers: pickHeaders(m.headers),
+    attachmentCount: Array.isArray(m.attachments) ? m.attachments.length : 0,
+    bodyMissing: text === undefined && html === undefined, // AgentMail omits both over 1 MB
+  };
+}
+
+function pickHeaders(h: unknown): Record<string, string> {
+  if (!h || typeof h !== "object" || Array.isArray(h)) return {};
+  return Object.fromEntries(
+    Object.entries(h).flatMap(([k, v]): [string, string][] =>
+      typeof v === "string" ? [[k, v]] : Array.isArray(v) && v.every((x) => typeof x === "string") ? [[k, v.join("; ")]] : [],
+    ),
+  );
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]+);/gi, (whole, e: string) => {
+    if (e[0] !== "#") return ENTITIES[e.toLowerCase()] ?? whole;
+    const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  });
+}
+
+// ponytail: regex-based, fine for mail bodies. Swap to a parser if a real email breaks it.
+/** Plain text and every href from an HTML mail body. Script, style and head are dropped. */
+export function htmlToText(html: string): { text: string; hrefs: string[] } {
+  const hrefs = [...html.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)]
+    .map((m) => decodeEntities((m[1] ?? m[2] ?? m[3] ?? "").trim()))
+    .filter(Boolean);
+  const text = decodeEntities(
+    html
+      .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?(?:p|div|tr|li|ul|ol|h[1-6]|table|blockquote|section|article|header|footer|hr)\b[^>]*>/gi, "\n")
+      .replace(/<\/?(?:td|th)\b[^>]*>/gi, " ")
+      .replace(/<[^>]*>/g, ""),
+  )
+    .replace(/[ \t ]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text, hrefs };
+}
+
+/** Comma-separated, lowercased. Unset parses to nothing: an empty list is a closed door. */
+export function parseAllowlist(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const ADDRESS = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+
+/** "Name <a@b.c>" or "a@b.c" → its parts; the address only when it looks like one. */
+function parseFrom(raw: string): { name?: string; address?: string } {
+  const angle = raw.match(/^(.*?)<([^<>]+)>\s*$/);
+  const address = (angle ? angle[2]! : raw).trim().toLowerCase().replace(/^mailto:/, "");
+  const name = angle?.[1]?.trim().replace(/^["'*\s]+|["'*\s]+$/g, "");
+  return { ...(name ? { name } : {}), ...(ADDRESS.test(address) ? { address } : {}) };
+}
+
+/** Whether Authentication-Results holds a dkim=pass whose header.d (or header.i) is the From domain exactly. */
+function dkimAligned(headers: Record<string, string>, domain: string): boolean {
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === "authentication-results");
+  const value = key ? headers[key]! : "";
+  return value.split(";").some((raw) => {
+    const clause = raw.replace(/\([^)]*\)/g, " "); // comments (e.g. ARC's inner "dkim=pass") are not verdicts
+    if (!/(?:^|\s)dkim\s*=\s*pass\b/i.test(clause)) return false;
+    const d = clause.match(/\bheader\.d\s*=\s*([^\s;]+)/i)?.[1] ?? clause.match(/\bheader\.i\s*=\s*([^\s;]+)/i)?.[1]?.replace(/^.*@/, "");
+    return d?.toLowerCase() === domain;
+  });
+}
+
+/**
+ * Exact address on the allowlist, and a DKIM pass aligned with the From domain (a From line alone can be faked).
+ * The tab is Bandcamp when the mail is from bandcamp.com, or when Tarik forwarded a bandcamp.com email by hand.
+ */
+export function senderDecision(mail: Pick<InboundMail, "from" | "headers" | "text">, allowlist: string[]): SenderDecision {
+  const address = parseFrom(mail.from).address;
+  if (!address || !allowlist.includes(address)) return { ok: false, reason: "Sender not on the list" };
+  const domain = address.slice(address.lastIndexOf("@") + 1);
+  if (!dkimAligned(mail.headers, domain)) return { ok: false, reason: "Sender's signature (DKIM) did not pass" };
+  const original = unwrapForward(mail.text).sender?.address;
+  const bandcamp = domain === BANDCAMP_DOMAIN || original?.endsWith(`@${BANDCAMP_DOMAIN}`);
+  return { ok: true, tab: bandcamp ? "bandcamp" : "cosign", address };
+}
+
+const FORWARD_MARK = /^[ \t>]*(?:-{3,}\s*Forwarded message\s*-{3,}|Begin forwarded message:)[ \t]*$/im;
+const FORWARD_HEADER = /^(From|Date|Sent|Subject|To|Cc|Reply-To):\s*(.*)$/i;
+
+/** Gmail's and Apple Mail's forward blocks: the original From becomes `sender`, and the note above the block is dropped. */
+export function unwrapForward(text: string): { sender?: { name?: string; address?: string }; body: string } {
+  const mark = FORWARD_MARK.exec(text);
+  if (!mark) return { body: text };
+  const lines = text.slice(mark.index + mark[0].length).split("\n");
+  let i = 0;
+  while (i < lines.length && !lines[i]!.trim()) i++;
+  let sender: { name?: string; address?: string } | undefined;
+  for (; i < lines.length; i++) {
+    const h = lines[i]!.replace(/^[ \t>]*/, "").match(FORWARD_HEADER);
+    if (!h) break;
+    if (h[1]!.toLowerCase() === "from") sender = parseFrom(h[2]!);
+  }
+  const body = lines.slice(i).join("\n").trim();
+  return sender && (sender.name || sender.address) ? { sender, body } : { body };
+}
+
+const URL_IN_TEXT = /\bhttps?:\/\/[^\s<>"'`]*/gi;
+const WWW_IN_TEXT = /(?<![\w@./-])www\.[^\s<>"'`]+/gi;
+const MAILTO = /\bmailto:[^\s<>"'`]*/gi;
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const TRAILING = /[.,;:!?)\]}>'"]+$/;
+
+function httpLink(raw: string): string | null {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every http(s) URL and www. host becomes [link], every email address (mailto: too) becomes [email], and any other @
+ * becomes (at), so no stored or model-bound text holds one. Up to 20 distinct http(s) links are kept apart for Tarik;
+ * the ones that pass bandcampPageUrl (at most 3) are the only links anything may fetch.
+ */
+export function stripLinks(text: string, hrefs: string[] = []): { text: string; links: string[]; bandcampPages: string[]; hosts: string[] } {
+  const found: string[] = [];
+  const toLink = (match: string) => {
+    const core = match.replace(TRAILING, "");
+    found.push(core);
+    return "[link]" + match.slice(core.length);
+  };
+  const stripped = text
+    .replace(MAILTO, "[email]")
+    .replace(URL_IN_TEXT, toLink)
+    .replace(WWW_IN_TEXT, (m) => "[link]" + m.slice(m.replace(TRAILING, "").length))
+    .replace(EMAIL, "[email]")
+    .replace(/@/g, "(at)");
+  const links = [...new Set([...found, ...hrefs].map(httpLink).filter((l): l is string => l !== null))]
+    .filter((l) => l.length <= MAX_LINK_CHARS)
+    .slice(0, MAX_LINKS);
+  const pages = links.map((l) => [l, bandcampPageUrl(l)] as const);
+  const bandcampPages = [...new Set(pages.flatMap(([, p]) => (p ? [p] : [])))].slice(0, MAX_PAGES);
+  const hosts = [...new Set(pages.flatMap(([l, p]) => (p ? [] : [new URL(l).hostname])))].slice(0, MAX_HOSTS);
+  return { text: stripped, links, bandcampPages, hosts };
+}
+
+/** The console's one call: unwrap the forward, strip links and addresses from body and subject, cap the body. */
+export function cleanMail(mail: InboundMail, decision: Extract<SenderDecision, { ok: true }>): CleanMail {
+  const forward = unwrapForward(mail.text);
+  const body = stripLinks(forward.body, mail.hrefs);
+  const from = forward.sender ?? parseFrom(mail.from);
+  const sender = {
+    ...(from.name ? { name: stripLinks(from.name).text } : {}),
+    ...(from.address ? { address: from.address } : {}),
+  };
+  return {
+    tab: decision.tab,
+    ...(sender.name || sender.address ? { sender } : {}),
+    subject: stripLinks(mail.subject).text,
+    body: body.text.slice(0, MAX_STORED_CHARS),
+    links: body.links,
+    bandcampPages: body.bandcampPages,
+    hosts: body.hosts,
+  };
+}

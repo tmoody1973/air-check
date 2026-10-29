@@ -1,0 +1,11 @@
+{
+  "_note": "SYNTHETIC fixture in the AgentMail message shape (Plan 8 Task 1). Not a real email. Confirm against a live sample in Task 7.",
+  "message_id": "<fwd-bc-0004@radiomilwaukee.example.invalid>",
+  "from_": "Tarik Moody <tarik@radiomilwaukee.org>",
+  "subject": "Fwd: New release from Pale Signal Records",
+  "text": "fyi for Friday\n\n---------- Forwarded message ---------\nFrom: Bandcamp <noreply@bandcamp.com>\nDate: Mon, Oct 27, 2026 at 8:02 AM\nSubject: New release from Pale Signal Records\nTo: <tarik@radiomilwaukee.org>\n\n\nHi Tarik,\n\nPale Signal Records just released Glass Weather by Ferro Lane.\n\nCheck it out: https://palesignal.bandcamp.com/album/glass-weather\n\nDigital album, released October 24, 2026\n\nYou are getting this because you follow Pale Signal Records on Bandcamp.\nUnsubscribe: https://example.invalid/unsubscribe/label",
+  "headers": {
+    "Authentication-Results": "mx.agentmail.invalid; dkim=pass header.i=@radiomilwaukee.org header.s=google header.b=XyZ123; spf=pass smtp.mailfrom=radiomilwaukee.org; dmarc=pass header.from=radiomilwaukee.org"
+  },
+  "attachments": []
+}
