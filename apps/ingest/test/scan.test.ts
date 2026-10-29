@@ -1,3 +1,5 @@
+import { chmod } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
 import { newMemory, runScan } from "../src/scan.js";
@@ -123,6 +125,14 @@ describe("scan: a source that is missing, expired or revoked (Review Focus 3, R1
     const w = await make({ googleToken: "{\"refresh_tok" });
     await runScan(w.deps);
     expect(w.cv.lastSource("google")).toEqual({ source: "google", state: "needs_reconnect", lastError: "invalid_token_file" });
+  });
+
+  test.skipIf(process.getuid?.() === 0)("M4: a token file ingest can't read (wrong owner) is unreadable_token_file, not needs_reconnect; nothing is drafted", async () => {
+    const w = await make();
+    await chmod(join(w.deps.tokenDir, "google.json"), 0);
+    await runScan(w.deps);
+    expect(w.cv.lastSource("google")).toEqual({ source: "google", state: "connected", lastError: "unreadable_token_file" });
+    expect(w.deps.memory.lastScanComplete).toBe(false);
   });
 
   test("Box not configured → not_connected; Box refusing the client credentials → needs_reconnect, tried once per scan", async () => {

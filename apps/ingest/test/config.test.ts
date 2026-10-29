@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -40,6 +40,11 @@ describe("token files", () => {
     expect(await readTokenFile(join(dir, "google.json"))).toEqual({ kind: "invalid" });
     await writeFile(join(dir, "google.json"), JSON.stringify({ refresh_token: "rt-1", account: "Google account", connectedAt: 5 }));
     expect(await readTokenFile(join(dir, "google.json"))).toEqual({ kind: "ok", refreshToken: "rt-1", account: "Google account", connectedAt: 5 });
+    if (process.getuid?.() !== 0) {
+      // M4: a file this service can't read (wrong owner) is its own state, not a bad credential.
+      await chmod(join(dir, "google.json"), 0);
+      expect(await readTokenFile(join(dir, "google.json"))).toEqual({ kind: "unreadable" });
+    }
     expect(refusalKey("google", "rt-1", 5)).not.toBe(refusalKey("google", "rt-1", 6));
     expect(refusalKey("google", "rt-1", 5)).not.toContain("rt-1");
   });

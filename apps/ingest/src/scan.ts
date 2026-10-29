@@ -101,6 +101,8 @@ async function tokenFor(deps: ScanDeps, source: "google" | "dropbox", configured
   if (t.kind === "missing") return (await report(deps, { source, state: "not_connected", lastError: "no_token" }), ABSENT);
   // A half-written file is a connected source that failed (needs_reconnect), not a disconnected one.
   if (t.kind === "invalid") return (await report(deps, { source, state: "needs_reconnect", lastError: "invalid_token_file" }), null);
+  // M4: connected, but the folder's owner is wrong (DEPLOY.md). A Reconnect would not fix it, so it is not needs_reconnect.
+  if (t.kind === "unreadable") return (await report(deps, { source, state: "connected", lastError: "unreadable_token_file" }), null);
   return { ...t, key: refusalKey(source, t.refreshToken, t.connectedAt ?? null) };
 }
 

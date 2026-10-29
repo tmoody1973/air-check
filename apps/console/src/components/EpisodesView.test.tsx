@@ -97,6 +97,17 @@ describe("EpisodesView table", () => {
   });
 });
 
+describe("M4: an unreadable saved sign-in", () => {
+  it("names the folder's owner instead of Reconnect, and says drafting is paused", () => {
+    setup([ep("2026-01-02")], {
+      sources: [{ source: "box", state: "connected" }, { source: "google", state: "connected", lastError: "unreadable_token_file" }, { source: "dropbox", state: "connected" }],
+      today: "2026-01-02",
+    });
+    expect(screen.getByText(/Air Check can't read the saved sign-in — check the folder's owner \(DEPLOY.md\)/).closest("p")).toHaveTextContent("— drafting is paused.");
+    expect(screen.queryByRole("link", { name: /Reconnect/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("EpisodesView questions", () => {
   it("answers a question inline, announces the save, and shows answered ones", async () => {
     const acts = setup([

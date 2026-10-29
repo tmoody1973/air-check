@@ -4,7 +4,7 @@ import { blankFridays, summaryLine } from "../lib/episodes";
 import type { EpisodeActions, EpisodeRow, RowCtx } from "./EpisodeControls";
 import { COLUMN_SOURCE, EpisodeItem, type SourceStates } from "./EpisodeItem";
 import type { Workspace } from "./Shell";
-import type { SourceStatus } from "./SourceConnections";
+import { UNREADABLE, UNREADABLE_TEXT, type SourceStatus } from "./SourceConnections";
 
 export type { EpisodeActions, EpisodeRow };
 
@@ -60,7 +60,8 @@ export function EpisodesView({
   const cards = (layout ?? (wide ? "table" : "cards")) === "cards";
   // Loading or hidden sources say nothing; a source with no row yet is not connected (as on Settings).
   const states: SourceStates = sources ? Object.fromEntries(SOURCES.map((s) => [s, sources.find((r) => r.source === s)?.state ?? "not_connected"])) : {};
-  const failing = SOURCES.filter((s) => states[s] === "needs_reconnect");
+  const unreadable = (s: (typeof SOURCES)[number]) => sources?.find((r) => r.source === s)?.lastError === UNREADABLE;
+  const failing = SOURCES.filter((s) => states[s] === "needs_reconnect" || unreadable(s));
   const unconnected = Object.values(COLUMN_SOURCE).filter((s) => states[s] === "not_connected");
   const blanks = blankFridays(data.episodes.map((e) => e.showDate), today);
   const rows = [...data.episodes.map((e) => ({ date: e.showDate, e })), ...blanks.map((date) => ({ date, e: null }))].sort((a, b) => a.date.localeCompare(b.date));
@@ -89,7 +90,7 @@ export function EpisodesView({
           {failing.map((s, i) => (
             <span key={s}>
               {i > 0 && ", "}
-              <Link href="/settings" className="font-medium underline underline-offset-2">{RECONNECT[s]}</Link>
+              {unreadable(s) ? UNREADABLE_TEXT : <Link href="/settings" className="font-medium underline underline-offset-2">{RECONNECT[s]}</Link>}
             </span>
           ))}
           {" — drafting is paused."}

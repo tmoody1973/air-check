@@ -15,6 +15,12 @@ function expectPostForm(region: HTMLElement, name: string, action: string) {
 const row = (source: "box" | "google" | "dropbox", state: "connected" | "needs_reconnect" | "not_connected", extra = {}) => ({ source, state, checkedAt: 1, ...extra });
 
 describe("SourceConnections", () => {
+  it("M4: a saved sign-in ingest can't read says to check the folder's owner, not Reconnect needed", () => {
+    render(<SourceConnections sources={[row("google", "connected", { lastError: "unreadable_token_file" })]} workspace="real" />);
+    expect(within(card("Google Drive")).getByText("Air Check can't read the saved sign-in — check the folder's owner (DEPLOY.md)")).toBeInTheDocument();
+    expect(within(card("Google Drive")).queryByText(/Reconnect needed|Connected as/)).not.toBeInTheDocument();
+  });
+
   it("nothing recorded yet: Google Drive and Dropbox offer Connect; Box is not configured and has no button", () => {
     render(<SourceConnections sources={[]} workspace="real" />);
     expect(within(card("Google Drive")).getByText("Not connected")).toBeInTheDocument();

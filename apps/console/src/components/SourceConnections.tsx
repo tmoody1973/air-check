@@ -6,7 +6,11 @@ import type { Workspace } from "./Shell";
 // Google Drive and Dropbox connect from here like Mixcloud; Box is a server app with no button (Plan 6).
 
 type SourceName = "box" | Provider;
-export type SourceStatus = { source: SourceName; state: "connected" | "needs_reconnect" | "not_connected"; account?: string };
+export type SourceStatus = { source: SourceName; state: "connected" | "needs_reconnect" | "not_connected"; account?: string; lastError?: string };
+
+/** M4: the ingest service can't read the saved token file (wrong owner); a Reconnect would not fix it. */
+export const UNREADABLE = "unreadable_token_file";
+export const UNREADABLE_TEXT = "Air Check can't read the saved sign-in — check the folder's owner (DEPLOY.md)";
 
 export type SourceNoticeT =
   | { provider: Provider; kind: "connected" | "disconnected" }
@@ -65,6 +69,7 @@ function statusLine(s: SourceStatus): [mark: string, text: string, tone: string]
       : s.state === "needs_reconnect"
         ? ["bg-problem-text", "Sign-in failed: check the Box values in ingest.env", "text-problem-text"]
         : ["bg-line-strong", "Not configured", "text-ink"];
+  if (s.lastError === UNREADABLE) return ["bg-problem-text", UNREADABLE_TEXT, "text-problem-text"];
   return s.state === "connected"
     ? ["bg-signal", `Connected as ${s.account ?? "[account]"}`, "text-ink"]
     : s.state === "needs_reconnect"
