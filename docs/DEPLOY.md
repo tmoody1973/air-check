@@ -523,6 +523,148 @@ Some changes span several parts, and each part expects the newer version of the 
 
 Deploy from `main`, after the pull request is merged; a production deploy from an unmerged branch was blocked on Oct 28, and the PR route that followed is the normal path now. For multi-step changes on the VM, put the commands in a short script file, copy it over with ssh and `cat`, read it, and run it, rather than pasting a long one-line ssh command: long pasted one-liners broke on Oct 28 (`docs/FRICTION_LOG.md`).
 
+## Plan 8: release radar
+
+The release radar turns forwarded email into release records. AgentMail (an email service with its own inbox, `rhythmlab@agentmail.to`) receives the mail and calls the console's `/api/agentmail/inbound` route. The console only stores the cleaned email. The ingest worker reads it once a minute: Bandcamp emails by code, co-signs through the Token Factory model, and one allowlisted Bandcamp page fetch for the player. Nothing in this section ever prints a secret; values move by pipe from a file.
+
+### The settings
+
+Console (`~/.aircheck/console.env` on the VM; the names are in `deploy/console.env.example`):
+
+| Name | What it is | Secret? |
+|---|---|---|
+| `INBOX_TOKEN` | The console's key for storing email in Convex. The same value is set in Convex env. 64 hex characters, never shared with another service. | yes |
+| `AGENTMAIL_API_KEY` | Reads one message from AgentMail when the webhook leaves a body over 1 MB out. Sends nothing. | yes |
+| `AGENTMAIL_WEBHOOK_SECRET` | The webhook's signing secret (`whsec_...`). Unset means the route answers 503 and stores nothing. | yes |
+| `RADAR_SENDERS` | Comma-separated addresses whose email is kept: `tarik@radiomilwaukee.org` and Bandcamp's sender address. | no |
+| `RADAR_AUTHSERV_ID` | The name AgentMail's mail server writes at the start of its `Authentication-Results` header. Unset means every sender is refused. | no |
+
+Ingest worker (`~/.aircheck/ingest.env`, names in `deploy/ingest/ingest.env.example`): `NEBIUS_API_KEY`, a Token Factory key named `aircheck-ingest-radar`, separate from the agent's so it can be revoked alone. Unset means co-signs are recorded as "Air Check's reader is not set up"; Bandcamp emails still parse.
+
+Convex (production env): `INBOX_TOKEN`, the same value as the console's.
+
+> **Set `RADAR_AUTHSERV_ID` and `RADAR_SENDERS` before turning on the Gmail forwarding filter.** An email that arrives while either is unset is stored as "ignored", with no body, and cannot be tried again. It is gone from Air Check (it is still in AgentMail and Gmail).
+
+### 1. Make the secrets on the Mac, without showing them
+
+Why: each secret goes straight into a file and into Convex, so it never appears on screen or in shell history.
+
+```sh
+cd apps/console
+export CONVEX_DEPLOY_KEY=$(grep '^CONVEX_DEPLOY_KEY=' .env.production.local | cut -d= -f2-)
+t=$(openssl rand -hex 32); printf 'INBOX_TOKEN=%s\n' "$t" >> .env.production.local; npx convex env set INBOX_TOKEN "$t"; unset t
+unset CONVEX_DEPLOY_KEY
+```
+
+For the Token Factory key: make a new key named `aircheck-ingest-radar` in the Token Factory console, then open `~/.aircheck-local/ingest-radar.env` in your editor and paste it as one line, `NEBIUS_API_KEY=<the key>`. Then `chmod 600 ~/.aircheck-local/ingest-radar.env`.
+
+`AGENTMAIL_API_KEY` is already in `apps/console/.env.local`.
+
+### 2. Deploy, in this order
+
+Why the order matters: the new console calls Convex functions that only the new Convex has. **Deploying the console before Convex breaks the Today page and the package page** until Convex catches up. The bridge and the ingest worker also call new Convex functions, so Convex always goes first.
+
+1. **Convex** (Mac, from `apps/console`, after the PR is merged and `main` is pulled). Why: new tables, fields and functions must exist before anything calls them.
+
+   ```sh
+   export CONVEX_DEPLOY_KEY=$(grep '^CONVEX_DEPLOY_KEY=' .env.production.local | cut -d= -f2-)
+   npx convex deploy -y
+   unset CONVEX_DEPLOY_KEY
+   ```
+
+2. **The bridge** (gives the agent the read-only `radar_get` tool). Why: the agent can then answer "What's new on the radar?". Follow "Updating the bridge" above, then on the VM:
+
+   ```sh
+   nemohermes airc mcp restart
+   nemohermes aircdemo mcp restart
+   nemohermes airc mcp status aircheck --json --tools   # radar_get should be listed
+   ```
+
+3. **The console.** Why: it holds the inbound webhook route and the Release radar page. First pipe the two secrets that exist so far (Mac, from `apps/console`):
+
+   ```sh
+   grep -hE '^(AGENTMAIL_API_KEY|INBOX_TOKEN)=' .env.local .env.production.local | ssh user@<the VM's static IP> 'cat >> ~/.aircheck/console.env'
+   ```
+
+   Then on the VM:
+
+   ```sh
+   cut -d= -f1 ~/.aircheck/console.env | sort | uniq -d   # prints a name only if it is in the file twice; expect nothing
+   cd ~/air-check && git pull
+   dc up -d --build
+   dc ps                                                  # console should say "healthy"
+   ```
+
+   The route answers 503 until the webhook secret exists (step 3 below). That is the safe state.
+
+4. **The ingest worker last.** Why: it reads what the console stores, and it needs the Token Factory key. On the Mac:
+
+   ```sh
+   ssh user@<the VM's static IP> 'cat >> ~/.aircheck/ingest.env' < ~/.aircheck-local/ingest-radar.env
+   pnpm --filter @aircheck/ingest build
+   wc -c apps/ingest/dist/main.js                         # note the size
+   ssh user@<the VM's static IP> 'cp ~/aircheck-ingest/dist/main.js ~/aircheck-ingest/dist/main.js.pre-radar'
+   ssh user@<the VM's static IP> 'cat > ~/aircheck-ingest/dist/main.js' < apps/ingest/dist/main.js
+   ```
+
+   Then on the VM:
+
+   ```sh
+   wc -c ~/aircheck-ingest/dist/main.js                   # must match the Mac's size
+   sudo systemctl restart aircheck-ingest
+   journalctl -u aircheck-ingest -n 20                    # expect step=start ok=true and no config error
+   ```
+
+**Rolling back:** undo in the reverse order, and **roll Convex back last**. The ingest worker (`cp main.js.pre-radar main.js`, then restart), then the console (see "Rolling back"), then the bridge, and only then Convex (check out the old commit on the Mac and run `npx convex deploy -y`). Why: an old console works against the new Convex, but the new console does not work against the old one.
+
+### 3. Register the webhook
+
+Why: this tells AgentMail where to send new mail, and gives us the secret that proves a delivery came from AgentMail. On the Mac, from `apps/console`:
+
+```sh
+umask 077; tmp=$(mktemp)
+curl -s -X POST https://api.agentmail.to/v0/inboxes/rhythmlab%40agentmail.to/webhooks \
+  -H "Authorization: Bearer $(grep '^AGENTMAIL_API_KEY=' .env.local | cut -d= -f2-)" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://aircheck.rhythmlabradio.com/api/agentmail/inbound","event_types":["message.received"]}' > "$tmp"
+jq -r .webhook_id "$tmp"                                  # the only thing printed; write it below
+jq -r '"AGENTMAIL_WEBHOOK_SECRET=" + .secret' "$tmp" >> .env.production.local
+rm "$tmp"
+grep -h '^AGENTMAIL_WEBHOOK_SECRET=' .env.production.local | ssh user@<the VM's static IP> 'cat >> ~/.aircheck/console.env'
+```
+
+Then on the VM: `dc up -d --force-recreate console`. Why `--force-recreate`: the container reads `console.env` only when it is created, so a plain restart would not see the new value.
+
+Webhook id: _(write it here after registering)_. To rotate the secret: delete the webhook in AgentMail, register again as above, remove the old `AGENTMAIL_WEBHOOK_SECRET` line from both files, pipe the new one, and recreate the console.
+
+### 4. Set the sender check (before the Gmail filter)
+
+1. **Add the forwarding address in Gmail.** Settings, "Forwarding and POP/IMAP", "Add a forwarding address", `rhythmlab@agentmail.to`. If the option is greyed out, the Radio Milwaukee Workspace admin has turned off automatic forwarding; ask them. Why: Gmail sends a confirmation email first, and that email is the one we read the server name from.
+2. **Read `RADAR_AUTHSERV_ID` from that confirmation email.** In AgentMail's own web console (not Air Check), open the message and show its raw headers. Find the **topmost** `Authentication-Results:` line. Its first word, before the first `;`, is the value (for example, in `Authentication-Results: mx.example.net; dkim=pass ...` it is `mx.example.net`). Why: only the header our receiver wrote is trusted; lower ones can be written by the sender. Click the confirmation link or copy the code from the same message to finish Gmail's step. In Air Check it shows under Not added as "Air Check's sender check is not set up", which is expected.
+3. **Find Bandcamp's sender address.** In Gmail, open a Bandcamp new-release email you already have, choose "Show original", and copy the address in its `From:` line. Why: auto-forwarded mail keeps Bandcamp's own From address, so that exact address must be on the list.
+4. **Set both on the VM**, then recreate the console:
+
+   ```sh
+   nano ~/.aircheck/console.env
+   # add or edit these two lines:
+   # RADAR_AUTHSERV_ID=<the first word from step 2>
+   # RADAR_SENDERS=tarik@radiomilwaukee.org,<Bandcamp's address from step 3>
+   dc up -d --force-recreate console
+   ```
+
+5. **Only now, turn on the Gmail filter** that forwards Bandcamp's new-release email to `rhythmlab@agentmail.to`. Co-signs are forwarded by hand.
+
+### 5. Live checks (UNVERIFIED until Task 7)
+
+Each of these was built from documentation or a guess, not a live test. Check each once and record the result in `docs/SPIKES.md`.
+
+- **The payload names the inbox.** Every delivery should carry `inbox_id: rhythmlab@agentmail.to`. If it does not, every email is skipped and `dc logs console` shows `radar step=inbox ok=false`.
+- **Header order.** AgentMail should list repeated headers top first, so the first `Authentication-Results` is our receiver's. Check one stored email is not wrongly refused as "Sender's signature (DKIM) did not pass".
+- **Token Factory accepts the reader's settings.** The reader sends `chat_template_kwargs` (thinking off). Expect, in `journalctl -u aircheck-ingest`, co-signs saved with no 400 error; in the Token Factory usage page, answers with content and about zero reasoning tokens. On a 400 the reader retries once without it.
+- **Bandcamp answers our user-agent.** The first Bandcamp email's player should become ready within two passes. If every page fails, the ingest log names the code.
+- **The real Bandcamp email and page.** The email parser and the page reader (cover art from `og:image`, tags, about) were written against made-up samples. Compare one real email and one real page with what Air Check shows.
+- **Google Workspace DKIM (co-signs).** A hand-forwarded co-sign is signed by Google for `tarik@radiomilwaukee.org`. If radiomilwaukee.org has no custom DKIM key, Gmail signs as `*.gappssmtp.com` instead, which does not match the From domain, so **every forwarded co-sign is ignored** as "Sender's signature (DKIM) did not pass". To check: in Gmail, open an email you sent, "Show original", and look at the DKIM line: `radiomilwaukee.org` is fine, `gappssmtp.com` is the problem. The fix is for the Workspace admin: Google Admin console, Apps, Google Workspace, Gmail, "Authenticate email", generate a key, add the TXT record it shows at GoDaddy, then "Start authentication". Until then, only Bandcamp's auto-forwarded email works, and this is a known limitation.
+
 ## Certificates and renewal dates
 
 The bridge uses a private certificate authority (CA, the signer that vouches for a certificate) made for this project, because the bridge has no public hostname.
