@@ -26,7 +26,8 @@ PROBES=(
   "Demo agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes aircdemo mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
   # One skill listing per sandbox per run, saved for the agent-made skill check below (no second call: gateway
   # load is what made the forwards drop). COLUMNS=200 so the table does not cut names short with "…".
-  "Agent skills|bad=0; for s in airc aircdemo; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/openshell sandbox exec -n \"\$s\" -- bash -lc 'COLUMNS=200 hermes skills list --source local' > ${HOME}/.aircheck/skills-list.\$s 2>/dev/null; grep -q rlr-description-safety ${HOME}/.aircheck/skills-list.\$s || bad=1; done; exit \$bad"
+  # The listing can hang inside the sandbox (seen Oct 29): 45 s cap, and a timed-out listing keeps the last good file.
+  "Agent skills|bad=0; for s in airc aircdemo; do f=${HOME}/.aircheck/skills-list.\$s; XDG_RUNTIME_DIR=/run/user/1001 timeout 45 ${HOME}/.local/bin/openshell sandbox exec -n \"\$s\" -- bash -lc 'COLUMNS=200 hermes skills list --source local' > \$f.tmp 2>/dev/null && mv \$f.tmp \$f; rm -f \$f.tmp; grep -q rlr-description-safety \$f || bad=1; done; exit \$bad"
   "Hermes forward|systemctl is-active --quiet aircheck-hermes-forward"
   "Demo Hermes forward|systemctl is-active --quiet aircheck-hermes-demo-forward"
 )
@@ -62,11 +63,12 @@ healed=()
 for probe in "${PROBES[@]}"; do
   name="${probe%%|*}"
   cmd="${probe#*|}"
-  if ! bash -c "${cmd}" >/dev/null 2>&1; then
+  # ponytail: one cap per probe so a hung command can never stall the run (the timer cannot start a new one meanwhile).
+  if ! timeout "${PROBE_TIMEOUT:-90}" bash -c "${cmd}" >/dev/null 2>&1; then
     box="" unit=""
     [[ "${name}" == "Hermes" ]] && box="airc" unit="aircheck-hermes-forward.service"
     [[ "${name}" == "Demo Hermes" ]] && box="aircdemo" unit="aircheck-hermes-demo-forward.service"
-    if [[ -n "${box}" ]] && heal "${box}" "${unit}" "${cmd}" && bash -c "${cmd}" >/dev/null 2>&1; then
+    if [[ -n "${box}" ]] && heal "${box}" "${unit}" "${cmd}" && timeout "${PROBE_TIMEOUT:-90}" bash -c "${cmd}" >/dev/null 2>&1; then
       healed+=("${name}")
       echo "watchdog: ${name} link dropped, reconnected at $(date +%H:%M)"
     else

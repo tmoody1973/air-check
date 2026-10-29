@@ -10,3 +10,5 @@ ExecStart=/home/user/.aircheck/watchdog.sh
 # KillMode=control-group systemd killed it when the oneshot exited, 11 s after the "reconnected" line
 # (Oct 29, 12:54). `process` kills only watchdog.sh itself, so the healed forward stays up.
 KillMode=process
+# A oneshot has no start timeout by default; a run that still hangs is ended so the next timer tick can start.
+TimeoutStartSec=10min
