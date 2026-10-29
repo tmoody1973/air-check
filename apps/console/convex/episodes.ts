@@ -1,4 +1,4 @@
-import { episodeStatus, type EpisodeFacts, type LinkedPackageStatus } from "@aircheck/core";
+import { episodeStatus, isShowDate, type EpisodeFacts, type LinkedPackageStatus } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -12,12 +12,7 @@ import { workspaceV } from "./schema";
 type EpisodeDoc = Doc<"episodes">;
 type Question = EpisodeDoc["questions"][number];
 
-/** A real calendar date written yyyy-mm-dd. */
-export function isShowDate(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const [y, m, d] = s.split("-").map(Number) as [number, number, number];
-  return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10) === s;
-}
+export { isShowDate };
 
 /** Real package ids are deterministic (core buildPackageDraft): pkg-M-D-YY. */
 export const packageIdFor = (showDate: string) => {
@@ -99,13 +94,14 @@ const notFound = (message: string) => new ConvexError({ code: "NOT_FOUND", messa
 
 /**
  * Why a rerun mark is refused, in plain words; [] when it is fine. Every path that sets rerunOf (the Episodes row, the
- * answer Yes, the agent's route) checks the original here: an earlier 2026 show that exists and is not itself a rerun.
+ * answer Yes, the agent's route) checks the original here: an earlier show. A 2026 original must exist and not itself
+ * be a rerun; a pre-2026 one has no row (the backlog is 2026 only), so its date is all there is to check (I2).
  */
 async function rerunProblems(ctx: QueryCtx, showDate: string, rerunOf: string): Promise<string[]> {
   if (!isShowDate(showDate)) return ["showDate must be a real date, yyyy-mm-dd"];
   if (!isShowDate(rerunOf)) return ["rerunOf must be a real date, yyyy-mm-dd"];
   if (rerunOf >= showDate) return ["rerunOf must be an earlier show than showDate"];
-  if (!rerunOf.startsWith("2026-")) return ["the original must be a 2026 show"];
+  if (rerunOf < "2026-01-01") return [];
   const original = await episodeByDate(ctx, rerunOf);
   if (!original) return ["no show on that date"];
   return original.rerunOf ? ["that show is itself a rerun"] : [];

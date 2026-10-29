@@ -224,7 +224,7 @@ describe("POST /agent/episodes/rerun", () => {
   });
 });
 
-describe("the rerun original must be a real 2026 show that is not itself a rerun (review fix 1)", () => {
+describe("the rerun original: an earlier 2026 show that is not itself a rerun, or any pre-2026 date (review fix 1, I2)", () => {
   const reason = async (p: Promise<unknown>) => {
     try {
       await p;
@@ -242,8 +242,25 @@ describe("the rerun original must be a real 2026 show that is not itself a rerun
   const CASES = [
     ["2026-03-20", "no show on that date"],
     ["2026-05-01", "that show is itself a rerun"],
-    ["2025-12-26", "the original must be a 2026 show"],
+    ["2026-08-01", "rerunOf must be an earlier show than showDate"],
+    ["2000-00-00", "rerunOf must be a real date, yyyy-mm-dd"],
   ] as const;
+
+  // I2: a 2025 original has no row (the backlog is 2026 only), so it is accepted without one, by every caller.
+  test("a pre-2026 original is accepted by markRerun, answer Yes and the agent route", async () => {
+    const t = await setupShows();
+    await t.withIdentity(human).mutation(api.episodes.markRerun, { showDate: "2026-07-17", rerunOf: "2025-12-19" });
+    expect(await row(t)).toMatchObject({ rerunOf: "2025-12-19", rerunSource: "episodes" });
+
+    await upsert(t, episode("2026-01-09", [{ id: "rerun", text: "Is 2026-01-09 a rerun of 2025-12-19?", kind: "rerun", rerunOf: "2025-12-19" }]));
+    await t.withIdentity(human).mutation(api.episodes.answer, { showDate: "2026-01-09", questionId: "rerun", answer: "Yes" });
+    expect(await row(t, "2026-01-09")).toMatchObject({ rerunOf: "2025-12-19", rerunSource: "detected" });
+
+    await upsert(t, episode("2026-01-16"));
+    const res = await post(t, { showDate: "2026-01-16", rerunOf: "2025-06-06" });
+    expect(res.status).toBe(200);
+    expect(await row(t, "2026-01-16")).toMatchObject({ rerunOf: "2025-06-06", rerunSource: "chat" });
+  });
 
   test("markRerun refuses each with a plain reason and writes nothing", async () => {
     const t = await setupShows();

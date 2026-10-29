@@ -232,6 +232,14 @@ test("rerunCandidate: skipped when already a rerun or declined", () => {
   expect(rerunCandidate(ep("2026-04-03", { ...base, rerunOf: "2026-03-06" }), [earlier])).toBeNull();
 });
 
+test("I2: a stamp that is not a real date gives no stamp date and no rerun candidate", () => {
+  const f = (name: string) => ({ id: name, name, size: 600_000_000 });
+  const a = assembleEpisode("3-6-26", [f("RLR - Full Hour 1 - 000000.wav"), f("RLR - Full Hour 2 - 000000.wav")]);
+  expect(a.stampDate).toBeUndefined();
+  expect(rerunCandidate(ep("2026-04-03", { stampDate: "2000-00-00" }), [])).toBeNull();
+  expect(rerunCandidate(ep("2026-04-03", { stampDate: "2025-12-19" }), [])?.of).toBe("2025-12-19");
+});
+
 test("assemble exposes the MMDDYY stamp date", () => {
   const f = (name: string) => ({ id: name, name, size: 600_000_000 });
   const a = assembleEpisode("3-6-26", [

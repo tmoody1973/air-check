@@ -1,4 +1,5 @@
 import { normalize } from "../tracklist/normalize";
+import { isShowDate } from "./dates";
 import type { EpisodeFacts } from "./status";
 
 const OVERLAP = 0.8;
@@ -19,7 +20,7 @@ export function rerunCandidate(e: EpisodeFacts, earlier: EpisodeFacts[]): { of: 
     }
     if (best) return { of: best.of, reason: `${Math.round(best.share * 100)}% of the tracks match the ${best.of} show.` };
   }
-  if (e.stampDate && e.stampDate < e.showDate)
+  if (e.stampDate && isShowDate(e.stampDate) && e.stampDate < e.showDate)
     return { of: e.stampDate, reason: `The audio files are stamped ${e.stampDate}.` };
   if (e.docTitle && /\(evergreen\)/i.test(e.docTitle))
     return { of: "", reason: "The Drive doc title says (evergreen)." };

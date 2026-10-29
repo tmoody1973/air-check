@@ -91,6 +91,8 @@ describe("EpisodesView table", () => {
     expect(within(rowOf("2026-01-02")).getByRole("link", { name: "open Chat" })).toHaveAttribute("href", "/chat");
     expect(within(rowOf("2026-01-09")).getByText(/Audio folder unclear — copy the two hour files to the inbox by hand/)).toBeInTheDocument();
     expect(within(rowOf("2026-01-09")).getByText(/aircheck-audio\/inbox\/2026-01-09/)).toBeInTheDocument();
+    expect(rowOf("2026-01-09")).toHaveTextContent("then draft it from the Tracklist page"); // I4: not a dead end
+    expect(within(rowOf("2026-01-09")).getByRole("link", { name: "Tracklist page" })).toHaveAttribute("href", "/tracklist");
     expect(within(rowOf("2026-01-16")).getByText("Download failed (Box couldn't find the file)")).toBeInTheDocument();
   });
 });
@@ -181,6 +183,13 @@ describe("EpisodesView reruns", () => {
     expect(rowOf("2026-01-16")).toHaveTextContent("(marked here)");
     await act(async () => fireEvent.click(within(r).getByRole("button", { name: "Undo" })));
     expect(acts.unmarkRerun).toHaveBeenCalledWith({ showDate: "2026-01-09" });
+  });
+
+  it("I2: a pre-2026 original is plain text (it has no row to link to)", () => {
+    setup([ep("2026-01-02", { status: "rerun", rerunOf: "2025-12-19", rerunSource: "detected" })], { today: "2026-01-02" });
+    const r = rowOf("2026-01-02");
+    expect(r).toHaveTextContent("Rerun of Dec 19, 2025 (confirmed)");
+    expect(within(r).queryByRole("link", { name: "Dec 19, 2025" })).not.toBeInTheDocument();
   });
 
   it("R12: a confirmed (detected) rerun's Undo is labelled 'not a rerun'", () => {

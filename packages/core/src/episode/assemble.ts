@@ -1,3 +1,5 @@
+import { isShowDate } from "./dates";
+
 export interface BoxFile {
   id: string;
   name: string;
@@ -67,7 +69,8 @@ export function assembleEpisode(folderName: string, files: BoxFile[]): EpisodeAs
     if (!h1 || !h2) continue;
     const suffixes = [h1.name.match(p.h1)?.[1], h2.name.match(p.h2)?.[1]].filter(Boolean);
     const stamp = suffixes[0]?.match(/^(\d{2})(\d{2})(\d{2})$/);
-    const stampDate = stamp ? { stampDate: `20${stamp[3]}-${stamp[1]}-${stamp[2]}` } : {};
+    const stamped = stamp && `20${stamp[3]}-${stamp[1]}-${stamp[2]}`;
+    const stampDate = stamped && isShowDate(stamped) ? { stampDate: stamped } : {};
     if (suffixes.some((s) => s !== date.mmddyy))
       return { status: "ask", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ...stampDate, ignored, flags: ["date mismatch"] };
     return { status: "ready", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ...stampDate, ignored, flags: sizeFlags(h1, h2) };

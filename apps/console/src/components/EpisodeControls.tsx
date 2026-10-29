@@ -1,4 +1,5 @@
 import { ConvexError } from "convex/values";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { showDateLabel } from "../lib/date";
 import { BTN } from "./MixcloudConnection";
@@ -127,7 +128,8 @@ export function RerunLine({ e, ctx }: { e: EpisodeRow; ctx: RowCtx }) {
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <p>
-          Rerun of <a href={`#ep-${of}`} className={LINK}>{showDateLabel(of)}</a> {SOURCE_SAID[source]}. Not drafted or posted.
+          {/* I2: a pre-2026 original has no row on this page to link to. */}
+          Rerun of {of < "2026-01-01" ? showDateLabel(of) : <a href={`#ep-${of}`} className={LINK}>{showDateLabel(of)}</a>} {SOURCE_SAID[source]}. Not drafted or posted.
         </p>
         <button type="button" className={SECONDARY} disabled={busy} onClick={() => save(() => ctx.actions.unmarkRerun({ showDate: e.showDate }), `${showDateLabel(e.showDate)} is back in the backlog`)}>
           {source === "detected" ? "Undo: not a rerun" : "Undo"}
@@ -162,7 +164,10 @@ export function MarkForm({ showDate, ctx, onClose }: { showDate: string; ctx: Ro
 export function AudioAsk({ showDate }: { showDate: string }) {
   return (
     <div className="text-sm">
-      <p>Audio folder unclear — copy the two hour files to the inbox by hand.</p>
+      <p>
+        Audio folder unclear — copy the two hour files to the inbox by hand, then draft it from the{" "}
+        <Link href="/tracklist" className={LINK}>Tracklist page</Link>.
+      </p>
       <details className="mt-1 text-ink-soft">
         <summary className="w-fit cursor-pointer font-medium text-ink underline underline-offset-2">How</summary>
         <p className="mt-1 max-w-[65ch]">
