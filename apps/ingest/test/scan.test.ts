@@ -285,8 +285,17 @@ describe("I3: rows for dates no source has any more are pruned, only after a com
     for (const d of dates) w.cv.rows.set(d, { ...structuredClone(w.cv.rows.get("2026-01-30")!), showDate: d });
   };
 
-  test("a complete scan prunes to the dates it found (a not-connected source is fine)", async () => {
-    const w = await make({ dropboxToken: undefined });
+  test("R18: a not-connected source blocks prune, even when a stored date is absent", async () => {
+    const w = await make({ googleToken: undefined });
+    await runScan(w.deps);
+    stale(w, "2026-02-27");
+    await runScan(w.deps);
+    expect(w.cv.prunes).toEqual([]);
+    expect(w.cv.rows.has("2026-02-27")).toBe(true);
+  });
+
+  test("a scan that read all three sources prunes to the dates it found", async () => {
+    const w = await make();
     await runScan(w.deps);
     stale(w, "2026-02-27"); // its doc was renamed to another date
     await runScan(w.deps);

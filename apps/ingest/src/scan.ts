@@ -167,8 +167,10 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   const mem = deps.memory.lastGood;
   const failed: SourceName[] = [];
   let uncached = false;
+  let absent = false;
   const use = <T>(name: SourceName, key: keyof typeof mem, r: Read<T>): Map<string, T[]> => {
     if (r === ABSENT) {
+      absent = true;
       delete mem[key];
       return new Map();
     }
@@ -207,8 +209,9 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   }
   const partial = failed.length ? ` failed=${failed.join("_")}` : "";
   deps.log(`ingest step=scan ok=${ok === episodes.length && !failed.length} stored=${ok} questions=${questions}${partial} ms=${Date.now() - t0}`);
-  // I3: only a scan that read every connected source knows a date is gone (a renamed or deleted doc).
-  if (deps.memory.lastScanComplete) await prune(deps, episodes.map((e) => e.showDate));
+  // I3/R18: only a scan that read all three sources knows a date is gone (a renamed or deleted doc). A not-connected
+  // source blocks it too, or disconnecting Google would delete Drive-only rows and Tarik's answers on them.
+  if (deps.memory.lastScanComplete && !absent) await prune(deps, episodes.map((e) => e.showDate));
 }
 
 async function prune(deps: ScanDeps, keep: string[]): Promise<void> {
