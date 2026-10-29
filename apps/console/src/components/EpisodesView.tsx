@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { blankFridays, summaryLine } from "../lib/episodes";
+import { useWide } from "../lib/wide";
 import { AddShowDate, type AddShowActions } from "./AddShowDate";
 import type { EpisodeActions, EpisodeRow, RowCtx } from "./EpisodeControls";
 import { COLUMN_SOURCE, EpisodeItem, type SourceStates } from "./EpisodeItem";
@@ -19,17 +20,6 @@ const SOURCES = ["box", "google", "dropbox"] as const;
 const COLUMNS = ["audio", "tracklist", "notes"] as const;
 const th = "px-3 py-2.5 text-left align-top font-mono text-[10.5px] font-normal uppercase tracking-[0.1em] text-muted";
 const NOTE_LINK = "font-sans text-xs normal-case tracking-normal text-ink-soft underline underline-offset-2";
-
-// R15: cards below Tailwind's md (768px), where the 720px table would scroll sideways. One layout is rendered, not
-// both hidden by CSS, so ids, labels and the #ep-<date> links stay unique. No matchMedia (tests, server) = table.
-const WIDE = "(min-width: 768px)";
-const subscribe = (cb: () => void) => {
-  if (typeof window === "undefined" || !window.matchMedia) return () => undefined;
-  const m = window.matchMedia(WIDE);
-  m.addEventListener("change", cb);
-  return () => m.removeEventListener("change", cb);
-};
-const useWide = () => useSyncExternalStore(subscribe, () => !window.matchMedia || window.matchMedia(WIDE).matches, () => true);
 
 export function EpisodesView({
   data,

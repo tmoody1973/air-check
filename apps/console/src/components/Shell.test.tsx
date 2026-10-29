@@ -70,6 +70,10 @@ describe("Shell nav targets", () => {
     render(<Shell title="Today" workspace="real" active="today">x</Shell>);
     expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Episodes" })).toHaveAttribute("href", "/episodes");
   });
+  it("Release radar links to the built radar page (Plan 8)", () => {
+    render(<Shell title="Today" workspace="real" active="today">x</Shell>);
+    expect(within(screen.getByRole("navigation", { name: "Workspace" })).getByRole("link", { name: "Release radar" })).toHaveAttribute("href", "/release-radar");
+  });
 });
 
 describe("Shell chat links", () => {

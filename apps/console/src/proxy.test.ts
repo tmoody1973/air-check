@@ -81,3 +81,25 @@ describe("proxy options", () => {
     expect(opts.authorizedParties).toBeUndefined();
   });
 });
+
+// Plan 8: the Release radar embeds Bandcamp's own player in an iframe. The console sets no Content-Security-Policy
+// today, so nothing blocks it. A CSP added later must allow it, or every player silently goes blank.
+describe("CSP note (Bandcamp player)", () => {
+  const NOTE = "A Content-Security-Policy now exists: include frame-src https://bandcamp.com so the Release radar's Bandcamp player still loads, then update this test.";
+
+  it("next.config.ts sets no Content-Security-Policy header", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { default: config } = await import("../next.config");
+    const source = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
+    expect(config.headers, NOTE).toBeUndefined();
+    expect(/content-security-policy/i.test(source), NOTE).toBe(false);
+  });
+
+  it("the proxy adds none either", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", FAKE_PK);
+    vi.stubEnv("CLERK_SECRET_KEY", "sk_live_fake_not_a_real_key");
+    const res = await run("/demo");
+    expect(res.headers.get("content-security-policy"), NOTE).toBeNull();
+    vi.unstubAllEnvs();
+  });
+});

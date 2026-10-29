@@ -39,7 +39,7 @@ describe("Today when the summary is null", () => {
 });
 
 describe("Today backlog line", () => {
-  const summary = { awaiting: [], openClaims: [], releases: { count: 0, labels: [], items: [] }, blockedSince: 0 };
+  const summary = { awaiting: [], openClaims: [], releases: { count: 0, labels: [], items: [], embargoed: 0, byTab: { bandcamp: 0, cosign: 0 } }, blockedSince: 0 };
   const ep = (status: string) => ({ status });
 
   it("links to Episodes with the count still to clear", () => {
@@ -53,5 +53,50 @@ describe("Today backlog line", () => {
     results["today.summary"] = summary;
     render(<TodayPage />);
     expect(screen.queryByRole("link", { name: /Backlog:/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Today release radar card", () => {
+  const releases = {
+    count: 4,
+    labels: ["Night Shift"],
+    items: [
+      { artist: "Nova Reyes", title: "Low Tide", label: "Night Shift", type: "album", tab: "bandcamp" },
+      { artist: "Co Artist", title: "Co Title", tab: "cosign" },
+    ],
+    embargoed: 1,
+    byTab: { bandcamp: 2, cosign: 2 },
+  };
+  const summary = { awaiting: [], openClaims: [], releases, blockedSince: 0 };
+
+  it("counts only new Bandcamp-tab records and links to the radar", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    const card = screen.getByRole("heading", { name: "New Bandcamp releases" }).closest("section")!;
+    expect(card).toHaveTextContent("2 new");
+    expect(card).toHaveTextContent("Nova Reyes · Low Tide");
+    expect(card).not.toHaveTextContent("Co Artist");
+    expect(screen.getByRole("link", { name: "Open release radar" })).toHaveAttribute("href", "/release-radar");
+  });
+
+  it("when the newest items are all co-signs the count stands alone, with no empty list", () => {
+    results["today.summary"] = { ...summary, releases: { ...releases, items: [releases.items[1]] } };
+    render(<TodayPage />);
+    const card = screen.getByRole("heading", { name: "New Bandcamp releases" }).closest("section")!;
+    expect(card).toHaveTextContent("2 new");
+    expect(card.querySelector("ul")).toBeNull();
+  });
+
+  it("a second line counts new co-signs and opens that tab", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    expect(screen.getByRole("link", { name: "2 new co-signs" })).toHaveAttribute("href", "/release-radar?tab=cosign");
+  });
+
+  it("an embargoed item shows its pill, never its name", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    expect(screen.getByText("Embargoed")).toHaveClass("bg-caution-bg");
+    expect(screen.getByText(/1 new release is embargoed/)).toBeInTheDocument();
   });
 });
