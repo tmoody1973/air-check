@@ -112,6 +112,9 @@ test("tracklistDifference: null when exact; else the first difference, in the or
   expect(got('HOUR 1\naja monet - "the black sea"\nHOUR 2\nB - "Two" feat. C\nD - "Four"')).toMatch(/^hour 1 track 2 is missing/); // hour
 });
 
-test("parseDriveTracklist: a pressed-dash track above HOUR 1 is still flagged, not dropped as a title", () => {
-  expect(parseDriveTracklist('Artist -"Title"\nHOUR 1\nA - "B"').bad.map((b) => b.raw)).toEqual(['Artist -"Title"']);
+test("parseDriveTracklist: above HOUR 1 only a spaced dash is track-like; a pressed dash there is a title, under it a track", () => {
+  const p = parseDriveTracklist('Rhythm Lab Radio -"Best of"\nHOUR 1\nA -"B"\nC - "D"');
+  expect(p.bad).toEqual([]);
+  expect(p.tracks.map((t) => [t.artist, t.title])).toEqual([["A", "B"], ["C", "D"]]);
+  expect(parseDriveTracklist('Artist - "Title"\nHOUR 1\nA - "B"').bad.map((b) => b.raw)).toEqual(['Artist - "Title"']);
 });
