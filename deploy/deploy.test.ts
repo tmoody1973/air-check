@@ -214,7 +214,8 @@ describe("deploy files", () => {
     writeFileSync(join(home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_ALLOWED_IDS=1\n");
     const stub = (path: string, body: string) => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); };
     stub(join(home, "bin/timeout"), 'shift; exec "$@"');
-    stub(join(home, "bin/sudo"), `echo "$@" >> "${home}/sudo.log"\n${opts.restartFixes ? `touch "${home}/fixed"` : "true"}`);
+    // printf, not echo: dash's echo (CI's /bin/sh) swallows a leading -n as its own flag.
+    stub(join(home, "bin/sudo"), `printf '%s\\n' "$*" >> "${home}/sudo.log"\n${opts.restartFixes ? `touch "${home}/fixed"` : "true"}`);
     const lists = { airc: opts.skills?.airc ?? "", aircdemo: opts.skills?.aircdemo ?? "" };
     stub(join(home, ".local/bin/nemohermes"), [
       'case "$*" in',
