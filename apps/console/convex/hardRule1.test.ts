@@ -41,6 +41,8 @@ test("the public writes are exactly the allowlist", async () => {
       "mixcloud.connected", "mixcloud.disconnected",
       // Plan 6: the ingest service (its own token) and the Episodes page (a signed-in real human). None can decide.
       "ingest.upsert", "ingest.setFetch", "ingest.requestDraft", "ingest.sourceStatus",
+      // I3: removes episode rows for dates gone from every source; never one with a package or a rerun mark.
+      "ingest.prune",
       "episodes.answer", "episodes.markRerun", "episodes.unmarkRerun",
       // Plan 6 Task 3: Connect Google / Connect Dropbox record state and an account label only (a signed-in real human).
       "episodes.sourceConnected", "episodes.sourceDisconnected",
@@ -397,7 +399,7 @@ test("ingest and episodes code never reach the gate, decide, publish or descript
 test("every ingest function checks INGEST_TOKEN first", () => {
   const text = src("ingest");
   const names = [...text.matchAll(/export const (\w+) = (?:query|mutation)\(/g)].map((m) => m[1]!);
-  expect(names.sort()).toEqual(["list", "requestDraft", "setFetch", "sourceStatus", "upsert"]);
+  expect(names.sort()).toEqual(["list", "prune", "requestDraft", "setFetch", "sourceStatus", "upsert"]);
   for (const name of names) expect(fnBody(text, `export const ${name} = `), name).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requireIngest\(token\);/);
   expect(text).not.toMatch(/\b(?:internalMutation|internalQuery|action|httpAction)\b/);
 });
