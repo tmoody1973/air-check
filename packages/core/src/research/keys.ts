@@ -73,7 +73,8 @@ const padded = (s: string) => ` ${normalize(s)} `;
 export function embargoedSearch(query: string, active: ActiveEmbargo[]): boolean {
   if (!active.length) return false;
   if (embargoMatches({ description: query }, active).blocking.length) return true;
-  const q = padded(query);
+  // foldText, not normalize: normalize drops a feat. clause and everything after it, which would hide the title.
+  const q = ` ${foldText(query)} `;
   return active.some((e) => {
     const title = embargoTitle(e.title);
     return title !== "" && q.includes(` ${title} `) && q.includes(padded(e.artist));

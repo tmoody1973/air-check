@@ -24,7 +24,7 @@ describe("createCrateProxy against a fake Crate", () => {
 
   it("lists only allowlisted tools", async () => {
     const names = (await proxy.listTools()).map((t) => t.name).sort();
-    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep", "wikipedia_links"]);
   });
 
   it("passes arguments through and hides parent secrets from the child", async () => {

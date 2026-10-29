@@ -24,10 +24,10 @@ const properties: Record<keyof AgentPackageInput, object> = {
 };
 const FIELDS = Object.keys(properties);
 
-const result = (text: string, isError = false): CallToolResult => ({ content: [{ type: "text", text }], isError });
+export const result = (text: string, isError = false): CallToolResult => ({ content: [{ type: "text", text }], isError });
 
 /** POSTs only the named fields of `args` with the bearer token; null when Air Check could not be reached. */
-async function postFields(
+export async function postFields(
   doFetch: typeof fetch,
   url: string,
   token: string,
@@ -50,7 +50,7 @@ async function postFields(
   }
 }
 
-const problemList = (data: Record<string, unknown>) => (Array.isArray(data.problems) ? data.problems.map(String) : ["(no details)"]);
+export const problemList = (data: Record<string, unknown>) => (Array.isArray(data.problems) ? data.problems.map(String) : ["(no details)"]);
 
 export interface PackageSubmitTool {
   tool: Tool;

@@ -254,6 +254,8 @@ describe("embargoes in research (R2, R8)", () => {
     expect(embargoedSearch("artist a biography", active)).toBe(false);
     expect(embargoedSearch("Up release date", [{ artist: "Ãrtist A", title: "Up", until: null }])).toBe(false);
     expect(embargoedSearch("artist a up", [{ artist: "Ãrtist A", title: "Up", until: null }])).toBe(true);
+    // Task 1 carry: a feat. clause in the query must not hide the words after it.
+    expect(embargoedSearch("Artist A feat. B Up label", [{ artist: "Ãrtist A", title: "Up", until: null }])).toBe(true);
     expect(EMBARGOED_SEARCH_REFUSAL).not.toMatch(/embargo/i);
   });
 });

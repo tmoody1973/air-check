@@ -13,6 +13,8 @@ export interface BridgeConfig {
   /** Demo sandbox pair: both set or both absent. Absent means no /aircheck-demo/mcp route. */
   demoMcpToken?: string;
   demoSubmitToken?: string;
+  /** Tavily key for source_search (Plan 7). Optional: absent means source_search says web search is not configured. */
+  tavilyApiKey?: string;
 }
 
 const MIN_TOKEN = 32;
@@ -68,5 +70,6 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
     agentSubmitToken,
     demoMcpToken,
     demoSubmitToken,
+    tavilyApiKey: env.TAVILY_API_KEY?.trim() || undefined,
   };
 }

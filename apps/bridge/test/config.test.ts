@@ -50,6 +50,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...env, CONVEX_SITE_URL: "http://x.convex.site" })).toThrow("CONVEX_SITE_URL");
   });
 
+  it("reads TAVILY_API_KEY as optional", () => {
+    expect(loadConfig(env).tavilyApiKey).toBeUndefined();
+    expect(loadConfig({ ...env, TAVILY_API_KEY: "  " }).tavilyApiKey).toBeUndefined();
+    expect(loadConfig({ ...env, TAVILY_API_KEY: " tvly-abc " }).tavilyApiKey).toBe("tvly-abc");
+  });
+
   describe("demo sandbox tokens", () => {
     const demo = { AIRCHECK_DEMO_MCP_TOKEN: "d".repeat(32), DEMO_AGENT_SUBMIT_TOKEN: "m".repeat(32) };
 

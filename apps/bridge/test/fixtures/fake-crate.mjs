@@ -13,6 +13,7 @@ const tools = [
   "bandcamp_get_artist_page",
   "bandcamp_search_bandcamp",
   "bandcamp_get_fan_collection",
+  "wikipedia_links",
 ].map((name) => ({
   name,
   description: `fake ${name}`,
@@ -35,6 +36,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     case "bandcamp_get_fan_collection":
       writeFileSync(`${name}-called`, "yes");
       return text("fetched");
+    case "wikipedia_links":
+      return text("Album A came out on 2026-10-10. https://en.wikipedia.org/wiki/Album_A https://label.example/album-a");
     case "musicbrainz_sleep":
       await new Promise((r) => setTimeout(r, 10_000));
       return text("slept");

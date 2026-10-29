@@ -14,6 +14,8 @@ import { episodeMarkRerunTool, packageGetTool, packageReviseTool, packageSubmitT
 import { bearerOk } from "./auth.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import { createCrateProxy } from "./crateProxy.js";
+import { researchSubmitTool, sourceSearchTool } from "./researchTools.js";
+import { annotateCrateResult, createSourceLedger } from "./sources.js";
 
 const MAX_BODY = 131_072; // NemoClaw's MCP policy cap on request bodies
 
@@ -94,12 +96,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
   await transport.handleRequest(req, res, body);
 }
 
-/** The private HTTPS bridge: /crate/mcp (allowlisted Crate) and /aircheck/mcp (package_submit, package_revise, read-only package_get, episode_mark_rerun),
+/** The private HTTPS bridge: /crate/mcp (allowlisted Crate, each result's URLs given source ids) and /aircheck/mcp
+ * (package_submit, package_revise, read-only package_get, episode_mark_rerun, radar_get, source_search, research_submit),
  * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
-  const crate = createCrateProxy(config.crate);
+  // One ledger for every route: ids Crate issues on /crate/mcp are cited on /aircheck/mcp. Shared by real and demo (R4).
+  const ledger = createSourceLedger();
+  const crate = createCrateProxy(config.crate, (name, result) => annotateCrateResult(ledger, name, result));
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
-    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool].map((make) => make({ siteUrl: config.convexSiteUrl, token: submitToken }));
+    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool, researchSubmitTool].map((make) =>
+      make({ siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey }),
+    );
     return {
       token,
       listTools: async () => tools.map((t) => t.tool),
