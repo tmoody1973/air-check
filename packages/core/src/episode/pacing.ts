@@ -2,7 +2,10 @@ import { episodeStatus, type EpisodeFacts } from "./status";
 
 const oldestFirst = (a: EpisodeFacts, b: EpisodeFacts) => a.showDate.localeCompare(b.showDate);
 
-/** Oldest show that needs its audio fetched, or null once `max` shows' audio is on disk. */
+/**
+ * Oldest show that needs its audio fetched, or null once `max` shows' audio is on disk. Only shows with a package
+ * (I1): a show that never gets one (draft-failed, rerun, a new question) would otherwise hold its slot forever.
+ */
 export function nextAudioToFetch(episodes: EpisodeFacts[], onDiskCount: number, max = 3): EpisodeFacts | null {
   if (onDiskCount >= max) return null;
   return (
@@ -12,7 +15,7 @@ export function nextAudioToFetch(episodes: EpisodeFacts[], onDiskCount: number, 
         (e) =>
           e.audio.status === "ready" &&
           !e.audioOnDisk &&
-          ["ready-to-draft", "drafting", "awaiting-review"].includes(episodeStatus(e).status),
+          ["drafting", "awaiting-review"].includes(episodeStatus(e).status),
       ) ?? null
   );
 }

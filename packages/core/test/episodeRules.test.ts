@@ -58,19 +58,27 @@ test("status: package status wins", () => {
   expect(s("skipped")).toBe("skipped");
 });
 
+const prep = { packageStatus: "preparing_audio" } as const;
+
 test("nextAudioToFetch: oldest first, stops at max, skips questions and ask/incomplete", () => {
   const eps = [
     ep("2026-03-01", { audio: { status: "ask" } }),
     ep("2026-02-01", { audio: { status: "incomplete" } }),
     ep("2026-04-01", { questions: [{ id: "q", text: "?" }] }),
-    ep("2026-06-01"),
-    ep("2026-05-01", { audioOnDisk: true }),
-    ep("2026-05-08"),
+    ep("2026-06-01", prep),
+    ep("2026-05-01", { ...prep, audioOnDisk: true }),
+    ep("2026-05-08", prep),
   ];
   expect(nextAudioToFetch(eps, 0)?.showDate).toBe("2026-05-08");
   expect(nextAudioToFetch(eps, 2)?.showDate).toBe("2026-05-08");
   expect(nextAudioToFetch(eps, 3)).toBeNull();
   expect(nextAudioToFetch([], 0)).toBeNull();
+});
+
+test("I1: audio is fetched only once a package exists; ready-to-draft and draft-failed shows hold no disk slot", () => {
+  expect(nextAudioToFetch([ep("2026-01-02")], 0)).toBeNull();
+  expect(nextAudioToFetch([ep("2026-01-02", { draftAttempts: 2 })], 0)).toBeNull();
+  expect(nextAudioToFetch([ep("2026-01-02"), ep("2026-01-09", prep)], 0)?.showDate).toBe("2026-01-09");
 });
 
 test("nextAudioToFetch: also covers drafting and awaiting-review shows", () => {
@@ -244,5 +252,5 @@ test("R10: two finished drafts with no package is draft-failed, never picked aga
   expect(episodeStatus(ep("2026-01-02", { draftAttempts: 2, questions: [{ id: "q", text: "?" }] })).status).toBe("question");
   const eps = [ep("2026-01-02", { draftAttempts: 2 }), ep("2026-01-09")];
   expect(nextToDraft(eps, 0)?.showDate).toBe("2026-01-09");
-  expect(nextAudioToFetch(eps, 0)?.showDate).toBe("2026-01-09");
+  expect(nextAudioToFetch([eps[0]!, { ...eps[1]!, ...prep }], 0)?.showDate).toBe("2026-01-09");
 });

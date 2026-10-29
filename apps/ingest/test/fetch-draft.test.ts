@@ -19,6 +19,12 @@ const make = async (o: Parameters<typeof world>[0] = {}) => {
   await runScan(w.deps);
   return w;
 };
+/** I1: audio is fetched only for shows with a package; give every ready show the package a draft would make (pending audio). */
+const makePackaged = async (o: Parameters<typeof world>[0] = {}) => {
+  const w = await make(o);
+  for (const r of (await w.cv.convex.list()).episodes) if (r.status === "ready-to-draft") w.cv.packages.set(r.showDate, "preparing_audio");
+  return w;
+};
 const fetchDeps = (w: Awaited<ReturnType<typeof world>>, now = () => 0) => ({
   convex: w.cv.convex, log: w.deps.log, box: w.deps.box!.client, inboxDir: w.inboxDir, preparedDir: w.preparedDir, failures: new Map<string, { count: number; at: number }>(), now,
 });
@@ -26,7 +32,7 @@ const downloads = (w: Awaited<ReturnType<typeof world>>) => w.box.seen.filter((s
 
 describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () => {
   test("downloads the oldest ready show's two hours into inbox/<date>/ so matchInbox orders them, mode 0644", async () => {
-    const w = await make();
+    const w = await makePackaged();
     await fetchPass(fetchDeps(w));
     expect(downloads(w)).toEqual(["1001", "1002"]);
     const files = (await readdir(join(w.inboxDir, "2026-01-02"))).sort();
@@ -34,6 +40,18 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
     expect(matchInbox("2026-01-02", files)).toEqual({ ok: true, showDate: "2026-01-02", hour1: "1-9125.wav", hour2: "2-9126.wav" });
     for (const f of files) expect((await stat(join(w.inboxDir, "2026-01-02", f))).mode & 0o777).toBe(0o644);
     expect(w.cv.fetches).toEqual([{ showDate: "2026-01-02", status: "fetching" }, { showDate: "2026-01-02", status: "fetched" }]);
+  });
+
+  test("I1: a show with no package yet (ready to draft, or draft-failed) is never fetched; it gets its audio once drafted", async () => {
+    const w = await make();
+    w.cv.runs.push({ showDate: "2026-01-02", open: false }, { showDate: "2026-01-02", open: false }); // 01-02 draft-failed
+    const deps = fetchDeps(w);
+    await fetchPass(deps);
+    expect(downloads(w)).toEqual([]);
+    w.cv.packages.set("2026-01-30", "preparing_audio");
+    await fetchPass(deps);
+    await fetchPass(deps);
+    expect((await readdir(w.inboxDir)).sort()).toEqual(["2026-01-30"]);
   });
 
   test("inbox names put the hour first, whatever Box called the files (29934/29935, RLR - Full Hour 1/2, legacy)", () => {
@@ -52,7 +70,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   });
 
   test("the next pass fetches the next show; a 4th show waits while 3 shows' audio is on disk (inbox folders + prepared MP3s)", async () => {
-    const w = await make();
+    const w = await makePackaged();
     const deps = fetchDeps(w);
     await fetchPass(deps); // 01-02
     await fetchPass(deps); // 01-30 (01-09, 01-16, 01-23 have questions)
@@ -60,6 +78,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
     await mkdir(w.preparedDir, { recursive: true });
     await writeFile(join(w.preparedDir, "pkg-12-19-25.mp3"), "mp3"); // a third show, already joined
     w.cv.rows.set("2026-02-06", { ...structuredClone(w.cv.rows.get("2026-01-30")!), showDate: "2026-02-06" });
+    w.cv.packages.set("2026-02-06", "preparing_audio");
     const before = downloads(w).length;
     await fetchPass(deps);
     expect(downloads(w)).toHaveLength(before);
@@ -67,7 +86,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   });
 
   test("an audio question (RECAP folder, unclear audio) is never downloaded, even once answered (R5)", async () => {
-    const w = await make();
+    const w = await makePackaged();
     const deps = fetchDeps(w);
     w.cv.extra.set("2026-01-16", { questions: [{ id: "q", text: "?", kind: "audio", answer: "use them" }] });
     for (const d of ["2026-01-02", "2026-01-30"]) w.cv.packages.set(d, "succeeded"); // nothing else is waiting
@@ -79,7 +98,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   test("a failed download leaves no .part, is recorded, waits out the backoff, then is retried", async () => {
     let fail = true;
     let now = 0;
-    const w = await make({
+    const w = await makePackaged({
       download: { "GET /d": (req, res) => {
         const size = Number(req.query.get("size"));
         res.writeHead(200, { "content-length": String(size) });
@@ -106,7 +125,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   });
 
   test("ingest's own stale .ingest-part is removed at the start of a pass; Tarik's hand copy (.wav.part) is never touched", async () => {
-    const w = await make();
+    const w = await makePackaged();
     const dir = join(w.inboxDir, "2026-01-02");
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "2-9126.wav.ingest-part"), "half");
@@ -121,7 +140,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   });
 
   test.each(["hour1", "hour2"] as const)("a listed %s over 2 GB is refused before anything is downloaded or a folder made", async (h) => {
-    const w = await make();
+    const w = await makePackaged();
     const row = w.cv.rows.get("2026-01-02")!;
     row.audio[h]!.size = 2 * 1024 ** 3 + 1;
     await fetchPass(fetchDeps(w));
@@ -131,7 +150,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
   });
 
   test("a failed download with no finished hour removes its date folder, so it holds no disk slot", async () => {
-    const w = await make();
+    const w = await makePackaged();
     w.cv.rows.get("2026-01-02")!.audio.hour1!.size = 601 * MB; // Box sends 600: size_mismatch
     await fetchPass(fetchDeps(w));
     expect(w.cv.fetches.at(-1)).toEqual({ showDate: "2026-01-02", status: "failed", error: "size_mismatch" });
@@ -140,7 +159,7 @@ describe("fetch: the next show's audio, on demand (Review Focus 1 and 2)", () =>
 
   test("after 3 failures a show is not tried again (Episodes keeps 'failed'), and its slot goes to the next show", async () => {
     let now = 0;
-    const w = await make();
+    const w = await makePackaged();
     w.cv.rows.get("2026-01-02")!.audio.hour2!.size = 601 * MB; // hour 1 downloads fine; hour 2 never matches
     const deps = fetchDeps(w, () => now);
     for (let i = 0; i < MAX_FETCH_FAILURES; i++) {
@@ -188,6 +207,7 @@ describe("draft: one show at a time (Review Focus 4)", () => {
 
   test("the notes go only into the upsert (draft input), never into a log, a fetch record or a draft request", async () => {
     const w = await make();
+    w.cv.packages.set("2026-01-02", "preparing_audio"); // fetched (I1); 01-30 is drafted
     await fetchPass(fetchDeps(w));
     await draftPass({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
     const outside = JSON.stringify([w.logs, w.cv.fetches, w.cv.draftCalls, w.cv.sources, await w.cv.convex.list()]);
