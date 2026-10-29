@@ -20,8 +20,8 @@ export const goldenDraft = (overrides: Partial<PackageDraft> = {}): PackageDraft
 });
 
 /**
- * R6: the finished draft-package run that asked for a draft's tracks. Convex's packages.submit refuses a package whose
- * tracks differ from the latest such run for its show and workspace, so console tests insert one before submitting.
+ * The finished draft-package run that asked for a draft's tracks. The agent's route (R9) takes a package's tracks from
+ * the latest such run for its show and workspace, so console tests insert one before submitting.
  */
 export const draftRunFor = (d: Pick<PackageDraft, "workspace" | "showDate" | "tracks">, tracklistText = formatTracklist(d.tracks), createdAt = 1) => ({
   workspace: d.workspace, runId: `run-${d.workspace}-${d.showDate}-${createdAt}`, title: `Draft package · ${d.showDate}`, state: {}, updatedAt: createdAt,

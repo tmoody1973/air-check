@@ -14,7 +14,7 @@ const sourcesSchema = {
 
 const properties: Record<keyof AgentPackageInput, object> = {
   showDate: str("Show date, ISO yyyy-mm-dd"),
-  tracklistText: str("The raw tracklist for both hours, as written"),
+  tracklistText: str("Optional and ignored: Air Check fills the tracklist from the draft request. Leave it out."),
   leads: strs("Title artists, in order"),
   tags: strs("Mixcloud tags"),
   description: str("Public description, under 1,000 characters"),
@@ -67,7 +67,7 @@ export function packageSubmitTool(opts: { siteUrl: string; token: string; fetch?
       name: "package_submit",
       description:
         "Submit a Mixcloud package draft. Air Check rebuilds and checks it; a person reviews it in the console.",
-      inputSchema: { type: "object", properties, required: FIELDS.filter((k) => k !== "descriptionSources"), additionalProperties: false },
+      inputSchema: { type: "object", properties, required: FIELDS.filter((k) => k !== "descriptionSources" && k !== "tracklistText"), additionalProperties: false },
     },
 
     async call(args) {

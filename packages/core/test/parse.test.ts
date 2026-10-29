@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatTrack, formatTracklist, parseDriveTracklist, parseTracklist, tracklistDifference } from "../src/index";
+import { formatTrack, formatTracklist, parseDriveTracklist, parseTracklist } from "../src/index";
 import { readFixture } from "./helpers/fixtures";
 
 test("golden 10-2-26 parses to 15 + 16 with closing tracks", () => {
@@ -95,21 +95,6 @@ test("formatTracklist writes both hours under Hour headings and parses back to t
 test("parseDriveTracklist: a title line above HOUR 1 is not bad; a track-like line there still is", () => {
   expect(parseDriveTracklist('Rhythm Lab Radio\nHOUR 1\nA - "One"\nHOUR 2\nB - "Two"').bad).toEqual([]);
   expect(parseDriveTracklist('X - "Early"\nHOUR 1\nA - "One"').bad.map((b) => b.reason)).toEqual(["before-hour-marker"]);
-});
-
-// R6: the agent must hand back the tracklist it was given; the first difference is named so it can correct itself.
-test("tracklistDifference: null when exact; else the first difference, in the order a host reads it", () => {
-  const want = parseTracklist('HOUR 1\naja monet - "the black sea"\nB - "Two" feat. C\nHOUR 2\nD - "Four"').tracks;
-  const got = (text: string) => tracklistDifference(parseTracklist(text).tracks, want);
-  expect(got('Hour 1\naja monet - "the black sea"\nB - "Two" feat. C\n\nHour 2\nD - "Four"')).toBeNull();
-  expect(got('HOUR 1\nja monet - "the black sea"\nB - "Two" feat. C\nHOUR 2\nD - "Four"')).toBe(
-    `hour 1 track 1 'ja monet - "the black sea"' should be 'aja monet - "the black sea"'`,
-  );
-  expect(got('HOUR 1\naja monet - "the black sea"\nB - "Two"\nHOUR 2\nD - "Four"')).toBe(`hour 1 track 2 'B - "Two"' should be 'B - "Two" feat. C'`);
-  expect(got('HOUR 1\naja monet - "the black sea"\nHOUR 2\nD - "Four"')).toBe(`hour 1 track 2 is missing: it should be 'B - "Two" feat. C'`);
-  expect(got('HOUR 1\naja monet - "the black sea"\nB - "Two" feat. C\nHOUR 2\nD - "Four"\nE - "Five"')).toBe(`hour 2 track 2 'E - "Five"' should not be there`);
-  expect(got('HOUR 1\nB - "Two" feat. C\naja monet - "the black sea"\nHOUR 2\nD - "Four"')).toMatch(/^hour 1 track 1 /); // order
-  expect(got('HOUR 1\naja monet - "the black sea"\nHOUR 2\nB - "Two" feat. C\nD - "Four"')).toMatch(/^hour 1 track 2 is missing/); // hour
 });
 
 test("parseDriveTracklist: above HOUR 1 only a spaced dash is track-like; a pressed dash there is a title, under it a track", () => {

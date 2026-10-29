@@ -31,6 +31,12 @@ describe("package_submit", () => {
     expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual([...Object.keys(input), "descriptionSources"].sort());
   });
 
+  it("R9: tracklistText is optional and says Air Check fills the tracklist from the draft request", () => {
+    const { tool } = packageSubmitTool({ siteUrl: "https://x.convex.site", token, fetch: stub(201, {}).fetch });
+    expect(tool.inputSchema.required).not.toContain("tracklistText");
+    expect(JSON.stringify(tool.inputSchema.properties?.tracklistText)).toMatch(/Air Check fills the tracklist from the draft request/);
+  });
+
   it("sends only the seven fields with the bearer token", async () => {
     const s = stub(201, { packageId: "pkg-10-2-26", status: "preparing_audio" });
     const { call } = packageSubmitTool({ siteUrl: "https://x.convex.site/", token, fetch: s.fetch });

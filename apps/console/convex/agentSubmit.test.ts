@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { formatTrack } from "@aircheck/core";
+import { formatTrack, parseTracklist } from "@aircheck/core";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "../../../packages/core/test/helpers/fixtures";
 import { draftRunFor, goldenDraft, goldenTracks } from "../../../packages/core/test/helpers/goldens";
 import { internal } from "./_generated/api";
@@ -109,14 +109,6 @@ describe("POST /agent/packages", () => {
     expect(await res.json()).toEqual({ error: "ALREADY_EXISTS" });
   });
 
-  test("a bad tracklist is 400 with problems and writes nothing", async () => {
-    const t = await requested();
-    const res = await post(t, body({ tracklistText: `${tracklistText()}\nthis line has no separator` }));
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { problems: string[] }).problems.length).toBeGreaterThan(0);
-    expect(await rows(t)).toHaveLength(0);
-  });
-
   test("a body that is not the expected shape is 400", async () => {
     const t = await requested();
     expect((await post(t, { showDate: 5 })).status).toBe(400);
@@ -194,40 +186,55 @@ describe("POST /agent/packages", () => {
   });
 });
 
-// R6 (Tarik, Oct 28): pkg-5-22-26 said "ja monet" where Drive and Paper say "aja monet". The agent hands back the
-// tracklist it was given, exactly, or the submit is refused with the first difference, which reaches it as a 400.
-describe("POST /agent/packages: the tracklist lock (R6)", () => {
+// R9 (Oct 29): the tracklist is code's, never the model's. pkg-5-22-26 said "ja monet" where Drive and Paper say
+// "aja monet", and the model retyping the list normalises curly quotes and accents. So whatever tracklist the agent
+// sends is ignored: the package's tracks are the latest draft request's for the show and workspace, parsed in code.
+describe("POST /agent/packages: tracks come from the draft request (R9)", () => {
   const DEMO = "d".repeat(40);
   const AJA = "aja monet";
   const withArtist = (artist: string) => tracklistText().replace("Walter Bishop, Jr.", artist);
   const refused = async (res: Response) => ({ status: res.status, problems: ((await res.json()) as { problems?: string[] }).problems });
+  const tracksOf = async (t: ReturnType<typeof convexTest>) => (await rows(t)).map((r) => r.draft.tracks);
 
-  test("the aja monet case is refused with the first difference, real and demo alike, and writes nothing", async () => {
+  test("the aja monet case: the agent sent 'ja monet', the package has the request's 'aja monet', real and demo alike", async () => {
     vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
     const t = await requested(withArtist(AJA));
-    const want = { status: 400, problems: [`the tracklist must be exactly as given: hour 1 track 1 'ja monet - "N'Dugu's Prayer"' should be 'aja monet - "N'Dugu's Prayer"'`] };
-    expect(await refused(await post(t, body({ tracklistText: withArtist("ja monet") })))).toEqual(want);
-    expect(await refused(await post(t, body({ tracklistText: withArtist("ja monet") }), `Bearer ${DEMO}`))).toEqual(want);
+    expect((await post(t, body({ tracklistText: withArtist("ja monet") }))).status).toBe(201);
+    expect((await post(t, body({ tracklistText: withArtist("ja monet") }), `Bearer ${DEMO}`)).status).toBe(201);
+    const want = parseTracklist(withArtist(AJA)).tracks;
+    expect(want[0]!.artist).toBe(AJA);
+    expect(await tracksOf(t)).toEqual([want, want]);
+  });
+
+  test("curly quotes and accents the model flattened, a dropped or extra track, or no tracklist at all: the request's tracks", async () => {
+    const curly = withArtist("Björk’s Band");
+    const t = await requested(curly);
+    const want = parseTracklist(curly).tracks;
+    const lines = tracklistText().split("\n");
+    for (const sent of [withArtist("Bjork's Band"), lines.filter((_, i) => i !== 3).join("\n"), `${tracklistText()}\nFloating Points - "Silhouettes"`]) {
+      await t.run(async (ctx) => { for (const r of await ctx.db.query("packages").collect()) await ctx.db.delete(r._id); });
+      expect((await post(t, body({ tracklistText: sent }))).status).toBe(201);
+      expect(await tracksOf(t)).toEqual([want]);
+    }
+    await t.run(async (ctx) => { for (const r of await ctx.db.query("packages").collect()) await ctx.db.delete(r._id); });
+    const { tracklistText: _omit, ...noTracks } = body();
+    expect((await post(t, noTracks)).status).toBe(201);
+    expect(await tracksOf(t)).toEqual([want]);
+  });
+
+  test("a title artist not in the request's tracklist is refused with the plain message, and writes nothing", async () => {
+    const t = await requested();
+    const leads = ["Floating Points", ...body().leads.slice(1)];
+    expect(await refused(await post(t, body({ leads, tracklistText: `${tracklistText()}\nFloating Points - "Silhouettes"` }))))
+      .toEqual({ status: 400, problems: ["title artist not in the tracklist: Floating Points"] });
     expect(await rows(t)).toHaveLength(0);
   });
 
-  test("the exact tracks are accepted, however the lines are laid out", async () => {
-    vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO);
-    const t = await requested(withArtist(AJA));
-    const relaid = withArtist(AJA).replace("HOUR 1", "Hour one").replace(/\n/g, "\n\n");
-    expect((await post(t, body({ tracklistText: relaid }))).status).toBe(201);
-    expect((await post(t, body({ tracklistText: withArtist(AJA) }), `Bearer ${DEMO}`)).status).toBe(201);
-  });
-
-  test("a dropped track or an extra track is refused", async () => {
-    const t = await requested();
-    const lines = tracklistText().split("\n");
-    const dropped = lines.filter((_, i) => i !== 3).join("\n");
-    const extra = `${tracklistText()}\nFloating Points - "Silhouettes"`;
-    const third = formatTrack(goldenTracks().filter((x) => x.hour === 1)[2]!);
-    const fourth = formatTrack(goldenTracks().filter((x) => x.hour === 1)[3]!);
-    expect(await refused(await post(t, body({ tracklistText: dropped })))).toEqual({ status: 400, problems: [`the tracklist must be exactly as given: hour 1 track 3 '${fourth}' should be '${third}'`] });
-    expect(await refused(await post(t, body({ tracklistText: extra })))).toEqual({ status: 400, problems: [`the tracklist must be exactly as given: hour 2 track 17 'Floating Points - "Silhouettes"' should not be there`] });
+  test("an unreadable request tracklist is 400 with problems and writes nothing", async () => {
+    const t = await requested(`${tracklistText()}\nthis line has no separator`);
+    const res = await post(t, body());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { problems: string[] }).problems.length).toBeGreaterThan(0);
     expect(await rows(t)).toHaveLength(0);
   });
 
@@ -243,7 +250,7 @@ describe("POST /agent/packages: the tracklist lock (R6)", () => {
   test("the latest request for the show wins", async () => {
     const t = await requested(withArtist("ja monet"));
     await t.run((ctx) => ctx.db.insert("runs", draftRunFor({ workspace: "real", showDate: "2026-10-02", tracks: [] }, withArtist(AJA), 2)));
-    expect((await post(t, body({ tracklistText: withArtist("ja monet") }))).status).toBe(400);
-    expect((await post(t, body({ tracklistText: withArtist(AJA) }))).status).toBe(201);
+    expect((await post(t, body({ tracklistText: withArtist("ja monet") }))).status).toBe(201);
+    expect(await tracksOf(t)).toEqual([parseTracklist(withArtist(AJA)).tracks]);
   });
 });

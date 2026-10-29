@@ -61,7 +61,7 @@ export async function readCapped(req: Request, max = MAX_BODY_BYTES): Promise<st
   return text + decoder.decode();
 }
 
-const STRINGS = ["showDate", "tracklistText", "description", "hour1Id", "hour2Id"] as const;
+const STRINGS = ["showDate", "description", "hour1Id", "hour2Id"] as const;
 const LISTS = ["leads", "tags"] as const;
 
 /** Copies only the named fields; anything else the caller sends (status, workspace...) is dropped. */
@@ -78,6 +78,8 @@ export function pickInput(body: unknown): AgentPackageInput | null {
     if (!Array.isArray(list) || !list.every((x) => typeof x === "string")) return null;
     out[k] = [...(list as string[])];
   }
+  // R9: any tracklist the agent sends is ignored; packages.submit uses the draft request's.
+  out.tracklistText = "";
   // Optional; its shape is checked (with plain messages) by buildPackageDraft.
   if (b.descriptionSources !== undefined) (out as Record<string, unknown>).descriptionSources = b.descriptionSources;
   return out as unknown as AgentPackageInput;
