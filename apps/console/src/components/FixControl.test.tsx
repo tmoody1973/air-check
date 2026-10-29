@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { ConvexError } from "convex/values";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EpisodeActions, EpisodeRow } from "./EpisodeControls";
-import { EpisodesView, type Unplaced } from "./EpisodesView";
+import { EpisodesView, type Placed, type Unplaced } from "./EpisodesView";
 import type { SourceStatus } from "./SourceConnections";
 
 // Plan 6b Task 4: fixing a backlog problem on the Episodes page, in the table and in the phone cards.
@@ -23,14 +23,16 @@ const actions = (over: Partial<EpisodeActions> = {}): EpisodeActions => ({
   place: vi.fn(noop), unplace: vi.fn(noop), tracklistText: vi.fn(async () => "HOUR 1\nDonalyd Byrd - \"Change\"\nHOUR 2\nB - \"Two\""),
   ...over,
 });
-type Opts = { acts?: EpisodeActions; layout?: "table" | "cards"; unplaced?: Unplaced[] | null; today?: string };
+type Names = { items: Unplaced[]; placements: Placed[] };
+type Opts = { acts?: EpisodeActions; layout?: "table" | "cards"; unplaced?: Names | null; today?: string };
 function setup(episodes: EpisodeRow[], { acts = actions(), layout = "table", unplaced = null, today = "2026-01-09" }: Opts = {}) {
-  const view = (rows: EpisodeRow[], u: Unplaced[] | null) => (
+  const view = (rows: EpisodeRow[], u: Names | null) => (
     <EpisodesView layout={layout} data={{ episodes: rows, awaitingReview: 0 }} unplaced={u} sources={connected} workspace="real" today={today} actions={acts} />
   );
   const r = render(view(episodes, unplaced));
-  return { acts, rerender: (rows: EpisodeRow[], u: Unplaced[] | null = unplaced) => r.rerender(view(rows, u)) };
+  return { acts, rerender: (rows: EpisodeRow[], u: Names | null = unplaced) => r.rerender(view(rows, u)) };
 }
+const names = (items: Unplaced[], placements: Placed[] = []): Names => ({ items, placements });
 const rowOf = (date: string) => document.getElementById(`ep-${date}`)!;
 const click = (el: HTMLElement) => act(async () => fireEvent.click(el));
 const CHECKING = "Saved. Checking again in a minute or two.";
@@ -106,6 +108,30 @@ describe("fix controls under each question", () => {
     expect(within(rowOf("2026-01-09")).getByRole("alert")).toHaveTextContent("this show's audio is already downloaded");
   });
 
+  it("M1: a frozen show (package or open run) renders no 'Use this one', hours picker or 'This show is …'", () => {
+    const frozen = { status: "question", audio: { status: "ask" as const }, questions: [boxPick, hours, stamp] };
+    setup([ep("2026-01-02", { ...frozen, packageStatus: "awaiting_review" }), ep("2026-01-09", { ...frozen, openRun: true })]);
+    for (const d of ["2026-01-02", "2026-01-09"]) {
+      const r = rowOf(d);
+      expect(within(r).queryByRole("button", { name: "Use this one" })).not.toBeInTheDocument();
+      expect(within(r).queryByLabelText("Hour 1")).not.toBeInTheDocument();
+      expect(within(r).queryByRole("button", { name: /This show is/ })).not.toBeInTheDocument();
+      expect(r).toHaveTextContent("Box has 2 folders dated 2026-01-09"); // the question itself still reads
+    }
+  });
+
+  it("M2: N unreadable lines give one 'Fix the tracklist' button, hidden while the editor is open", async () => {
+    const line5 = { ...badLine, id: "l5", text: 'Line 5 "Bad" could not be read (no-separator). Fix it so no track is missed.' };
+    setup([ep("2026-01-09", { status: "question", questions: [badLine, line5] })]);
+    const r = rowOf("2026-01-09");
+    expect(r).toHaveTextContent("Line 4");
+    expect(r).toHaveTextContent("Line 5");
+    expect(within(r).getAllByRole("button", { name: "Fix the tracklist" })).toHaveLength(1);
+    await click(within(r).getByRole("button", { name: "Fix the tracklist" }));
+    expect(within(r).getByLabelText("Tracklist for Jan 9, 2026")).toBeInTheDocument();
+    expect(within(r).queryByRole("button", { name: "Fix the tracklist" })).not.toBeInTheDocument();
+  });
+
   it("the rerun question stays as it is", () => {
     setup([ep("2026-01-02"), ep("2026-01-09", { status: "question", questions: [{ id: "r", kind: "rerun", text: "x", rerunOf: "2026-01-02" }] })]);
     expect(within(rowOf("2026-01-09")).getByRole("button", { name: "Yes, a rerun" })).toBeInTheDocument();
@@ -143,15 +169,17 @@ describe("the corrected line", () => {
     expect(rowOf("2026-01-09")).toHaveTextContent("Corrected in Air Check (tracklist, which files are Hour 1 and Hour 2)");
   });
 
-  it("'Use Drive again' asks once more before calling clearCorrection", async () => {
+  it("'Remove my fix' asks once more before calling clearCorrection", async () => {
     const { acts } = setup([ep("2026-01-09", { corrected: { fields: ["drive"], at: 1, stale: false } })]);
     const r = rowOf("2026-01-09");
-    await click(within(r).getByRole("button", { name: "Use Drive again" }));
+    expect(within(r).queryByRole("button", { name: "Use Drive again" })).not.toBeInTheDocument();
+    await click(within(r).getByRole("button", { name: "Remove my fix" }));
     expect(acts.clearCorrection).not.toHaveBeenCalled();
     expect(r).toHaveTextContent("Your fix will be removed.");
     fireEvent.click(within(r).getByRole("button", { name: "Keep my fix" }));
     expect(r).not.toHaveTextContent("Your fix will be removed.");
-    await click(within(r).getByRole("button", { name: "Use Drive again" }));
+    await click(within(r).getByRole("button", { name: "Remove my fix" }));
+    expect(r).toHaveTextContent("Your fix will be removed.");
     await click(within(r).getByRole("button", { name: "Remove my fix" }));
     expect(acts.clearCorrection).toHaveBeenCalledWith({ showDate: "2026-01-09" });
     expect(screen.getByRole("status")).toHaveTextContent("Your fix was removed. Checking again in a minute or two.");
@@ -160,12 +188,41 @@ describe("the corrected line", () => {
   it("a stale fix says so and that the show won't draft", () => {
     setup([ep("2026-01-09", { corrected: { fields: ["tracklist"], at: 1, stale: true } })]);
     const r = rowOf("2026-01-09");
-    expect(r).toHaveTextContent("Your fix no longer matches Drive. Use Drive again or fix it again.");
-    expect(r).toHaveTextContent("This show won't be drafted until then.");
+    expect(r).toHaveTextContent("Your fix no longer matches Drive. Remove your fix or fix it again. This show won't be drafted until then.");
     expect(r).not.toHaveTextContent("Corrected in Air Check");
     expect(within(r).getByText("Fix needs a look")).toBeInTheDocument();
     expect(within(r).queryByText("Waiting to draft")).not.toBeInTheDocument();
-    expect(within(r).getByRole("button", { name: "Use Drive again" })).toBeInTheDocument();
+    expect(within(r).getByRole("button", { name: "Remove my fix" })).toBeInTheDocument();
+  });
+
+  it("A3: the stale line names the source the fix was for: Drive, Paper or Box", () => {
+    setup([
+      ep("2026-01-02", { corrected: { fields: ["drive"], at: 1, stale: true } }),
+      ep("2026-01-09", { corrected: { fields: ["paper"], at: 1, stale: true } }),
+      ep("2026-01-16", { corrected: { fields: ["hours"], at: 1, stale: true } }),
+      ep("2026-01-23", { corrected: { fields: ["box"], at: 1, stale: true } }),
+      ep("2026-01-30", { corrected: { fields: ["folderDate"], at: 1, stale: true } }),
+      ep("2026-02-06", { corrected: { fields: ["tracklist", "box"], at: 1, stale: true } }),
+    ], { today: "2026-02-06" });
+    const said = (d: string) => rowOf(d).textContent;
+    expect(said("2026-01-02")).toContain("Your fix no longer matches Drive.");
+    expect(said("2026-01-09")).toContain("Your fix no longer matches Paper.");
+    for (const d of ["2026-01-16", "2026-01-23", "2026-01-30"]) expect(said(d)).toContain("Your fix no longer matches Box.");
+    expect(said("2026-02-06")).toContain("Your fix no longer matches Drive and Box.");
+  });
+
+  it("A4: a stale fix on a frozen show gives no instruction it has no button for", () => {
+    setup([
+      ep("2026-01-02", { status: "awaiting-review", packageStatus: "awaiting_review", corrected: { fields: ["drive"], at: 1, stale: true } }),
+      ep("2026-01-09", { openRun: true, corrected: { fields: ["drive"], at: 1, stale: true } }),
+    ]);
+    for (const d of ["2026-01-02", "2026-01-09"]) {
+      const r = rowOf(d);
+      expect(r).not.toHaveTextContent("no longer matches");
+      expect(r).not.toHaveTextContent("Remove your fix");
+      expect(r).toHaveTextContent("Corrected in Air Check (which Drive doc)");
+      expect(within(r).queryByRole("button", { name: "Remove my fix" })).not.toBeInTheDocument();
+    }
   });
 
   it("a fix waiting for its scan says 'Checking your fix…' and keeps the row's controls", () => {
@@ -175,14 +232,14 @@ describe("the corrected line", () => {
     expect(r).not.toHaveTextContent("no longer matches"); // the stale flag is from the scan before the fix
     expect(within(r).getByText("Checking your fix")).toBeInTheDocument(); // the pill, not "Waiting to draft"
     expect(within(r).getByRole("button", { name: "Edit tracklist" })).toBeInTheDocument();
-    expect(within(r).getByRole("button", { name: "Use Drive again" })).toBeInTheDocument();
+    expect(within(r).getByRole("button", { name: "Remove my fix" })).toBeInTheDocument();
   });
 
   it("a show with a package hides the fix buttons (it is changed on the package page)", () => {
     setup([ep("2026-01-09", { status: "awaiting-review", packageStatus: "awaiting_review", corrected: { fields: ["tracklist"], at: 1, stale: false } })]);
     const r = rowOf("2026-01-09");
     expect(r).toHaveTextContent("Corrected in Air Check (tracklist)");
-    expect(within(r).queryByRole("button", { name: "Use Drive again" })).not.toBeInTheDocument();
+    expect(within(r).queryByRole("button", { name: "Remove my fix" })).not.toBeInTheDocument();
   });
 });
 
@@ -193,7 +250,7 @@ describe("undated names", () => {
   ];
 
   it("lists each item with its source and name, and places it on a 2026 show", async () => {
-    const { acts } = setup([ep("2026-01-09")], { unplaced: items });
+    const { acts } = setup([ep("2026-01-09")], { unplaced: names(items) });
     const section = screen.getByRole("region", { name: "Couldn't tell the date of these" });
     const first = within(section).getByText("Rhythm Lab playlist (final)").closest("li")!;
     expect(first).toHaveTextContent("Google Drive");
@@ -206,22 +263,45 @@ describe("undated names", () => {
     await click(within(first).getByRole("button", { name: "Save" }));
     expect(acts.place).toHaveBeenCalledWith({ source: "drive", id: "d1", date: "2026-01-09" });
     expect(screen.getByRole("status")).toHaveTextContent(CHECKING);
-    expect(first).toHaveTextContent("Saved as the show for Jan 9, 2026.");
-    await click(within(first).getByRole("button", { name: "Undo" }));
-    expect(acts.unplace).toHaveBeenCalledWith({ source: "drive", id: "d1" });
   });
 
-  it("sits above the table, and a placed item disappears after the rescan", () => {
-    const { rerender } = setup([ep("2026-01-09")], { unplaced: items });
+  it("sits above the table; a placed item moves to 'Placed by you'", () => {
+    const { rerender } = setup([ep("2026-01-09")], { unplaced: names(items) });
     const section = screen.getByRole("region", { name: "Couldn't tell the date of these" });
     expect(section.compareDocumentPosition(screen.getByRole("table")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    rerender([ep("2026-01-09")], items.slice(1));
-    expect(screen.queryByText("Rhythm Lab playlist (final)")).not.toBeInTheDocument();
-    expect(screen.getByText("RLR spring special")).toBeInTheDocument();
+    rerender([ep("2026-01-09")], names(items.slice(1), [{ source: "drive", id: "d1", name: "Rhythm Lab playlist (final)", date: "2026-01-09" }]));
+    expect(within(section).getAllByLabelText("This is the show for…")).toHaveLength(1); // only the one still undated
+    const placed = within(screen.getByRole("region", { name: "Couldn't tell the date of these" })).getByRole("list", { name: "Placed by you" });
+    expect(placed).toHaveTextContent("Rhythm Lab playlist (final) → Jan 9, 2026");
+    expect(screen.getAllByText("RLR spring special")).toHaveLength(1);
   });
 
-  it("is absent with nothing unplaced (empty or not loaded)", () => {
-    const { rerender } = setup([ep("2026-01-09")], { unplaced: [] });
+  it("I1: a placement (even after the scan dropped it from the undated list) can be undone or moved", async () => {
+    const { acts } = setup([ep("2026-01-09")], { unplaced: names([], [{ source: "paper", id: "p9", name: "Rhythm Lab Radio 9-4-226", date: "2026-09-04" }]) });
+    const placed = screen.getByRole("list", { name: "Placed by you" });
+    const li = within(placed).getByText(/Rhythm Lab Radio 9-4-226/).closest("li")!;
+    expect(li).toHaveTextContent("Rhythm Lab Radio 9-4-226 → Sep 4, 2026");
+    await click(within(li).getByRole("button", { name: "Move" }));
+    const to = within(li).getByLabelText("Move to");
+    expect(to).toHaveAttribute("type", "date");
+    fireEvent.change(to, { target: { value: "2026-09-11" } });
+    await click(within(li).getByRole("button", { name: "Save" }));
+    expect(acts.place).toHaveBeenCalledWith({ source: "paper", id: "p9", date: "2026-09-11" });
+    await click(within(li).getByRole("button", { name: "Undo" }));
+    expect(acts.unplace).toHaveBeenCalledWith({ source: "paper", id: "p9" });
+  });
+
+  it("I1: a refused date shows Convex's words (not a Friday)", async () => {
+    const acts = actions({ place: vi.fn(async () => { throw new ConvexError({ code: "BAD_INPUT", message: "Rhythm Lab airs Fridays — pick a Friday" }); }) });
+    setup([ep("2026-01-09")], { acts, unplaced: names(items) });
+    const first = screen.getByText("Rhythm Lab playlist (final)").closest("li")!;
+    fireEvent.change(within(first).getByLabelText("This is the show for…"), { target: { value: "2026-01-08" } });
+    await click(within(first).getByRole("button", { name: "Save" }));
+    expect(within(first).getByRole("alert")).toHaveTextContent("Rhythm Lab airs Fridays — pick a Friday");
+  });
+
+  it("is absent with nothing unplaced or placed (empty or not loaded)", () => {
+    const { rerender } = setup([ep("2026-01-09")], { unplaced: names([]) });
     expect(screen.queryByRole("region", { name: "Couldn't tell the date of these" })).not.toBeInTheDocument();
     rerender([ep("2026-01-09")], null);
     expect(screen.queryByText("Couldn't tell the date of these")).not.toBeInTheDocument();
@@ -232,7 +312,7 @@ describe("phone cards", () => {
   it("render the same controls", async () => {
     const { acts } = setup(
       [ep("2026-01-09", { status: "question", audio: { status: "ask" }, questions: [boxPick, hours, badLine], corrected: { fields: ["paper"], at: 1, stale: false } })],
-      { layout: "cards", unplaced: [{ source: "paper", id: "p1", name: "notes", reason: "no date", seenAt: 1 }] },
+      { layout: "cards", unplaced: names([{ source: "paper", id: "p1", name: "notes", reason: "no date", seenAt: 1 }]) },
     );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const card = rowOf("2026-01-09");
@@ -240,7 +320,7 @@ describe("phone cards", () => {
     expect(within(card).getAllByRole("button", { name: "Use this one" })).toHaveLength(2);
     expect(within(card).getByLabelText("Hour 1")).toBeInTheDocument();
     expect(card).toHaveTextContent("Corrected in Air Check (which Paper doc)");
-    expect(within(card).getByRole("button", { name: "Use Drive again" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Remove my fix" })).toBeInTheDocument();
     await click(within(card).getByRole("button", { name: "Fix the tracklist" }));
     expect(within(card).getByLabelText("Tracklist for Jan 9, 2026")).toBeInTheDocument();
     expect(acts.tracklistText).toHaveBeenCalled();

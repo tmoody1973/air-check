@@ -77,6 +77,8 @@ export async function rescanPending(ctx: QueryCtx, row: EpisodeDoc): Promise<boo
 /** The corrected fields in words the page can label, in a fixed order. */
 const CORRECTED = [["tracklistText", "tracklist"], ["drive", "drive"], ["paper", "paper"], ["box", "box"], ["hours", "hours"], ["folderDate", "folderDate"]] as const;
 export type CorrectedField = (typeof CORRECTED)[number][1];
+/** What a correction row still fixes; [] for a removed fix (I2: the row stays so its updatedAt keeps counting). */
+export const correctedFields = (c: Doc<"corrections">): CorrectedField[] => CORRECTED.filter(([k]) => c[k] !== undefined).map(([, name]) => name);
 
 /** What core's episodeStatus, nextToDraft and rerunCandidate read. */
 export function factsOf(e: EpisodeDoc, packageStatus: LinkedPackageStatus, draftAttempts = 0): EpisodeFacts {
@@ -110,7 +112,9 @@ export async function episodeRows(ctx: QueryCtx) {
       const runs = await draftRunsFor(ctx, e.showDate);
       const draftAttempts = await attemptsSince(ctx, e.showDate);
       const c = await correctionFor(ctx, e.showDate);
-      const corrected = c && { fields: CORRECTED.filter(([k]) => c[k] !== undefined).map(([, name]) => name), at: c.updatedAt, stale: !!correctionStale };
+      const fields = c ? correctedFields(c) : [];
+      // I2: a removed fix keeps its row (and updatedAt) with no fields: nothing is corrected.
+      const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
       const openRun = runs.some((r) => isOpenRun(r));
       return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
@@ -163,12 +167,20 @@ export const list = query({
   },
 });
 
-/** Plan 6b: the docs and folders the scanner could not date, for Tarik to place on a show. Real human only. */
+/**
+ * Plan 6b: the docs and folders the scanner could not date, for Tarik to place on a show, and (I1) the ones he placed,
+ * which a scan drops from `unplaced`, so he can still move or undo them. Real human only.
+ */
 export const unplaced = query({
   args: {},
   handler: async (ctx) => {
     if (workspaceOf(await actorOf(ctx)) !== "real") return null;
-    return (await ctx.db.query("unplaced").collect()).map(({ source, id, name, reason, seenAt }) => ({ source, id, name, reason, seenAt }));
+    const placed = await ctx.db.query("placements").collect();
+    const isPlaced = (u: { source: string; id: string }) => placed.some((p) => p.source === u.source && p.id === u.id);
+    return {
+      items: (await ctx.db.query("unplaced").collect()).filter((u) => !isPlaced(u)).map(({ source, id, name, reason, seenAt }) => ({ source, id, name, reason, seenAt })),
+      placements: placed.map(({ source, id, name, date }) => ({ source, id, name: name ?? id, date })),
+    };
   },
 });
 

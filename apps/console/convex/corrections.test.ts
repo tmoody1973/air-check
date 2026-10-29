@@ -148,7 +148,7 @@ describe("forged choices (Review Focus 5)", () => {
 });
 
 describe("each mutation touches only its own field", () => {
-  test("a later fix keeps the earlier ones, and clear (Use Drive again) deletes the row", async () => {
+  test("a later fix keeps the earlier ones, and clear (Remove my fix) leaves only {showDate, updatedAt} (I2)", async () => {
     const t = convexTest(schema, modules);
     await upsert(t, episode());
     const h = t.withIdentity(human);
@@ -160,8 +160,16 @@ describe("each mutation touches only its own field", () => {
     void _id, _creationTime;
     expect(c).toEqual({ showDate: D, tracklistText: GOOD, drive: "g2", hours: { hour1: "w1", hour2: "w2" }, folderDate: true, updatedAt: expect.any(Number) });
     await h.mutation(api.corrections.clear, { showDate: D });
-    expect(await correction(t)).toBeNull();
+    // I2: the row stays, so its updatedAt still decides which draft runs count (old failures don't come back).
+    const cleared = (await correction(t))!;
+    expect(Object.keys(cleared).sort()).toEqual(["_creationTime", "_id", "showDate", "updatedAt"]);
+    expect(cleared.updatedAt).toBeGreaterThanOrEqual(c.updatedAt);
+    expect((await h.query(api.episodes.list, {}))!.episodes[0]!.corrected).toBeNull();
     await h.mutation(api.corrections.clear, { showDate: D }); // nothing to clear: fine
+    const u = convexTest(schema, modules);
+    await upsert(u, episode());
+    await u.withIdentity(human).mutation(api.corrections.clear, { showDate: D }); // never fixed: no row is made
+    expect(await correction(u)).toBeNull();
   });
 });
 
@@ -213,7 +221,9 @@ describe("R3: audio already downloaded", () => {
     await upsert(u, episode({ audioOnDisk: true }));
     await u.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: D, text: GOOD });
     await u.withIdentity(human).mutation(api.corrections.clear, { showDate: D }); // no audio field: fine
-    expect(await correction(u)).toBeNull();
+    expect(await correction(u)).not.toHaveProperty("tracklistText");
+    // R3 still holds once cleared: the row has no audio field, so a second clear is fine too.
+    await u.withIdentity(human).mutation(api.corrections.clear, { showDate: D });
   });
 });
 
@@ -248,9 +258,37 @@ describe("undated names", () => {
     await h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-11" });
     const placed = await t.run((ctx) => ctx.db.query("placements").collect());
     expect(placed).toEqual([expect.objectContaining({ source: "paper", id: "p9", date: "2026-09-11", updatedAt: expect.any(Number) })]);
-    expect(await h.query(api.episodes.unplaced, {})).toEqual([{ ...item, seenAt: expect.any(Number) }]);
+    // A placed item shows under "Placed by you", not in the undated list.
+    expect(await h.query(api.episodes.unplaced, {})).toEqual({ items: [], placements: [{ source: "paper", id: "p9", name: item.name, date: "2026-09-11" }] });
     await h.mutation(api.corrections.unplace, { source: "paper", id: "p9" });
     expect(await t.run((ctx) => ctx.db.query("placements").collect())).toEqual([]);
+    expect(await h.query(api.episodes.unplaced, {})).toEqual({ items: [{ ...item, seenAt: expect.any(Number) }], placements: [] });
+  });
+
+  test("I1: a placement can still be moved and undone after the scan that applied it", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [item] });
+    const h = t.withIdentity(human);
+    await h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-04" });
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [] }); // the scan dated it: no longer undated
+    expect(await h.query(api.episodes.unplaced, {})).toEqual({ items: [], placements: [{ source: "paper", id: "p9", name: item.name, date: "2026-09-04" }] });
+    await h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-11" }); // Move
+    expect((await h.query(api.episodes.unplaced, {}))!.placements).toEqual([{ source: "paper", id: "p9", name: item.name, date: "2026-09-11" }]);
+    // A brand-new placement still needs a current undated row.
+    expect(await code(h.mutation(api.corrections.place, { source: "paper", id: "p8", date: "2026-09-11" }))).toBe("BAD_INPUT");
+    await h.mutation(api.corrections.unplace, { source: "paper", id: "p9" }); // Undo
+    expect(await h.query(api.episodes.unplaced, {})).toEqual({ items: [], placements: [] });
+  });
+
+  test("I1: only a Friday is accepted, for a new placement and a move", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [item] });
+    const h = t.withIdentity(human);
+    const friday = { code: "BAD_INPUT", message: "Rhythm Lab airs Fridays — pick a Friday" };
+    expect(await failure(h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-03" }))).toEqual(friday);
+    await h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-04" });
+    expect(await failure(h.mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-05" }))).toEqual(friday);
+    expect((await t.run((ctx) => ctx.db.query("placements").collect())).map((p) => p.date)).toEqual(["2026-09-04"]);
   });
 
   test("placing on a drafted show is refused", async () => {

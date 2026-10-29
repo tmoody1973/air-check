@@ -97,11 +97,12 @@ export default defineSchema({
   // Docs and folders whose names the scanner could not date; replaced whole after each complete scan.
   unplaced: defineTable({ source: fixSourceV, id: v.string(), name: v.string(), reason: v.string(), seenAt: v.number() }).index("by_source_id", ["source", "id"]),
   // Tarik's date for one of them. Never written back as a rename.
-  placements: defineTable({ source: fixSourceV, id: v.string(), date: v.string(), updatedAt: v.number() })
+  // `name`: the undated name at place time, so "Placed by you" can show it after a scan drops it from `unplaced` (I1).
+  placements: defineTable({ source: fixSourceV, id: v.string(), date: v.string(), name: v.optional(v.string()), updatedAt: v.number() })
     .index("by_source_id", ["source", "id"])
     .index("by_date", ["date"]),
-  // One row: when a correction or placement was last removed. A delete leaves no updatedAt behind, so ingest.list's
-  // rescanAfter counts this too and "Use Drive again" rescans as promptly as a save.
+  // One row: when a placement was last removed. A delete leaves no updatedAt behind, so ingest.list's rescanAfter
+  // counts this too and Undo rescans as promptly as a save. (A removed fix keeps its row and updatedAt, I2.)
   rescanAsks: defineTable({ at: v.number() }),
   // One row per source the ingest service reads. Hard Rule 2: state and account only, never a credential.
   ingestSources: defineTable({

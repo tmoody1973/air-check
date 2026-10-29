@@ -52,7 +52,7 @@ async function save(ctx: MutationCtx, showDate: string, field: Partial<Omit<Corr
 /** The fixes the show's current questions offer. */
 const offers = (row: Episode): Fix[] => row.questions.flatMap((q) => (q.fix ? [q.fix] : []));
 
-/** A deletion leaves no updatedAt behind, so the scanner is told to rescan here. */
+/** Undo deletes a placement, which leaves no updatedAt behind, so the scanner is told to rescan here. */
 async function askRescan(ctx: MutationCtx): Promise<void> {
   const row = await ctx.db.query("rescanAsks").first();
   if (row) await ctx.db.patch(row._id, { at: Date.now() });
@@ -112,16 +112,17 @@ export const useFolderDate = mutation({
   },
 });
 
-/** "Use Drive again": removes every fix for the show. Nothing to clear is fine. */
+/**
+ * "Remove my fix": removes every fix for the show. Nothing to clear is fine. I2: the row stays as {showDate, updatedAt},
+ * so draft runs from before the fix still don't count (attemptsSince) and the new updatedAt starts the rescan.
+ */
 export const clear = mutation({
   args: { showDate: v.string() },
   handler: async (ctx, { showDate }) => {
     const cur = await correctionFor(ctx, showDate);
     const hasAudio = !!cur && (cur.box !== undefined || cur.hours !== undefined || cur.folderDate !== undefined);
     await editable(ctx, showDate, hasAudio);
-    if (!cur) return;
-    await ctx.db.delete(cur._id);
-    await askRescan(ctx);
+    if (cur) await ctx.db.replace(cur._id, { showDate, updatedAt: Date.now() });
   },
 });
 
@@ -145,18 +146,26 @@ export const tracklistText = query({
 const placementBy = (ctx: QueryCtx, source: Doc<"placements">["source"], id: string) =>
   ctx.db.query("placements").withIndex("by_source_id", (q) => q.eq("source", source).eq("id", id)).unique();
 
-/** "This is the show for…": dates a doc or folder whose name the scanner could not read. Never a rename. */
+const isFriday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
+
+/**
+ * "This is the show for…": dates a doc or folder whose name the scanner could not read. Never a rename. I1: "Move"
+ * re-dates an existing placement even after a scan dropped it from the undated list; a new one needs a listed name.
+ */
 export const place = mutation({
   args: { source: fixSourceV, id: v.string(), date: v.string() },
   handler: async (ctx, { source, id, date }) => {
     await requireRealHuman(ctx);
     if (!isShowDate(date) || !date.startsWith("2026-")) throw badInput("the date must be a real 2026 date, yyyy-mm-dd");
-    const listed = await ctx.db.query("unplaced").withIndex("by_source_id", (q) => q.eq("source", source).eq("id", id)).unique();
-    if (!listed) throw badInput("that item is not in the list of undated names");
-    await refuseFrozen(ctx, date);
+    if (!isFriday(date)) throw badInput("Rhythm Lab airs Fridays — pick a Friday");
     const cur = await placementBy(ctx, source, id);
+    const listed = await ctx.db.query("unplaced").withIndex("by_source_id", (q) => q.eq("source", source).eq("id", id)).unique();
+    if (!cur && !listed) throw badInput("that item is not in the list of undated names");
+    await refuseFrozen(ctx, date);
+    // Moving off a drafted show would change it too, same as Undo.
+    if (cur) await refuseFrozen(ctx, cur.date);
     if (cur) await ctx.db.patch(cur._id, { date, updatedAt: Date.now() });
-    else await ctx.db.insert("placements", { source, id, date, updatedAt: Date.now() });
+    else await ctx.db.insert("placements", { source, id, date, name: listed!.name, updatedAt: Date.now() });
   },
 });
 

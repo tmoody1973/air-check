@@ -3,7 +3,7 @@ import { Fragment, useState, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { fetchErrorText } from "../lib/episodes";
 import { AnswerBox, AudioAsk, LINK, MarkForm, RerunLine, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
-import { CorrectedLine, FixControl, hasAudioFix, withoutHandCopy } from "./FixControl";
+import { CorrectedLine, FixControl, hasAudioFix, TracklistFixButton, withoutHandCopy } from "./FixControl";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl } from "./PublishStatus";
 import { TracklistFix } from "./TracklistFix";
@@ -84,8 +84,8 @@ function statusLink(e: EpisodeRow): ReactNode {
 }
 
 /** One question: its words, then the answer box or the "fix it in the source" line, then any in-console fix (Plan 6b). */
-function QuestionItem({ e, q, ctx, onEditTracklist }: { e: EpisodeRow; q: Question; ctx: RowCtx; onEditTracklist?: () => void }) {
-  const fix = q.fix && <FixControl showDate={e.showDate} fix={q.fix} ctx={ctx} onEditTracklist={onEditTracklist} />;
+function QuestionItem({ e, q, ctx, canChange }: { e: EpisodeRow; q: Question; ctx: RowCtx; canChange: boolean }) {
+  const fix = q.fix && <FixControl showDate={e.showDate} fix={q.fix} ctx={ctx} canChange={canChange} />;
   const said = (line: ReactNode) => (
     <p className="flex flex-col [overflow-wrap:anywhere]">
       <span className="font-medium">{q.fix?.type === "hours" ? withoutHandCopy(q.text) : q.text}</span>
@@ -109,7 +109,10 @@ function QuestionItem({ e, q, ctx, onEditTracklist }: { e: EpisodeRow; q: Questi
   );
 }
 
-/** The explanations and controls under a show, in reading order. */
+/**
+ * The explanations and controls under a show, in reading order. `onEditTracklist` is absent on a frozen show and while
+ * the editor is open, so the one "Fix the tracklist" button (after the last question that offers it, M2) never leads nowhere.
+ */
 function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTracklist?: () => void): ReactNode[] {
   const parts: ReactNode[] = [];
   if (e.status === "rerun" && e.rerunOf) parts.push(<RerunLine key="rerun" e={e} ctx={ctx} />);
@@ -122,7 +125,11 @@ function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTrackli
     );
   if (e.audio.status === "ask" && e.status !== "rerun" && !hasAudioFix(e.questions)) parts.push(<AudioAsk key="ask" showDate={e.showDate} />);
   if (e.fetch?.status === "failed") parts.push(<p key="fetch" className="text-problem-text">Download failed ({fetchErrorText(e.fetch.error)})</p>);
-  for (const q of e.questions) parts.push(<QuestionItem key={q.id} e={e} q={q} ctx={ctx} onEditTracklist={onEditTracklist} />);
+  const lastTracklistFix = e.questions.findLastIndex((q) => q.fix?.type === "tracklist");
+  e.questions.forEach((q, i) => {
+    parts.push(<QuestionItem key={q.id} e={e} q={q} ctx={ctx} canChange={canChange} />);
+    if (i === lastTracklistFix && onEditTracklist) parts.push(<TracklistFixButton key="fix-tracklist" onEdit={onEditTracklist} />);
+  });
   return parts;
 }
 
@@ -147,7 +154,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
   const canChange = !!e && e.packageStatus === "none" && !e.openRun;
   const canEdit = canChange && e.status !== "rerun";
   const onEdit = canEdit && !editing ? () => setEditing(true) : undefined;
-  const details = e ? detailsOf(e, ctx, canChange, canEdit ? () => setEditing(true) : undefined) : [];
+  const details = e ? detailsOf(e, ctx, canChange, onEdit) : [];
   if (editing && canEdit) details.push(<TracklistFix key="edit" showDate={showDate} ctx={ctx} onClose={() => setEditing(false)} />);
   if (marking && canMark) details.push(<MarkForm key="mark" showDate={showDate} ctx={ctx} onClose={() => setMarking(false)} />);
   const date = showDateLabel(showDate);

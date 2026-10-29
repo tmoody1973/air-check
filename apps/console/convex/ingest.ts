@@ -3,7 +3,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { attemptsSince, awaitingReviewCount, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
+import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
 import { MAX_NOTES, queueDraft } from "./tracklist";
 
@@ -118,7 +118,9 @@ export const prune = mutation({
     const kept = new Set(keep);
     const gone = [];
     for (const e of await ctx.db.query("episodes").collect()) {
-      if (kept.has(e.showDate) || e.rerunOf || e.scannedAt === 0 || (await correctionFor(ctx, e.showDate))) continue;
+      const c = await correctionFor(ctx, e.showDate);
+      // I2: a removed fix (no fields) is no correction.
+      if (kept.has(e.showDate) || e.rerunOf || e.scannedAt === 0 || (c && correctedFields(c).length)) continue;
       if ((await linkedPackage(ctx, e.showDate)).packageStatus !== "none") continue;
       gone.push(e._id);
     }
