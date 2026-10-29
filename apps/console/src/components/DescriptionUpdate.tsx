@@ -3,6 +3,7 @@
 import { checkDescription, describeIssue } from "@aircheck/core";
 import { useId, useState, type ReactNode } from "react";
 import { chicagoTimeLabel } from "../lib/date";
+import { EmbargoHold, type ClearEmbargoFn } from "./EmbargoHold";
 
 type Sources = { claim: string; source: string }[];
 /** descriptionUpdates.forPackage's answer: what Mixcloud shows now, and the latest update. */
@@ -11,6 +12,8 @@ export type UpdateView = {
   latest: {
     id: string; status: "proposed" | "approved" | "pushing" | "pushed" | "failed"; description: string;
     proposedBy: "agent" | "human"; fingerprint: string; descriptionSources?: Sources; error?: string; pushedAt?: string; approvedAt?: string;
+    /** Plan 8: approved, but an embargo now holds it; each release for Clear embargo. */
+    held?: { releaseId: string; text: string }[];
   } | null;
 };
 type Refused = { ok: false; message: string };
@@ -113,7 +116,7 @@ function Proposer({ start, live, trackTitles, propose, onProposed, onCancel }: {
  * Plan 5c Task 4: the description of a show already on Mixcloud. The host (or the agent) proposes new text; the host
  * approves exactly the text on screen (its fingerprint); the publisher sends only the description.
  */
-export function DescriptionUpdate({ view, trackTitles, fns }: { view: UpdateView; trackTitles: string[]; fns: UpdateFns }) {
+export function DescriptionUpdate({ view, trackTitles, fns, clearEmbargo }: { view: UpdateView; trackTitles: string[]; fns: UpdateFns; clearEmbargo?: ClearEmbargoFn }) {
   const { live, latest } = view;
   const [editing, setEditing] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
@@ -179,7 +182,11 @@ export function DescriptionUpdate({ view, trackTitles, fns }: { view: UpdateView
       ) : (
         <>
           <Text caption="Live on Mixcloud" text={live.description} sources={live.descriptionSources} />
-          {sending && <Notice tone="quiet">Updating on Mixcloud…</Notice>}
+          {sending && (latest?.held?.length ? (
+            <EmbargoHold embargo={{ blocking: latest.held, sameArtist: [] }} clear={clearEmbargo} after="It goes to Mixcloud after that date, or once the embargo is cleared." />
+          ) : (
+            <Notice tone="quiet">Updating on Mixcloud…</Notice>
+          ))}
           {latest?.status === "failed" && (
             <Notice tone="problem">
               <p className="font-medium">{(latest.error && FAILURE[latest.error]) || `Mixcloud refused the update (${latest.error ?? "no reason given"}).`}</p>

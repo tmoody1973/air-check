@@ -96,6 +96,21 @@ describe("DescriptionUpdate", () => {
     expect(screen.queryByRole("button", { name: /Approve update|Update the description/ })).toBeNull();
   });
 
+  it("approved but held by an embargo (Plan 8): the hold and Clear embargo instead of Updating on Mixcloud…", async () => {
+    const clear = vi.fn(async () => null);
+    render(
+      <DescriptionUpdate
+        view={view({ status: "approved", held: [{ releaseId: "r1", text: "'Moonlit Avenue' by Nova Reyes is embargoed until 2026-11-07" }] })}
+        trackTitles={[]} fns={fns()} clearEmbargo={clear}
+      />,
+    );
+    expect(screen.queryByText("Updating on Mixcloud…")).toBeNull();
+    expect(screen.getByText(/Moonlit Avenue' by Nova Reyes is embargoed until 2026-11-07\. It goes to Mixcloud after that date, or once the embargo is cleared\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear embargo" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Clear it" })));
+    expect(clear).toHaveBeenCalledWith("r1");
+  });
+
   it("pushed: says when, and a new update can be proposed", () => {
     setup(view({ status: "pushed", pushedAt: "2026-10-28T15:04:00.000Z" }, { updatedAt: "2026-10-28T15:04:00.000Z" }));
     expect(screen.getByText(/^Updated /)).toBeInTheDocument();

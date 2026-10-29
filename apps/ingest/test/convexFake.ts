@@ -1,5 +1,46 @@
-import { episodeStatus, type LinkedPackageStatus } from "@aircheck/core";
-import type { Correction, DraftOutcome, IngestConvex, IngestRow, Placement, ScannedEpisode, SourceReport, Unplaced } from "../src/convex.js";
+import { readFileSync } from "node:fs";
+import { cleanMail, episodeStatus, parseAllowlist, pickInbound, senderDecision, type LinkedPackageStatus } from "@aircheck/core";
+import type { Correction, DraftOutcome, EmbedOutcome, IngestConvex, IngestRow, PendingEmail, Placement, RadarConvex, RadarOutcome, ScannedEpisode, SourceReport, Unplaced } from "../src/convex.js";
+
+export const RECEIVED_AT = Date.UTC(2026, 9, 29, 15);
+
+/** A fixture email exactly as the console stores it (pickInbound, senderDecision, cleanMail), as radar.pending returns it. */
+export function pendingFromFixture(name: string, messageId = `<${name}@test.invalid>`): PendingEmail {
+  const raw = pickInbound(JSON.parse(readFileSync(new URL(`../../../fixtures/email/${name}.json`, import.meta.url), "utf8")))!;
+  const decision = senderDecision(raw, parseAllowlist("tarik@radiomilwaukee.org,noreply@bandcamp.com"), "mx.agentmail.invalid");
+  if (!decision.ok) throw new Error(decision.reason);
+  const mail = cleanMail(raw, decision);
+  return { messageId, tab: mail.tab, subject: mail.subject, body: mail.body, receivedAt: RECEIVED_AT };
+}
+
+/**
+ * In-memory stand-in for the four radar functions in apps/console/convex/radar.ts: pending hands out received rows
+ * (oldest first, at most 5) until each is recorded; embedsWanted hands out queued pages (at most 3) until each has a result.
+ */
+export function fakeRadar(rows: PendingEmail[] = [], pages: { releaseId: string; pageUrl: string }[] = []) {
+  const records: { messageId: string; outcome: RadarOutcome }[] = [];
+  const results: { releaseId: string; pageUrl: string; result: EmbedOutcome }[] = [];
+  const calls: string[] = [];
+  const convex: RadarConvex = {
+    async pending() {
+      calls.push("pending");
+      return rows.filter((r) => !records.some((x) => x.messageId === r.messageId)).sort((a, b) => a.receivedAt - b.receivedAt).slice(0, 5).map((r) => structuredClone(r));
+    },
+    async record(messageId, outcome) {
+      calls.push("record");
+      records.push({ messageId, outcome: structuredClone(outcome) });
+    },
+    async embedsWanted() {
+      calls.push("embedsWanted");
+      return pages.filter((p) => !results.some((x) => x.releaseId === p.releaseId)).slice(0, 3).map((p) => ({ ...p }));
+    },
+    async embedResult(releaseId, pageUrl, result) {
+      calls.push("embedResult");
+      results.push({ releaseId, pageUrl, result: structuredClone(result) });
+    },
+  };
+  return { convex, records, results, calls };
+}
 
 /**
  * In-memory stand-in for apps/console/convex/ingest.ts with the same rules that matter here: upsert replaces the scanned

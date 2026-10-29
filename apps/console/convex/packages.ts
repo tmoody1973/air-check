@@ -1,5 +1,5 @@
 import {
-  buildPackageDraft, checkDescriptionChange, formatTracklist, GateError, publishDayOffset, type AgentPackageInput, type GateErrorCode,
+  agentEmbargoLines, buildPackageDraft, checkDescriptionChange, chicagoDayKey, formatTracklist, GateError, publishDayOffset, type AgentPackageInput, type GateErrorCode,
   type PackageDraft,
   type PackageRecord, type PackageStatus,
 } from "@aircheck/core";
@@ -13,20 +13,32 @@ import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
 import { createdAtOf } from "./runDefaults";
 import { MAX_TRACKLIST } from "./tracklist";
-import { publishQueue } from "./publisher";
+import { publishQueue, requireNotHeld } from "./publisher";
+import { activeEmbargoes, descriptionEmbargoes, embargoProblems, embargoView, markPlayed } from "./radar";
 
 const asDraft = (d: unknown) => d as PackageDraft;
 
+export type PackageEmbargo = { blocking: { releaseId: Id<"releases">; text: string }[]; sameArtist: string[] };
+
+/**
+ * `today` (the browser's Chicago day key, like publishState) asks for the embargo view as well; the chat card, which
+ * only shows the package, leaves it out.
+ */
 export const get = query({
-  args: { packageId: v.string() },
-  handler: async (ctx, { packageId }): Promise<PackageRecord | null> => {
+  args: { packageId: v.string(), today: v.optional(v.string()) },
+  handler: async (ctx, { packageId, today }): Promise<(PackageRecord & { embargo?: PackageEmbargo }) | null> => {
+    if (today !== undefined && !DAY_KEY.test(today)) throw new ConvexError({ code: "BAD_INPUT", message: "today must be YYYY-MM-DD" });
     const ws = workspaceOf(await actorOf(ctx));
     if (!ws) return null;
     const doc = await ctx.db
       .query("packages")
       .withIndex("by_packageId", (q) => q.eq("packageId", packageId))
       .unique();
-    return doc && doc.draft.workspace === ws ? toRecord(doc) : null;
+    if (!doc || doc.draft.workspace !== ws) return null;
+    const draft = asDraft(doc.draft);
+    // Plan 8: what holds this package, in its own workspace (Hard Rule 9). A private view: release ids for Clear embargo.
+    if (today === undefined) return toRecord(doc);
+    return { ...toRecord(doc), embargo: await embargoView(ctx, ws, { description: draft.description, tracks: draft.tracks }, today) };
   },
 });
 
@@ -92,12 +104,14 @@ export const coverPreview = query({
 });
 
 export type DecideResult = { ok: true; record: PackageRecord } | { ok: false; code: GateErrorCode; message: string };
+/** Plan 8: Approve is also refused while an embargoed release is in the package. */
+export type ApproveResult = DecideResult | { ok: false; code: "EMBARGOED"; message: string };
 export type CoverResult = DecideResult | { ok: false; code: "BAD_INPUT"; message: string };
 
 /** The only public mutation that decides a package (Hard Rule 1). */
 export const decide = mutation({
   args: { packageId: v.string(), fingerprint: v.string(), decision: v.union(v.literal("approve"), v.literal("skip")) },
-  handler: async (ctx, { packageId, fingerprint, decision }): Promise<DecideResult> => {
+  handler: async (ctx, { packageId, fingerprint, decision }): Promise<ApproveResult> => {
     const actor = await actorOf(ctx);
     if (!actor) return { ok: false, code: "FORBIDDEN", message: "Sign in with your Radio Milwaukee account." };
     const doc = await ctx.db
@@ -109,6 +123,13 @@ export const decide = mutation({
     // A demo caller also gets FORBIDDEN for a missing package, so it cannot probe for real package ids.
     if (doc ? doc.workspace !== workspaceOf(actor) : actor.kind === "demo")
       return { ok: false, code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can decide" };
+    // Plan 8: an actively embargoed release in the tracks or the description holds Approve (never Skip) until its date
+    // or a human's Clear embargo. Checked here, server-side, not only by the page.
+    if (decision === "approve" && doc?.status === "awaiting_review") {
+      const draft = asDraft(doc.draft);
+      const { blocking } = await embargoProblems(ctx, doc.workspace, { description: draft.description, tracks: draft.tracks });
+      if (blocking.length) return { ok: false, code: "EMBARGOED", message: `${blocking.join(". ")}. Approve after that date, or clear the embargo.` };
+    }
     try {
       const record = await gateFor(ctx).decide(packageId, fingerprint, decision, actor);
       // Already decided differently (A skipped, B taps Approve): the gate returns the current record; tell the user.
@@ -185,7 +206,12 @@ export const confirmPosted = mutation({
   handler: async (ctx, { packageId, url }): Promise<DecideResult> => {
     const actor = await staffOn(ctx, packageId);
     if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
-    return asResult(() => gateFor(ctx).confirmPosted(packageId, url.trim(), actor));
+    return asResult(async () => {
+      const rec = await gateFor(ctx).confirmPosted(packageId, url.trim(), actor);
+      // Plan 8: the show is on Mixcloud after all, so its tracks were played (as publisher.result does).
+      await markPlayed(ctx, rec.draft.tracks);
+      return rec;
+    });
   },
 });
 
@@ -198,6 +224,13 @@ export const editDescription = mutation({
   handler: async (ctx, { packageId, description }): Promise<DecideResult> => {
     const actor = await staffOn(ctx, packageId);
     if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    const embargoed = await descriptionEmbargoes(ctx, "real", description, "human");
+    if (embargoed.length) {
+      // Plan 8: added to the description's own problems, so the host sees every reason at once.
+      const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+      const problems = [...(doc ? checkDescriptionChange(asDraft(doc.draft), description, undefined, privateTerms()) : []), ...embargoed];
+      return { ok: false, code: "BAD_INPUT", message: problems.join("; ") };
+    }
     return asResult(() => gateFor(ctx).editDescription(packageId, description, actor, privateTerms()));
   },
 });
@@ -249,7 +282,10 @@ async function agentDraft(ctx: QueryCtx, { input, workspace, idSuffix }: { input
   const text = await requestedTracklist(ctx, workspace, input.showDate);
   if (text === null) return refuse(["no draft request for this show"]);
   const built = buildPackageDraft({ ...input, tracklistText: text }, { privateTerms: privateTerms(), workspace, ...(idSuffix && { idSuffix }) });
-  return built.ok ? built.draft : refuse(built.problems);
+  // Plan 8: an embargoed title in the description is one more problem, reported with the rest.
+  const embargoed = await descriptionEmbargoes(ctx, workspace, input.description, "agent");
+  if (!built.ok || embargoed.length) return refuse([...(built.ok ? [] : built.problems), ...embargoed]);
+  return built.draft;
 }
 
 // Internal: reachable only with the deploy key (Plans 4 and 5). The agent's route sends `agent` and can't change a track
@@ -261,6 +297,10 @@ export const submit = internalMutation({
   },
   handler: async (ctx, a) => {
     const draft = a.agent ? await agentDraft(ctx, a.agent) : asDraft(a.draft);
+    if (!a.agent) {
+      const embargoed = await descriptionEmbargoes(ctx, draft.workspace, draft.description, "agent");
+      if (embargoed.length) refuse(embargoed);
+    }
     try {
       return await gateFor(ctx).submit(draft);
     } catch (e) {
@@ -306,7 +346,7 @@ export const revise = internalMutation({
       return r.code === "BAD_INPUT" ? { ok: false, code: "BAD_INPUT", problems: r.message.split("; ") } : { ok: false, code: "NOT_READY", message: r.message };
     }
     if (cur.status !== "awaiting_review") return { ok: false, code: "NOT_READY", message: NOT_REVISABLE[cur.status] };
-    const problems = checkDescriptionChange(cur.draft, description, descriptionSources, privateTerms());
+    const problems = [...checkDescriptionChange(cur.draft, description, descriptionSources, privateTerms()), ...(await descriptionEmbargoes(ctx, workspace, description, "agent"))];
     if (problems.length) return { ok: false, code: "BAD_INPUT", problems };
     const sources = (descriptionSources as { claim: string; source: string }[] | undefined)?.map((e) => ({ claim: e.claim, source: e.source }));
     try {
@@ -334,11 +374,15 @@ export const agentGet = internalQuery({
     const updates = doc.status === "succeeded" ? await updatesOf(ctx, packageId) : [];
     const live = doc.status === "succeeded" ? liveOf(doc, updates) : draft;
     const open = updates.find(isOpen);
+    // Plan 8 (R8, Hard Rule 10): why Approve would be refused, in the package's own words only. Never a release's
+    // artist or title, id, player or link, and no same-artist notes.
+    const blocking = agentEmbargoLines({ description: live.description, tracks: draft.tracks }, await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now())));
     return {
       packageId: doc.packageId, showDate: draft.showDate, status: doc.status, title: draft.title, tags: draft.tags,
       tracklistText: formatTracklist(draft.tracks), description: live.description,
       ...(live.descriptionSources?.length && { descriptionSources: live.descriptionSources }),
       ...(open && { openUpdate: open.status }),
+      ...(blocking.length && { embargo: { blocking } }),
     };
   },
 });
@@ -358,7 +402,10 @@ export const attachAudio = internalMutation({
 
 export const claimForPublish = internalMutation({
   args: { packageId: v.string() },
-  handler: (ctx, { packageId }) => gateFor(ctx).claimForPublish(packageId),
+  handler: async (ctx, { packageId }) => {
+    await requireNotHeld(ctx, packageId);
+    return gateFor(ctx).claimForPublish(packageId);
+  },
 });
 
 const publishResultV = v.union(

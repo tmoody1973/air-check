@@ -61,3 +61,69 @@ test("Box, Google and Dropbox API hosts appear only in the ingest service and th
   // Google Fonts is not the Drive API.
   expect(one("apps/console/src/app/layout.tsx", "https://fonts.googleapis.com/css2")).toEqual([]);
 });
+
+// Plan 8: the console receives email and fetches nothing; only the ingest worker talks to Token Factory and Bandcamp.
+test("api.agentmail.to appears only in the console's AgentMail client", () => {
+  const url = 'fetch("https://api.agentmail.to/v0/inboxes")';
+  expect(one("apps/console/src/lib/agentmail.ts", url)).toEqual([]);
+  for (const path of ["apps/console/src/app/api/agentmail/inbound/route.ts", "apps/console/src/lib/other.ts", "apps/ingest/src/x.ts", "apps/bridge/src/x.ts", "agent/x.py"]) {
+    expect(one(path, url), path).toEqual([`${path}: AgentMail API host outside apps/console/src/lib/agentmail.ts (Plan 8)`]);
+  }
+});
+
+test("tokenfactory.nebius.com appears in apps/ only in the ingest worker's extractor client", () => {
+  const url = 'fetch("https://api.tokenfactory.nebius.com/v1/chat/completions")';
+  expect(one("apps/ingest/src/tokenFactory.ts", url)).toEqual([]);
+  for (const path of ["apps/console/src/lib/x.ts", "apps/console/convex/x.ts", "apps/console/src/app/api/agentmail/inbound/route.ts", "apps/ingest/src/main.ts", "apps/bridge/src/x.ts"]) {
+    expect(one(path, url), path).toEqual([`${path}: Token Factory host outside apps/ingest/src/tokenFactory.ts (Plan 8)`]);
+  }
+});
+
+test("a file that names bandcamp.com and calls fetch( is only the ingest worker's Bandcamp page reader", () => {
+  const code = 'await fetch("https://x.bandcamp.com/album/a")';
+  expect(one("apps/ingest/src/bandcamp.ts", code)).toEqual([]);
+  for (const path of ["apps/console/src/lib/x.ts", "apps/console/src/app/api/agentmail/inbound/route.ts", "apps/ingest/src/main.ts", "apps/bridge/src/x.ts"]) {
+    expect(one(path, code), path).toEqual([`${path}: fetches next to bandcamp.com outside apps/ingest/src/bandcamp.ts (Plan 8)`]);
+  }
+  // Naming the domain without fetching (the bridge's allow-list, core's rules) is fine.
+  expect(one("apps/bridge/src/allowlist.ts", 'host === "bandcamp.com"')).toEqual([]);
+  expect(one("packages/core/src/radar/bandcamp.ts", 'const BANDCAMP_DOMAIN = "bandcamp.com"')).toEqual([]);
+});
+
+test("in apps/ingest, the shared call( helper next to bandcamp.com trips the wire too; bandcamp.ts itself is allowed", () => {
+  const code = 'await call(http, "https://x.bandcamp.com/album/a")';
+  expect(one("apps/ingest/src/bandcamp.ts", code)).toEqual([]);
+  for (const path of ["apps/ingest/src/radar.ts", "apps/ingest/src/x.ts"]) {
+    expect(one(path, code), path).toEqual([`${path}: fetches next to bandcamp.com outside apps/ingest/src/bandcamp.ts (Plan 8)`]);
+  }
+  // Outside the ingest worker, call( is not the fetch helper.
+  expect(one("apps/console/src/lib/x.ts", 'call(x, "bandcamp.com")')).toEqual([]);
+});
+
+test("final review: an ingest file that uses bandcampPageUrl or .embedsWanted( and fetches is flagged, even without the domain", () => {
+  const msg = (path: string) => `${path}: uses the Bandcamp page list and fetches outside apps/ingest/src/bandcamp.ts (Plan 8)`;
+  const uses = ['import { bandcampPageUrl } from "@aircheck/core"; await fetch(u);', "for (const w of await deps.convex.embedsWanted()) await call(http, w.pageUrl);"];
+  for (const code of uses) {
+    expect(one("apps/ingest/src/bandcamp.ts", code)).toEqual([]);
+    expect(one("apps/ingest/src/radar.ts", code)).toEqual([msg("apps/ingest/src/radar.ts")]);
+  }
+  // The Convex client defines embedsWanted and passes Convex its own fetch: not a Bandcamp fetch.
+  const client = "embedsWanted(): Promise<W[]>; new ConvexHttpClient(url, { fetch: (i, n) => fetch(i, n) }); embedsWanted: () => client.query(r.embedsWanted, { token }),";
+  expect(one("apps/ingest/src/convex.ts", client)).toEqual([]);
+  expect(one("apps/ingest/src/x.ts", "bandcampPageUrl(u)")).toEqual([]); // no fetch
+});
+
+test("no attachments or send call anywhere in apps/", () => {
+  for (const s of ['`/inboxes/${i}/messages/${m}/attachments/${a}`', '"/inboxes/x/messages/send"']) {
+    for (const path of ["apps/console/src/lib/agentmail.ts", "apps/ingest/src/x.ts", "apps/console/convex/x.ts"]) {
+      expect(one(path, s), path).toHaveLength(1);
+    }
+  }
+});
+
+test("tests are exempt from the Plan 8 rules", () => {
+  const all = 'fetch("https://api.agentmail.to/v0/x/attachments"); fetch("https://api.tokenfactory.nebius.com"); fetch("https://x.bandcamp.com/album/a") // messages/send';
+  for (const path of ["apps/console/src/app/api/agentmail/inbound/route.test.ts", "apps/ingest/test/bandcamp.test.ts", "apps/console/convex/radar.test.ts"]) {
+    expect(one(path, all), path).toEqual([]);
+  }
+});

@@ -18,8 +18,18 @@ describe("config", () => {
     expect(loadConfig(base)).toEqual({
       ...{ convexUrl: base.CONVEX_URL, ingestToken: base.INGEST_TOKEN },
       tokenDir: "/home/user/.aircheck/ingest-tokens", inboxDir: "/home/user/aircheck-audio/inbox", preparedDir: "/home/user/aircheck-audio/prepared",
-      scanMs: 3_600_000, pollMs: 60_000, box: null, google: null, dropbox: null, dropboxFolder: "",
+      scanMs: 3_600_000, pollMs: 60_000, box: null, google: null, dropbox: null, dropboxFolder: "", nebiusKey: null,
     });
+  });
+
+  test("NEBIUS_API_KEY (Plan 8's extractor) is optional, read trimmed, and never echoed in an error", () => {
+    const key = "nb-" + "s".repeat(40);
+    expect(loadConfig({ ...base, NEBIUS_API_KEY: ` ${key} ` }).nebiusKey).toBe(key);
+    expect(loadConfig({ ...base, NEBIUS_API_KEY: "  " }).nebiusKey).toBeNull();
+    let message = "";
+    try { loadConfig({ ...base, INGEST_TOKEN: "short", NEBIUS_API_KEY: key }); } catch (e) { message = String(e); }
+    expect(message).toMatch(/INGEST_TOKEN/);
+    expect(message).not.toContain(key);
   });
 
   test("Box needs all four values; the folder id must be digits", () => {

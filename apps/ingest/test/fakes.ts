@@ -51,3 +51,31 @@ export function testHttp(): Http & { slept: number[] } {
 }
 
 export const form = (s: Seen) => Object.fromEntries(new URLSearchParams(s.body));
+
+/** A request the stub saw: its URL and init exactly as the code passed them. */
+export interface Sent { url: string; init: RequestInit }
+
+/**
+ * An Http whose fetch never leaves the process (Plan 8: Token Factory and Bandcamp are never really called in a test).
+ * Each request goes to `answer`; sleeps are recorded, never waited.
+ */
+export function stubHttp(answer: (url: string, init: RequestInit, n: number) => Response | Promise<Response>) {
+  const sent: Sent[] = [];
+  const slept: number[] = [];
+  const http: Http = {
+    fetch: async (input, init = {}) => {
+      const url = String(input);
+      sent.push({ url, init });
+      return answer(url, init, sent.length);
+    },
+    sleep: async (ms) => void slept.push(ms),
+  };
+  return { http, sent, slept, hosts: () => sent.map((s) => new URL(s.url).hostname) };
+}
+
+/** A Token Factory chat-completions reply whose message content is `content`. */
+export const tfReply = (content: string) =>
+  new Response(JSON.stringify({ id: "x", choices: [{ index: 0, message: { role: "assistant", content } }] }), { status: 200, headers: { "content-type": "application/json" } });
+
+/** What fetch rejects with when AbortSignal.timeout fires. */
+export const timeoutError = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");

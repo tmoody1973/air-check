@@ -8,10 +8,10 @@ import { isTerminal, sourceOf, statusOf } from "./runDefaults";
 
 // The relay (a host program) is the only caller. Every function checks its token first, in constant time,
 // and fails closed: RELAY_TOKEN unset or shorter than 32 characters means nothing here works.
-// R11: a RELAY_TOKEN equal to INGEST_TOKEN would let the ingest service act as the relay, so it refuses everything.
+// R11: a RELAY_TOKEN equal to INGEST_TOKEN (or Plan 8's INBOX_TOKEN) would let that service act as the relay, so it refuses everything.
 function requireRelay(token: string): void {
-  const { RELAY_TOKEN, INGEST_TOKEN } = process.env;
-  if (RELAY_TOKEN === INGEST_TOKEN || !sameToken(token, RELAY_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
+  const { RELAY_TOKEN, INGEST_TOKEN, INBOX_TOKEN } = process.env;
+  if (RELAY_TOKEN === INGEST_TOKEN || RELAY_TOKEN === INBOX_TOKEN || !sameToken(token, RELAY_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 const workspaceV = v.union(v.literal("real"), v.literal("demo"));

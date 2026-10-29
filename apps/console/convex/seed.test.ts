@@ -24,7 +24,40 @@ describe("seedDemo", () => {
     const first = await counts(t);
     await t.mutation(internal.seed.seedDemo, {});
     expect(await counts(t)).toEqual(first);
-    expect(first).toEqual({ packages: 2, activity: 9, verifications: 2, releases: 2, runs: 1 });
+    expect(first).toEqual({ packages: 2, activity: 9, verifications: 2, releases: 4, runs: 1 });
+  });
+
+  test("demo releases: both tabs, a status and a source each, bracketed values, one undated embargo, no players", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const rows = await t.run((ctx) => ctx.db.query("releases").collect());
+    expect(rows.every((r) => r.workspace === "demo")).toBe(true);
+    expect(new Set(rows.map((r) => r.source))).toEqual(new Set(["bandcamp", "cosign"]));
+    for (const r of rows) {
+      expect(r.status).toBeTruthy();
+      expect(r.receivedAt).toBeTypeOf("number");
+      for (const v of [r.artist, r.title, r.label]) expect(v).toMatch(/^\[.+\]$/);
+      expect(r).not.toHaveProperty("embed");
+      expect(r).not.toHaveProperty("bandcampPage");
+      expect(r).not.toHaveProperty("embedState");
+      expect(r).not.toHaveProperty("links");
+    }
+    expect(rows.filter((r) => r.embargo).map((r) => r.embargo)).toEqual([{ until: null }]);
+    // Task 6b: bracketed tags and about on Bandcamp rows, never cover art (copyrighted: the video rule); one favorite;
+    // every row searchable.
+    for (const r of rows) {
+      expect(r).not.toHaveProperty("art");
+      expect(r.searchText).toBeTruthy();
+    }
+    for (const r of rows.filter((x) => x.source === "bandcamp")) {
+      expect(r.tags?.length).toBeGreaterThan(0);
+      for (const v of [...r.tags!, r.about]) expect(v).toMatch(/^\[.+\]$/);
+    }
+    expect(rows.filter((r) => r.favorite)).toHaveLength(1);
+    // Co-signs show their sender prominently: a bracketed sample one, never a real address.
+    for (const r of rows.filter((x) => x.source === "cosign")) expect(r.senders?.map((s) => [s.name, s.address])).toEqual([["[Label or PR company]", undefined]]);
+    // The demo has no inbox (Hard Rule 9: inbound mail writes the real workspace only).
+    expect(await t.run((ctx) => ctx.db.query("inbox").collect())).toEqual([]);
   });
 
   test("seedDemo never touches real rows", async () => {

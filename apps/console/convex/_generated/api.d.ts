@@ -27,6 +27,7 @@ import type * as mixcloud from "../mixcloud.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as publisher from "../publisher.js";
+import type * as radar from "../radar.js";
 import type * as relay from "../relay.js";
 import type * as runDefaults from "../runDefaults.js";
 import type * as runs from "../runs.js";
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   packageStore: typeof packageStore;
   packages: typeof packages;
   publisher: typeof publisher;
+  radar: typeof radar;
   relay: typeof relay;
   runDefaults: typeof runDefaults;
   runs: typeof runs;

@@ -91,9 +91,29 @@ const markRerun = httpAction(async (ctx, req) => {
   return r.code === "NOT_FOUND" ? json(404, { error: "NOT_FOUND" }) : json(400, { problems: r.problems });
 });
 
+const RADAR_STATUSES = ["new", "considering", "played", "passed"] as const;
+const RADAR_TABS = ["bandcamp", "cosign"] as const;
+const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => list.includes(x as T);
+
+// Plan 8 (Hard Rule 5, Review Focus 2): the agent reads release records, never an email. internal.radar.agentList picks
+// the fields one by one (no links, player, senders or email text) and leaves active embargoes out. Read-only: the only
+// function this route may call is internal.radar.agentList, a query.
+const radarView = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const b = got.body ?? {};
+  if (typeof b !== "object" || Array.isArray(b)) return json(400, { problems: ["body must be an object with optional status and tab"] });
+  const { status, tab } = b as { status?: unknown; tab?: unknown };
+  if (status !== undefined && !oneOf(RADAR_STATUSES, status)) return json(400, { problems: [`status must be one of ${RADAR_STATUSES.join(", ")}`] });
+  if (tab !== undefined && !oneOf(RADAR_TABS, tab)) return json(400, { problems: [`tab must be one of ${RADAR_TABS.join(", ")}`] });
+  const releases = await ctx.runQuery(internal.radar.agentList, { workspace: got.workspace, ...(status !== undefined && { status }), ...(tab !== undefined && { tab }) });
+  return json(200, { releases });
+});
+
 const http = httpRouter();
 http.route({ path: "/agent/packages", method: "POST", handler: submitPackage });
 http.route({ path: "/agent/packages/revise", method: "POST", handler: revisePackage });
 http.route({ path: "/agent/packages/get", method: "POST", handler: getPackage });
 http.route({ path: "/agent/episodes/rerun", method: "POST", handler: markRerun });
+http.route({ path: "/agent/radar", method: "POST", handler: radarView });
 export default http;

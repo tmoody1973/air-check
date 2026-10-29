@@ -5,8 +5,8 @@ import { expect, test } from "vitest";
 import { findBoundaryViolations, type SourceFile } from "../packages/core/src/index";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-// Build output (dist, Next's .next) bundles third-party code and is not ours to police.
-const SKIP_DIRS = new Set(["node_modules", ".git", ".superpowers", "dist", ".next"]);
+// Build output (dist, Next's .next and the e2e build's .next-e2e) bundles third-party code and is not ours to police.
+const SKIP_DIRS = new Set(["node_modules", ".git", ".superpowers", "dist", ".next", ".next-e2e"]);
 const SCAN = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|ya?ml|py|sh|toml)$|\.env\.example$/;
 
 function walk(dir: string): SourceFile[] {

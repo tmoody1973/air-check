@@ -16,6 +16,8 @@ const heading = "text-base font-semibold";
 const btn =
   "inline-flex min-h-11 items-center whitespace-nowrap rounded-control px-5 text-sm font-semibold";
 
+const link = "font-medium underline underline-offset-2 hover:text-signal-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal";
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function Card({ title, badge, children }: { title: string; badge?: ReactNode; children: ReactNode }) {
@@ -40,6 +42,8 @@ export default function TodayPage() {
   // Real workspace only too (null otherwise), so demo never shows the backlog line.
   const episodes = useQuery(api.episodes.list, {});
   const { isSignedIn } = useAuth();
+  // Plan 8: the card counts the Bandcamp tab only; co-signs get their own line.
+  const bandcampNew = s?.releases.byTab.bandcamp ?? 0;
 
   return (
     <Shell title="Today">
@@ -112,31 +116,42 @@ export default function TodayPage() {
 
               <Card
                 title="New Bandcamp releases"
-                badge={
-                  s.releases.count > 0 && (
-                    <Pill tone="ready">
-                      {s.releases.count} from {plural(s.releases.labels.length, "label")}
-                    </Pill>
-                  )
-                }
+                badge={bandcampNew > 0 && <Pill tone="ready">{bandcampNew} new</Pill>}
               >
-                {s.releases.count === 0 ? (
-                  <Empty>No new releases.</Empty>
-                ) : (
+                {bandcampNew === 0 && <Empty>No new Bandcamp releases.</Empty>}
+                {/* The server sends Bandcamp items only, never an embargoed one: all embargoed means no list. */}
+                {s.releases.items.length > 0 && (
                   <ul className="divide-y divide-line">
                     {s.releases.items.map((r) => (
-                      <li key={r._id} className="flex items-start justify-between gap-3 py-2.5 text-sm first:pt-0">
-                        <div>
-                          <p className="font-medium">
-                            {r.artist} · {r.title}
-                          </p>
-                          <p className="text-muted">{[r.label, r.type, r.releasedOn].filter(Boolean).join(" · ")}</p>
-                        </div>
-                        {r.playedNote && <span className="text-right text-muted">{r.playedNote}</span>}
+                      <li key={`${r.artist}|${r.title}`} className="py-2.5 text-sm first:pt-0">
+                        <p className="font-medium">
+                          {r.artist} · {r.title}
+                        </p>
+                        <p className="text-muted">{[r.label, r.type].filter(Boolean).join(" · ")}</p>
                       </li>
                     ))}
                   </ul>
                 )}
+                {s.releases.embargoed.bandcamp > 0 && (
+                  // Plan 8: counted, never named here; the radar page (a private view) shows which.
+                  <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+                    <Pill tone="caution">Embargoed</Pill>
+                    {s.releases.embargoed.bandcamp === 1
+                      ? "1 new Bandcamp release is embargoed, so it isn't named here."
+                      : `${s.releases.embargoed.bandcamp} new Bandcamp releases are embargoed, so they aren't named here.`}
+                  </p>
+                )}
+                {s.releases.byTab.cosign > 0 && (
+                  <p className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                    <Link href="/release-radar?tab=cosign" className={link}>
+                      {plural(s.releases.byTab.cosign, "new co-sign")}
+                    </Link>
+                    {s.releases.embargoed.cosign > 0 && <Pill tone="caution">{s.releases.embargoed.cosign} embargoed</Pill>}
+                  </p>
+                )}
+                <Link href="/release-radar" className={`${btn} mt-4 border border-line-strong bg-surface text-ink hover:bg-surface-quiet`}>
+                  Open release radar
+                </Link>
               </Card>
             </div>
 
@@ -170,7 +185,7 @@ export default function TodayPage() {
                   <ul className="mt-2 flex flex-col gap-1">
                     <li>Ready to approve: {s.awaiting.length}</li>
                     <li>
-                      Bandcamp: {plural(s.releases.count, "release")}, {plural(s.releases.labels.length, "label")}
+                      Bandcamp: {plural(bandcampNew, "release")}, {plural(s.releases.labels.length, "label")}
                     </li>
                     <li>Verification: {plural(s.openClaims.length, "open item")}</li>
                     <li>Blocked overnight: {plural(s.blockedSince, "request")}</li>

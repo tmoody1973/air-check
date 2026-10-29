@@ -57,6 +57,12 @@ test("the public writes are exactly the allowlist", async () => {
       "episodes.addShowDate", "episodes.removeShowDate",
       // R9: "Try again" on a draft-failed show records a retry time only (a signed-in real human); it queues nothing.
       "episodes.retryDraft",
+      // Plan 8: the console's inbound route (INBOX_TOKEN) stores a cleaned email; the ingest worker (INGEST_TOKEN) records
+      // what it read and a Bandcamp player id; a signed-in human moves records. None can reach a package (Hard Rule 1).
+      "radar.received", "radar.record", "radar.embedResult",
+      "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed",
+      // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
+      "radar.setFavorite",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
@@ -99,18 +105,33 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP routes are the agent's submit, revise, read-only get and rerun mark", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/episodes/rerun", "POST"], ["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"]]);
+test("the only HTTP routes are the agent's submit, revise, read-only get, rerun mark and read-only radar", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/episodes/rerun", "POST"], ["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"], ["/agent/radar", "POST"]]);
 });
 
-test("the agent routes reach only internal.packages.submit, internal.packages.revise, internal.packages.agentGet and internal.episodes.agentMarkRerun", () => {
-  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet", "internal.episodes.agentMarkRerun"];
+test("the agent routes reach only internal.packages.submit, internal.packages.revise, internal.packages.agentGet, internal.episodes.agentMarkRerun and internal.radar.agentList", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet", "internal.episodes.agentMarkRerun", "internal.radar.agentList"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
     expect([...refs].filter((r) => !allowed.includes(r))).toEqual([]);
   }
   for (const ref of allowed) expect(readFileSync(new URL("./http.ts", import.meta.url), "utf8")).toContain(ref);
+});
+
+// Plan 8 (Review Focus 2): the agent's radar view runs one internal query and nothing else, so an email can never trigger
+// a write through it (Hard Rule 5), and radar.ts never touches a package.
+test("the /agent/radar handler can only run internal.radar.agentList, a query", () => {
+  const text = src("http");
+  const handler = text.slice(text.indexOf("const radarView = httpAction("), text.indexOf("\n});", text.indexOf("const radarView = httpAction(")));
+  expect([...handler.matchAll(/ctx\.(\w+)\(([^,)]*)/g)].map((m) => `${m[1]} ${m[2]}`)).toEqual(["runQuery internal.radar.agentList"]);
+  expect(text).toContain(`path: "/agent/radar", method: "POST", handler: radarView`);
+  const radar = src("radar");
+  expect(radar).toMatch(/export const agentList = internalQuery\(/);
+  for (const banned of ["packages.decide", "gateFor", "ApprovalGate", "internal.packages", "api.packages", "descriptionUpdates", "runMutation", "runAction", "scheduler", "fetch("]) {
+    expect(radar, `radar.ts mentions ${banned}`).not.toContain(banned);
+  }
+  expect(radar).not.toMatch(/(?:patch|insert|replace|delete)\("(?:packages|runs|messages|conversations)"/);
 });
 
 // Plan 5c: the agent's revise reaches the gate only through revise (which never approves), and only for a package in
@@ -158,7 +179,8 @@ test("descriptionUpdates: proposals are only ever inserted as proposed; only app
   // The publisher's functions check its token first, and claim takes only approved rows.
   for (const name of ["claim", "record"]) expect(fnBody(text, `export const ${name} = mutation(`)).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requirePublisher\(token\);/);
   const claim = fnBody(text, "export const claim = mutation(");
-  expect(claim).toMatch(/withIndex\("by_status", \(q\) => q\.eq\("status", "approved"\)\)\.first\(\)/);
+  // Plan 8: approved rows only; one an embargo now holds is skipped, never handed out.
+  expect(claim).toMatch(/withIndex\("by_status", \(q\) => q\.eq\("status", "approved"\)\)\.collect\(\)/);
   expect([...claim.matchAll(/status: "(\w+)"/g)].map((m) => m[1]).sort()).toEqual(["failed", "pushing"]);
   // The update path never touches the package row (R10) or the gate.
   for (const banned of ["gateFor", "ApprovalGate", "convexPackageStore", "compareAndSwap", `patch(pkg`, `"packages", `]) expect(text, banned).not.toContain(banned);
@@ -207,7 +229,7 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation", "ctx.runQuery"]);
 });
 
 // The agent reads a package before it revises one. Read-only: an internal query (Convex gives it no writer), and its

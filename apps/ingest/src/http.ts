@@ -37,12 +37,23 @@ export async function call(http: Http, url: string, init: RequestInit = {}, time
   }
 }
 
-/** The body as text, refused past `max` bytes (Drive exports cap at 10 MB; a show's notes are a few KB). */
+/**
+ * The body as text, refused past `max` bytes (Drive exports cap at 10 MB; a show's notes are a few KB; a Bandcamp page
+ * 2 MB). The cap holds while streaming: a body with no or a false content-length is cancelled once it passes `max`.
+ */
 export async function readText(res: Response, max: number): Promise<string> {
-  if (Number(res.headers.get("content-length") ?? 0) > max) throw new HttpError(res.status, "too_large");
-  const buf = await res.arrayBuffer();
-  if (buf.byteLength > max) throw new HttpError(res.status, "too_large");
-  return new TextDecoder().decode(buf).replace(/^﻿/, "");
+  if (Number(res.headers.get("content-length") ?? 0) > max) {
+    await res.body?.cancel();
+    throw new HttpError(res.status, "too_large");
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of res.body ?? []) {
+    size += chunk.byteLength;
+    if (size > max) throw new HttpError(res.status, "too_large"); // leaving the loop cancels the stream
+    chunks.push(chunk);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks)).replace(/^﻿/, "");
 }
 
 /** A JSON object body, or an error code. Never echoes the body. */

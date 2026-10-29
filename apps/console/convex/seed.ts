@@ -2,6 +2,7 @@ import { type PackageDraft, applyRunEvent, fingerprint, initialRun, type RunStat
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
+import { searchTextOf } from "./radar";
 import { createdAtOf, statusOf } from "./runDefaults";
 import {
   DEMO_MP3_SHA256,
@@ -80,6 +81,15 @@ function demoRunState(now: number): RunState {
   return { ...s, steps: s.steps.map((st, i) => ({ ...st, label: rows[i]!.label, sources: rows[i]!.sources })) };
 }
 
+// Task 6b: Bandcamp rows get bracketed tags and an about, never cover art (copyrighted: the page shows a placeholder).
+const SAMPLE_PAGE = { tags: ["[tag]", "[another tag]"], about: "[The album's description from its Bandcamp page]" };
+const SAMPLE_RELEASES = [
+  { source: "bandcamp", status: "new", type: "album", favorite: true, ...SAMPLE_PAGE },
+  { source: "bandcamp", status: "considering", type: "single", ...SAMPLE_PAGE },
+  { source: "cosign", status: "new", type: "single", embargo: { until: null } },
+  { source: "cosign", status: "passed", type: "ep", passReason: "[Reason]" },
+] as const;
+
 const SEEDED_ACTIVITY_TITLES = new Set<string>(ACTIVITY.map(([, row]) => row.title));
 
 /**
@@ -135,9 +145,15 @@ export const seedDemo = internalMutation({
     await ctx.db.insert("verifications", { workspace: WS, claim: "ALA.NI release date", status: "conflict" });
     await ctx.db.insert("verifications", { workspace: WS, claim: "Silvan Strauss project credit", status: "could-not-verify", show: "10-2-26" });
 
-    // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases.
-    await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", type: "album" });
-    await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", type: "single" });
+    // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases. Both radar tabs, one undated
+    // embargo, and no players or links: no real music in the demo or the video (Plan 8, Hard Rule 9).
+    for (const [i, row] of SAMPLE_RELEASES.entries()) {
+      const at = newest - i * 60_000;
+      // A co-sign shows its sender prominently: a bracketed sample one, never a real address.
+      const sender = row.source === "cosign" ? { senders: [{ name: "[Label or PR company]", messageId: `demo-sample-${i}`, at }] } : {};
+      const fields = { artist: "[Artist]", title: "[Release title]", label: "[Label]", ...row, ...("tags" in row && { tags: [...row.tags] }) };
+      await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...sender, ...fields, searchText: searchTextOf(fields) });
+    }
 
     await ctx.db.insert("runs", {
       workspace: WS,

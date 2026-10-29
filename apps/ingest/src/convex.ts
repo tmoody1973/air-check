@@ -1,4 +1,4 @@
-import type { LinkedPackageStatus } from "@aircheck/core";
+import type { BandcampDetails, BandcampEmbed, LinkedPackageStatus, RadarTab, ReleaseFields } from "@aircheck/core";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi, type FunctionReference } from "convex/server"; // untyped on purpose, like media: the console's generated api would drag its tsconfig in
 
@@ -91,13 +91,34 @@ export interface IngestConvex {
   reportUnplaced(items: Unplaced[]): Promise<void>;
 }
 
+/** Plan 8: one stored email as radar.pending returns it. The body is cleaned text: no link, no address. */
+export interface PendingEmail { messageId: string; tab: RadarTab; subject: string; body: string; receivedAt: number }
+/** Mirrors outcomeV in apps/console/convex/radar.ts: any other key is refused by its validator. */
+export type RadarOutcome = { kind: "saved"; release: ReleaseFields } | { kind: "not-a-release" | "refused" | "failed"; reasons: string[] };
+/** Mirrors embedResult's validator: the player id, and (Task 6b) the page's art, tags and about from the same fetch. */
+export type EmbedOutcome = (BandcampEmbed & BandcampDetails) | { failed: string };
+/** The radar code's only Convex calls (Plan 8 Global Constraints): radar.pending, record, embedsWanted, embedResult. */
+export interface RadarConvex {
+  pending(): Promise<PendingEmail[]>;
+  record(messageId: string, outcome: RadarOutcome): Promise<void>;
+  embedsWanted(): Promise<{ releaseId: string; pageUrl: string }[]>;
+  embedResult(releaseId: string, pageUrl: string, result: EmbedOutcome): Promise<void>;
+}
+
 /** Like media and the publisher: a Convex call that never answers fails instead of wedging the pass. */
 export const CONVEX_TIMEOUT_MS = 15_000;
 
-export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex {
+export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex & { radar: RadarConvex } {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) });
   const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune" | "reportUnplaced", FunctionReference<"mutation">>;
+  const r = anyApi.radar as unknown as Record<"pending" | "embedsWanted", FunctionReference<"query">> & Record<"record" | "embedResult", FunctionReference<"mutation">>;
   return {
+    radar: {
+      pending: () => client.query(r.pending, { token }),
+      record: async (messageId, outcome) => void (await client.mutation(r.record, { token, messageId, outcome })),
+      embedsWanted: () => client.query(r.embedsWanted, { token }),
+      embedResult: async (releaseId, pageUrl, result) => void (await client.mutation(r.embedResult, { token, releaseId, pageUrl, result })),
+    },
     list: () => client.query(m.list, { token }),
     upsert: async (episode) => void (await client.mutation(m.upsert, { token, episode })),
     setFetch: async (showDate, status, error) => void (await client.mutation(m.setFetch, { token, showDate, status, ...(error ? { error } : {}) })),

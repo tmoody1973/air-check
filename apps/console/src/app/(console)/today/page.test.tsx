@@ -39,7 +39,7 @@ describe("Today when the summary is null", () => {
 });
 
 describe("Today backlog line", () => {
-  const summary = { awaiting: [], openClaims: [], releases: { count: 0, labels: [], items: [] }, blockedSince: 0 };
+  const summary = { awaiting: [], openClaims: [], releases: { count: 0, labels: [], items: [], embargoed: { bandcamp: 0, cosign: 0 }, byTab: { bandcamp: 0, cosign: 0 } }, blockedSince: 0 };
   const ep = (status: string) => ({ status });
 
   it("links to Episodes with the count still to clear", () => {
@@ -53,5 +53,47 @@ describe("Today backlog line", () => {
     results["today.summary"] = summary;
     render(<TodayPage />);
     expect(screen.queryByRole("link", { name: /Backlog:/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("Today release radar card", () => {
+  const releases = {
+    count: 4,
+    labels: ["Night Shift"],
+    // The server sends Bandcamp items only (fix round 1).
+    items: [{ artist: "Nova Reyes", title: "Low Tide", label: "Night Shift", type: "album", tab: "bandcamp" }],
+    embargoed: { bandcamp: 1, cosign: 2 },
+    byTab: { bandcamp: 2, cosign: 2 },
+  };
+  const summary = { awaiting: [], openClaims: [], releases, blockedSince: 0 };
+
+  it("counts only new Bandcamp-tab records and links to the radar", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    const card = screen.getByRole("heading", { name: "New Bandcamp releases" }).closest("section")!;
+    expect(card).toHaveTextContent("2 new");
+    expect(card).toHaveTextContent("Nova Reyes · Low Tide");
+    expect(screen.getByRole("link", { name: "Open release radar" })).toHaveAttribute("href", "/release-radar");
+  });
+
+  it("a second line counts new co-signs and opens that tab", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    expect(screen.getByRole("link", { name: "2 new co-signs" })).toHaveAttribute("href", "/release-radar?tab=cosign");
+  });
+
+  it("embargoed items show their pill per tab, each under its own line, never named", () => {
+    results["today.summary"] = summary;
+    render(<TodayPage />);
+    const bandcamp = screen.getByText(/1 new Bandcamp release is embargoed/);
+    expect(bandcamp.querySelector(".bg-caution-bg")).toHaveTextContent("Embargoed");
+    const cosign = screen.getByRole("link", { name: "2 new co-signs" }).closest("p")!;
+    expect(cosign.querySelector(".bg-caution-bg")).toHaveTextContent("2 embargoed");
+  });
+
+  it("no embargo pill when nothing is embargoed", () => {
+    results["today.summary"] = { ...summary, releases: { ...releases, embargoed: { bandcamp: 0, cosign: 0 } } };
+    render(<TodayPage />);
+    expect(screen.queryByText(/Embargoed|embargoed/)).toBeNull();
   });
 });

@@ -27,11 +27,23 @@ const SOURCE_HOST_ALLOWED = [
   "apps/console/src/app/api/ingestSources.routes.test.ts",
 ];
 
+// Plan 8: the console receives email and fetches nothing. One file names AgentMail's host; only the ingest worker's
+// extractor names Token Factory; only its Bandcamp page reader fetches next to bandcamp.com; nothing reads an
+// attachment or sends mail.
+const AGENTMAIL_HOST = "api.agentmail.to";
+const AGENTMAIL_ALLOWED = "apps/console/src/lib/agentmail.ts";
+const TOKEN_FACTORY_HOST = "tokenfactory.nebius.com";
+const TOKEN_FACTORY_ALLOWED = "apps/ingest/src/tokenFactory.ts";
+const BANDCAMP_FETCH_ALLOWED = "apps/ingest/src/bandcamp.ts";
+const BANDCAMP_PAGE_USE = /\bbandcampPageUrl\b|\.embedsWanted\(/;
+const MAIL_ONLY_READS = ["/attachments", "messages/send"];
+const isTest = (path: string) => /(?:^|\/)test\/|\.test\.[cm]?[jt]sx?$/.test(path);
+
 const exempt = (path: string) =>
   path.endsWith(".md") || EXEMPT_FILES.has(path) || EXEMPT_PREFIXES.some((p) => path.startsWith(p));
 
 /**
- * Structural checks for Hard Rules 1, 2 and 11:
+ * Structural checks for Hard Rules 1, 2, 5 and 11 (Plan 8 adds the email rules in plan8Violations):
  * only the publisher talks to the Mixcloud upload API, only the ingest service and the Connect routes name the Box,
  * Google or Dropbox API hosts, the agent holds no source or Mixcloud
  * credentials and imports nothing from the services, and no code carries track start times.
@@ -52,6 +64,26 @@ export function findBoundaryViolations(files: SourceFile[]): string[] {
     if (SOURCE_HOST.test(content) && !SOURCE_HOST_ALLOWED.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p))
       found.push(`${path}: Box, Google or Dropbox API host outside apps/ingest/src and the Connect routes (Hard Rule 2)`);
     if (content.includes(START_TIME)) found.push(`${path}: contains ${START_TIME} (Hard Rule 11)`);
+    if (!isTest(path)) found.push(...plan8Violations(path, content));
     return found;
   });
+}
+
+function plan8Violations(path: string, content: string): string[] {
+  const found: string[] = [];
+  if (content.includes(AGENTMAIL_HOST) && path !== AGENTMAIL_ALLOWED)
+    found.push(`${path}: AgentMail API host outside ${AGENTMAIL_ALLOWED} (Plan 8)`);
+  // ponytail: apps/ only; spikes/ prototypes and the agent's own model provider config are not the console or a service.
+  if (path.startsWith("apps/") && content.includes(TOKEN_FACTORY_HOST) && path !== TOKEN_FACTORY_ALLOWED)
+    found.push(`${path}: Token Factory host outside ${TOKEN_FACTORY_ALLOWED} (Plan 8)`);
+  // In the ingest worker, call( is the shared fetch helper (http.ts), so it counts as a fetch there.
+  const fetches = content.includes("fetch(") || (path.startsWith("apps/ingest/") && content.includes("call("));
+  if (content.includes("bandcamp.com") && fetches && path !== BANDCAMP_FETCH_ALLOWED)
+    found.push(`${path}: fetches next to bandcamp.com outside ${BANDCAMP_FETCH_ALLOWED} (Plan 8)`);
+  // The page list without the domain: `.embedsWanted(` is a use; convex.ts only defines it (and hands Convex a fetch).
+  if (path.startsWith("apps/ingest/") && fetches && path !== BANDCAMP_FETCH_ALLOWED && BANDCAMP_PAGE_USE.test(content))
+    found.push(`${path}: uses the Bandcamp page list and fetches outside ${BANDCAMP_FETCH_ALLOWED} (Plan 8)`);
+  if (path.startsWith("apps/") && MAIL_ONLY_READS.some((s) => content.includes(s)))
+    found.push(`${path}: AgentMail attachments or send call in apps/ (Plan 8)`);
+  return found;
 }
