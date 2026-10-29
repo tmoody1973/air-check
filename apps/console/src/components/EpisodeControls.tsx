@@ -44,6 +44,8 @@ export type EpisodeActions = {
   answer: (a: { showDate: string; questionId: string; answer: string; rerunOf?: string }) => Promise<unknown>;
   markRerun: (a: { showDate: string; rerunOf: string }) => Promise<unknown>;
   unmarkRerun: (a: { showDate: string }) => Promise<unknown>;
+  /** R9: "Try again" on a draft-failed show; the scanner then queues fresh attempts. */
+  retryDraft: (a: { showDate: string }) => Promise<unknown>;
   // Plan 6b: corrections. Each is a signed-in person's mutation; Convex refuses anything else in plain words.
   setTracklist: (a: { showDate: string; text: string }) => Promise<unknown>;
   pick: (a: { showDate: string; source: FixSource; id: string }) => Promise<unknown>;
@@ -158,6 +160,22 @@ export function RerunLine({ e, ctx }: { e: EpisodeRow; ctx: RowCtx }) {
         </p>
         <button type="button" className={SECONDARY} disabled={busy} onClick={() => save(() => ctx.actions.unmarkRerun({ showDate: e.showDate }), `${showDateLabel(e.showDate)} is back in the backlog`)}>
           {source === "detected" ? "Undo: not a rerun" : "Undo"}
+        </button>
+      </div>
+      {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
+    </div>
+  );
+}
+
+/** R9: a show the agent couldn't draft twice: Try again (two fresh attempts), or fix the tracklist below. */
+export function DraftFailedLine({ showDate, ctx }: { showDate: string; ctx: RowCtx }) {
+  const { busy, error, save } = useSave(ctx.announce);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p>The agent couldn&apos;t draft this show twice. Try again, or check the tracklist.</p>
+        <button type="button" className={SECONDARY} disabled={busy} onClick={() => save(() => ctx.actions.retryDraft({ showDate }), `Trying ${showDateLabel(showDate)} again`)}>
+          Try again
         </button>
       </div>
       {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}

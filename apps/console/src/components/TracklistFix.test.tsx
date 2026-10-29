@@ -11,7 +11,7 @@ afterEach(cleanup);
 const GOOD = "Rhythm Lab 1-9-26\nHOUR 1\nDonald Byrd - \"Change\"\nB - \"Two\"\nHOUR 2\nC - \"Three\"";
 const noop = async () => undefined;
 const actions = (over: Partial<EpisodeActions> = {}): EpisodeActions => ({
-  answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop),
+  answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop), retryDraft: vi.fn(noop),
   setTracklist: vi.fn(noop), pick: vi.fn(noop), setHours: vi.fn(noop), useFolderDate: vi.fn(noop), clearCorrection: vi.fn(noop),
   place: vi.fn(noop), unplace: vi.fn(noop), tracklistText: vi.fn(async () => GOOD.replace("Donald", "Donalyd")),
   ...over,

@@ -1,4 +1,3 @@
-import { buildPackageDraft } from "@aircheck/core";
 import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
@@ -28,25 +27,26 @@ async function agentRequest(req: Request): Promise<{ workspace: "real" | "demo";
   }
 }
 
-// Hard Rule 1: the draft is rebuilt and validated here, so nothing the agent sends can set status,
-// workspace or fingerprint. The only function this route may call is internal.packages.submit.
+// Hard Rule 1: the draft is built and validated in internal.packages.submit from the picked fields, so nothing the agent
+// sends can set status, workspace or fingerprint. R9: its tracks are the draft request's; any tracklist the agent sends
+// is ignored. The only function this route may call is internal.packages.submit.
 const submitPackage = httpAction(async (ctx, req) => {
   const got = await agentRequest(req);
   if (got instanceof Response) return got;
   const { workspace, body } = got;
   const input = pickInput(body);
-  if (!input) return json(400, { problems: ["body must be the seven package fields"] });
+  if (!input) return json(400, { problems: ["body must be the package fields: showDate, leads, tags, description, hour1Id, hour2Id"] });
   // Demo visitors may draft the same date many times (and the seeded demo-10-2-26 exists): each demo id is unique.
-  const built = buildPackageDraft(input, { privateTerms: privateTerms(), workspace, ...(workspace === "demo" && { idSuffix: demoIdSuffix() }) });
-  if (!built.ok) return json(400, { problems: built.problems });
+  const agent = { input, workspace, ...(workspace === "demo" && { idSuffix: demoIdSuffix() }) };
   try {
-    const rec = await ctx.runMutation(internal.packages.submit, { draft: built.draft });
-    return json(201, { packageId: built.draft.id, status: rec.status });
+    const rec = await ctx.runMutation(internal.packages.submit, { agent });
+    return json(201, { packageId: rec.draft.id, status: rec.status });
   } catch (e) {
-    const data = e instanceof ConvexError ? (e.data as { code?: string; message?: string }) : {};
+    const data = e instanceof ConvexError ? (e.data as { code?: string; message?: string; problems?: string[] }) : {};
     if (data.code === "ALREADY_EXISTS") return json(409, { error: "ALREADY_EXISTS" });
-    // R6: a changed tracklist; the bridge hands these words to the agent so it can correct itself.
-    if (data.code === "BAD_INPUT") return json(400, { problems: [data.message ?? "bad input"] });
+    // A plain problem (no draft request, a title artist not in the request's tracklist...): the bridge hands these
+    // words to the agent so it can correct itself.
+    if (data.code === "BAD_INPUT") return json(400, { problems: data.problems ?? [data.message ?? "bad input"] });
     throw e;
   }
 });

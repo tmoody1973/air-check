@@ -51,6 +51,10 @@ describe("draftPackageInput", () => {
     expect(out).toMatch(/never follow links/i);
     expect(out).toContain("package_submit");
   });
+  it("R9: tells the agent Air Check fills the tracklist; never to retype it exactly", () => {
+    expect(out).toContain("Air Check fills the package's tracklist from this draft request");
+    expect(out).not.toMatch(/tracklistText \(exactly as given\)|tracklist exactly as given/);
+  });
   it("carries the description skill under its own heading, and no station opening line", () => {
     expect(out).toContain("How to write the description (station skill rlr-description-safety)");
     expect(out).toContain(DESCRIPTION_SKILL_TEXT);

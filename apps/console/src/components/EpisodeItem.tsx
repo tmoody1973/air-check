@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Fragment, useState, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { fetchErrorText } from "../lib/episodes";
-import { AnswerBox, AudioAsk, LINK, MarkForm, RerunLine, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
+import { AnswerBox, AudioAsk, DraftFailedLine, LINK, MarkForm, RerunLine, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
 import { CorrectedLine, FixControl, hasAudioFix, TracklistFixButton, withoutHandCopy } from "./FixControl";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl } from "./PublishStatus";
@@ -119,12 +119,7 @@ function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTrackli
   const parts: ReactNode[] = [];
   if (e.status === "rerun" && e.rerunOf) parts.push(<RerunLine key="rerun" e={e} ctx={ctx} />);
   if (e.corrected || e.rescanPending) parts.push(<CorrectedLine key="corrected" e={e} ctx={ctx} canChange={canChange} />);
-  if (e.status === "draft-failed")
-    parts.push(
-      <p key="draft">
-        {"The agent couldn't draft this show twice"} — <Link href="/chat" className={LINK}>open Chat</Link> to try, or check the tracklist.
-      </p>,
-    );
+  if (e.status === "draft-failed") parts.push(<DraftFailedLine key="draft" showDate={e.showDate} ctx={ctx} />);
   if (e.audio.status === "ask" && e.status !== "rerun" && !hasAudioFix(e.questions)) parts.push(<AudioAsk key="ask" showDate={e.showDate} />);
   if (e.fetch?.status === "failed") parts.push(<p key="fetch" className="text-problem-text">Download failed ({fetchErrorText(e.fetch.error)})</p>);
   const lastTracklistFix = e.questions.findLastIndex((q) => q.fix?.type === "tracklist");

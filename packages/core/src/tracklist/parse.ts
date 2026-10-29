@@ -70,21 +70,3 @@ export function formatTrack(t: Pick<Track, "artist" | "title" | "feat">): string
 export function formatTracklist(tracks: Pick<Track, "hour" | "artist" | "title" | "feat">[]): string {
   return ([1, 2] as const).map((h) => [`Hour ${h}`, ...tracks.filter((t) => t.hour === h).map(formatTrack)].join("\n")).join("\n\n");
 }
-
-/**
- * R6: the first way `got` differs from `want` (hour, order, artist, title, feat, all exact), in plain words; null when
- * they are the same. Compared hour by hour, so a dropped, added or moved track is named where it first shows.
- */
-export function tracklistDifference(got: readonly Track[], want: readonly Track[]): string | null {
-  for (const h of [1, 2] as const) {
-    const [g, w] = [got, want].map((ts) => ts.filter((t) => t.hour === h));
-    for (let i = 0; i < Math.max(g!.length, w!.length); i++) {
-      const [a, b] = [g![i], w![i]];
-      const where = `hour ${h} track ${i + 1}`;
-      if (!a) return `${where} is missing: it should be '${formatTrack(b!)}'`;
-      if (!b) return `${where} '${formatTrack(a)}' should not be there`;
-      if (a.artist !== b.artist || a.title !== b.title || a.feat !== b.feat) return `${where} '${formatTrack(a)}' should be '${formatTrack(b)}'`;
-    }
-  }
-  return null;
-}

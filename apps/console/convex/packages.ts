@@ -1,5 +1,6 @@
 import {
-  checkDescriptionChange, formatTracklist, GateError, parseTracklist, publishDayOffset, tracklistDifference, type GateErrorCode, type PackageDraft,
+  buildPackageDraft, checkDescriptionChange, formatTracklist, GateError, publishDayOffset, type AgentPackageInput, type GateErrorCode,
+  type PackageDraft,
   type PackageRecord, type PackageStatus,
 } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
@@ -226,25 +227,42 @@ export const coverUploadUrl = mutation({
 });
 
 /**
- * R6: why the agent's tracks are not the ones it was asked to draft, or null. They are compared with the latest
- * draft-package run (Tracklist page or ingest service) for the show in the same workspace, parsed the same way.
+ * R9: the tracklist text of the latest draft-package run (Tracklist page or ingest service) for the show in the
+ * workspace, or null when there is none. The package's tracks are always these, parsed in code, never the agent's.
  */
-async function tracklistLock(ctx: QueryCtx, d: PackageDraft): Promise<string | null> {
-  const runs = await ctx.db.query("runs").withIndex("by_kind_showDate", (q) => q.eq("kind", "draft-package").eq("form.showDate", d.showDate)).collect();
-  const latest = runs.filter((r) => r.workspace === d.workspace && r.form).sort((a, b) => createdAtOf(b) - createdAtOf(a))[0];
-  if (!latest) return "no draft request for this show";
-  const diff = tracklistDifference(d.tracks, parseTracklist(latest.form!.tracklistText).tracks);
-  return diff && `the tracklist must be exactly as given: ${diff}`;
+async function requestedTracklist(ctx: QueryCtx, workspace: "real" | "demo", showDate: string): Promise<string | null> {
+  const runs = await ctx.db.query("runs").withIndex("by_kind_showDate", (q) => q.eq("kind", "draft-package").eq("form.showDate", showDate)).collect();
+  const latest = runs.filter((r) => r.workspace === workspace && r.form).sort((a, b) => createdAtOf(b) - createdAtOf(a))[0];
+  return latest ? latest.form!.tracklistText : null;
 }
 
-// Internal: reachable only with the deploy key (Plans 4 and 5). The agent's route; it can't change a track (R6).
+const refuse = (problems: string[]): never => {
+  throw new ConvexError({ code: "BAD_INPUT", message: problems.join("; "), problems });
+};
+
+/**
+ * R9: the agent's draft, built from its picked input with the draft request's tracklist in place of whatever the agent
+ * typed (the model flattens curly quotes and accents), so the title's leads, tags and description are checked against
+ * the request's tracks. No request for the show in the workspace: refused.
+ */
+async function agentDraft(ctx: QueryCtx, { input, workspace, idSuffix }: { input: AgentPackageInput; workspace: "real" | "demo"; idSuffix?: string }): Promise<PackageDraft> {
+  const text = await requestedTracklist(ctx, workspace, input.showDate);
+  if (text === null) return refuse(["no draft request for this show"]);
+  const built = buildPackageDraft({ ...input, tracklistText: text }, { privateTerms: privateTerms(), workspace, ...(idSuffix && { idSuffix }) });
+  return built.ok ? built.draft : refuse(built.problems);
+}
+
+// Internal: reachable only with the deploy key (Plans 4 and 5). The agent's route sends `agent` and can't change a track
+// (R9); a prebuilt `draft` (tests only, no route sends one) is submitted as given.
 export const submit = internalMutation({
-  args: { draft: v.any() },
-  handler: async (ctx, { draft }) => {
-    const problem = await tracklistLock(ctx, asDraft(draft));
-    if (problem) throw new ConvexError({ code: "BAD_INPUT", message: problem });
+  args: {
+    draft: v.optional(v.any()),
+    agent: v.optional(v.object({ input: v.any(), workspace: v.union(v.literal("real"), v.literal("demo")), idSuffix: v.optional(v.string()) })),
+  },
+  handler: async (ctx, a) => {
+    const draft = a.agent ? await agentDraft(ctx, a.agent) : asDraft(a.draft);
     try {
-      return await gateFor(ctx).submit(asDraft(draft));
+      return await gateFor(ctx).submit(draft);
     } catch (e) {
       // Only ConvexError data survives the hop to an HTTP action on a deployed backend.
       if (e instanceof GateError) throw new ConvexError({ code: e.code, message: e.message });

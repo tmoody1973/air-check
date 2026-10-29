@@ -55,6 +55,8 @@ test("the public writes are exactly the allowlist", async () => {
       "ingest.reportUnplaced",
       // Add a 2025 show: a signed-in real human adds or removes a 2025 Friday for the scanner; never a source write.
       "episodes.addShowDate", "episodes.removeShowDate",
+      // R9: "Try again" on a draft-failed show records a retry time only (a signed-in real human); it queues nothing.
+      "episodes.retryDraft",
     ].sort(),
   );
   expect(internal.sort()).toEqual(

@@ -587,4 +587,45 @@ describe("Plan 6b: corrections and placements", () => {
     expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]).toMatchObject({ draftAttempts: 0, status: "ready-to-draft", rescanPending: false });
     expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
   });
+
+  // R9 (Oct 29): "Try again" on a draft-failed show: the runs before it stop counting, so two fresh attempts.
+  const failTwice = async (t: T) => {
+    for (let i = 0; i < 2; i++) {
+      expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+      await t.run(async (ctx) => {
+        for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed", createdAt: Date.now() - 60_000 });
+      });
+    }
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "draft-failed" });
+  };
+
+  test("R9: draft-failed → Try again → requestDraft queues, and the old failures stop counting", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await failTwice(t);
+    await t.withIdentity(human).mutation(api.episodes.retryDraft, { showDate: "2026-01-02" });
+    expect((await row(t))!.retryAt).toEqual(expect.any(Number));
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]).toMatchObject({ draftAttempts: 0, status: "ready-to-draft" });
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+    // A scan after the retry keeps it (the scanner patches only what it read).
+    await upsert(t, episode());
+    expect((await row(t))!.retryAt).toEqual(expect.any(Number));
+  });
+
+  test("R9: Try again is refused unless the show's draft failed, and writes nothing", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    expect(await errorCode(t.withIdentity(human).mutation(api.episodes.retryDraft, { showDate: "2026-01-02" }))).toBe("BAD_INPUT");
+    expect(await errorCode(t.withIdentity(human).mutation(api.episodes.retryDraft, { showDate: "2026-01-09" }))).toBe("NOT_FOUND");
+    expect((await row(t))!.retryAt).toBeUndefined();
+  });
+
+  test("R9: Try again from the demo login or signed out is FORBIDDEN (Hard Rule 9)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await failTwice(t);
+    expect(await errorCode(t.withIdentity({ subject: "d1", role: "demo" }).mutation(api.episodes.retryDraft, { showDate: "2026-01-02" }))).toBe("FORBIDDEN");
+    expect(await errorCode(t.mutation(api.episodes.retryDraft, { showDate: "2026-01-02" }))).toBe("FORBIDDEN");
+    expect((await row(t))!.retryAt).toBeUndefined();
+  });
 });
