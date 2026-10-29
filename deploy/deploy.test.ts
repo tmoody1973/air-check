@@ -343,6 +343,15 @@ describe("deploy files", () => {
     expect(read("hermes/aircheck-watchdog.service").split("\n")).toContain("KillMode=process");
   });
 
+  it("no probe can stall a watchdog run: each probe is capped, the skills listing too, and the unit has a ceiling (Oct 29)", () => {
+    const w = read("hermes/watchdog.sh");
+    expect(w).toContain('if ! timeout "${PROBE_TIMEOUT:-90}" bash -c "${cmd}"');
+    expect(w).toContain('&& timeout "${PROBE_TIMEOUT:-90}" bash -c "${cmd}"');
+    expect(w).toMatch(/timeout 45 \$\{HOME\}\/\.local\/bin\/openshell sandbox exec/);
+    expect(w).toContain("> \\$f.tmp 2>/dev/null && mv \\$f.tmp \\$f");
+    expect(read("hermes/aircheck-watchdog.service").split("\n")).toContain("TimeoutStartSec=10min");
+  });
+
   // forward-adopt.sh with a stub `ss` (a listener while ALIVE exists), a fake /proc and `kill` overridden by an
   // exported shell function, so no real process is touched.
   const runAdopt = (argv: string, opts: { listening?: boolean; age?: number } = {}) => {
