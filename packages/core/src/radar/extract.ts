@@ -88,44 +88,68 @@ export function findEmbargo(text: string, receivedAt: number): { until: string |
   return { until: dates.length ? dates.sort().at(-1)! : null };
 }
 
-// Bandcamp's real new-release line (live mail, 2026-10-29): `<sender> just released "<title>"( by <artist>), check it out at:`
-// with the link on the next line. The brief states it as
-//   ^(?<sender>.{1,200}?) just released "(?<title>.{1,300}?)"(?: by (?<artist>.{1,200}?))?, check it out at:\s*$
-// That regex is bounded but cubic (sender x title x artist backtracking), so it is read here with literal scans instead,
-// same meaning: straight or curly quotes, the title is the shortest quoted run that the rest fits, and the
-// ", check it out at:" tail may be missing only when the line ends right after the closing quote.
+// Bandcamp's new-release line (live mail, 2026-10-29): `<sender> just released|announced "<title>"( by <artist>), check it out at:`
+// (or `, check it out here`), the link on the next line. A hand-forward may leave the quotes off and wrap the line.
+// Read with literal scans, never a regex: every step is linear in the 500-char line.
 const MAX_TEMPLATE_LINE = 500;
-const RELEASED = " just released ";
-const TAIL = ", check it out at:";
+const VERBS = [" just released ", " just announced "];
+const TAILS = [", check it out at:", ", check it out here"].flatMap((t) => [t, `${t}:`, `${t}.`]).filter((t, i, all) => all.indexOf(t) === i);
 const OPEN_QUOTE = new Set(['"', "\u201c"]);
 const CLOSE_QUOTE = new Set(['"', "\u201d"]);
+const MAX_JOINED_LINES = 3;
+
+function verbAt(line: string): { at: number; len: number } | null {
+  const hits = VERBS.map((v) => ({ at: line.indexOf(v), len: v.length })).filter((h) => h.at >= 0);
+  return hits.length ? hits.reduce((a, b) => (b.at < a.at ? b : a)) : null;
+}
 
 function templateLine(line: string): { sender: string; title: string; artist?: string } | null {
-  const at = line.indexOf(RELEASED);
-  if (at < 1 || at > 200) return null;
-  const tailed = line.endsWith(TAIL);
-  const rest = line.slice(at + RELEASED.length, tailed ? -TAIL.length : undefined);
-  if (!OPEN_QUOTE.has(rest[0] ?? "")) return null;
+  const verb = verbAt(line);
+  if (!verb || verb.at < 1 || verb.at > 200) return null;
+  const tail = TAILS.find((t) => line.endsWith(t));
+  const rest = line.slice(verb.at + verb.len, tail ? -tail.length : undefined);
+  const sender = line.slice(0, verb.at);
+  if (!OPEN_QUOTE.has(rest[0] ?? "")) {
+    // ponytail: unquoted needs the tail; the last " by " splits title from artist, so a title holding " by " is mis-split.
+    if (!tail) return null;
+    const by = rest.lastIndexOf(" by ");
+    if (by < 0) return rest.length >= 1 && rest.length <= 300 ? { sender, title: rest } : null;
+    const [title, artist] = [rest.slice(0, by), rest.slice(by + 4)];
+    return title.length >= 1 && title.length <= 300 && artist.length >= 1 && artist.length <= 200 ? { sender, title, artist } : null;
+  }
   for (let q = 2; q < rest.length && q <= 301; q++) {
     if (!CLOSE_QUOTE.has(rest[q]!)) continue;
     const title = rest.slice(1, q);
-    if (q === rest.length - 1) return { sender: line.slice(0, at), title };
+    if (q === rest.length - 1) return { sender, title };
     const artistLength = rest.length - (q + 5);
-    if (tailed && rest.startsWith(" by ", q + 1) && artistLength >= 1 && artistLength <= 200) return { sender: line.slice(0, at), title, artist: rest.slice(q + 5) };
+    if (tail && rest.startsWith(" by ", q + 1) && artistLength >= 1 && artistLength <= 200) return { sender, title, artist: rest.slice(q + 5) };
+  }
+  return null;
+}
+
+/** The line at i, then (when it holds the verb) up to two more lines joined by a space, until one reads as the template. */
+function templateAt(lines: string[], i: number): ReturnType<typeof templateLine> {
+  let joined = "";
+  for (let k = 0; k < MAX_JOINED_LINES && i + k < lines.length; k++) {
+    joined = k === 0 ? lines[i]!.trim() : `${joined} ${lines[i + k]!.trim()}`;
+    if (joined.length > MAX_TEMPLATE_LINE) return null;
+    const g = templateLine(joined);
+    if (g) return g;
   }
   return null;
 }
 
 /**
  * Bandcamp's new-release template, read in code. With "by", the by-part is the artist and the sender is the label;
- * without it, the sender is the artist and there is no label. The title is the quoted text as is (it may hold an
- * unbalanced bracket). Null when no line matches: the email then goes to the model, as any other.
+ * without it, the sender is the artist and there is no label. The title is the text as is (it may hold an
+ * unbalanced bracket). Null when no line matches: the email then goes to the model, as any other. The subject is
+ * not read (a "Fwd:" prefix changes nothing here).
  */
 export function parseBandcampEmail(_subject: string, text: string): ReleaseFields | null {
   const lines = text.split("\n");
   for (const [i, raw] of lines.entries()) {
-    if (raw.length > MAX_TEMPLATE_LINE) continue;
-    const g = templateLine(raw.trim());
+    if (!VERBS.some((v) => raw.includes(v.trimEnd()))) continue;
+    const g = templateAt(lines, i);
     const [sender, title, by] = [g?.sender.trim(), g?.title.trim(), g?.artist?.trim()];
     if (!sender || !title) continue;
     const releasedOn = lines.filter((l, j) => j !== i && /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
