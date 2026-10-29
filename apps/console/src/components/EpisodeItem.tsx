@@ -2,9 +2,11 @@ import Link from "next/link";
 import { Fragment, useState, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { fetchErrorText } from "../lib/episodes";
-import { AnswerBox, AudioAsk, LINK, MarkForm, RerunLine, type EpisodeRow, type RowCtx } from "./EpisodeControls";
+import { AnswerBox, AudioAsk, LINK, MarkForm, RerunLine, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
+import { CorrectedLine, FixControl, hasAudioFix, TracklistFixButton, withoutHandCopy } from "./FixControl";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl } from "./PublishStatus";
+import { TracklistFix } from "./TracklistFix";
 import type { SourceStatus } from "./SourceConnections";
 
 // One show (or one blank Friday) as one model, drawn two ways: a row group in the table on wide screens, a stacked card
@@ -30,6 +32,12 @@ const STATUS: Record<string, [PillTone, string]> = {
   "draft-failed": ["problem", "Draft failed"],
 };
 const DRAFTING: [PillTone, string] = ["neutral", "Drafting"];
+/** Plan 6b: before a package, a fix waiting for its scan or a stale fix holds the draft, so the pill says so (not "Waiting to draft"). */
+function fixState(e: EpisodeRow): [PillTone, string] | null {
+  if (e.packageStatus !== "none" || e.status === "rerun") return null;
+  if (e.rescanPending) return ["neutral", "Checking your fix"];
+  return e.corrected?.stale ? ["problem", "Fix needs a look"] : null;
+}
 /** Before a package exists, a week can still be declared a rerun (R7); not while a draft run is open (M2). */
 const MARKABLE = new Set(["missing-audio", "missing-tracklist", "question", "ready-to-draft", "draft-failed"]);
 export const COLUMN_SOURCE = { audio: "box", tracklist: "google", notes: "dropbox" } as const;
@@ -75,42 +83,59 @@ function statusLink(e: EpisodeRow): ReactNode {
   return e.packageStatus !== "none" ? <Link href={`/packages/${e.packageId}`} className={LINK}>Open package</Link> : null;
 }
 
-/** The explanations and controls under a show, in reading order. */
-function detailsOf(e: EpisodeRow, ctx: RowCtx): ReactNode[] {
+/** One question: its words, then the answer box or the "fix it in the source" line, then any in-console fix (Plan 6b). */
+function QuestionItem({ e, q, ctx, canChange }: { e: EpisodeRow; q: Question; ctx: RowCtx; canChange: boolean }) {
+  const fix = q.fix && <FixControl showDate={e.showDate} fix={q.fix} ctx={ctx} canChange={canChange} />;
+  const said = (line: ReactNode) => (
+    <p className="flex flex-col [overflow-wrap:anywhere]">
+      <span className="font-medium">{q.fix?.type === "hours" ? withoutHandCopy(q.text) : q.text}</span>
+      {line && <span className="text-ink-soft">{line}</span>}
+    </p>
+  );
+  // M6: an action question is settled by a fix (in the source, or now here), so it has no answer box. The hours
+  // picker replaces the special folder's answer box: the answer to "which files?" is the two files.
+  const head = q.action
+    ? said("This clears on the next scan after you fix it.")
+    : q.answer
+      ? said(`You answered: ${q.answer}`)
+      : q.fix?.type === "hours"
+        ? said(null)
+        : <AnswerBox showDate={e.showDate} q={q} ctx={ctx} />;
+  return (
+    <div className="flex flex-col gap-2">
+      {head}
+      {fix}
+    </div>
+  );
+}
+
+/**
+ * The explanations and controls under a show, in reading order. `onEditTracklist` is absent on a frozen show and while
+ * the editor is open, so the one "Fix the tracklist" button (after the last question that offers it, M2) never leads nowhere.
+ */
+function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTracklist?: () => void): ReactNode[] {
   const parts: ReactNode[] = [];
   if (e.status === "rerun" && e.rerunOf) parts.push(<RerunLine key="rerun" e={e} ctx={ctx} />);
+  if (e.corrected || e.rescanPending) parts.push(<CorrectedLine key="corrected" e={e} ctx={ctx} canChange={canChange} />);
   if (e.status === "draft-failed")
     parts.push(
       <p key="draft">
         {"The agent couldn't draft this show twice"} — <Link href="/chat" className={LINK}>open Chat</Link> to try, or check the tracklist.
       </p>,
     );
-  if (e.audio.status === "ask" && e.status !== "rerun") parts.push(<AudioAsk key="ask" showDate={e.showDate} />);
+  if (e.audio.status === "ask" && e.status !== "rerun" && !hasAudioFix(e.questions)) parts.push(<AudioAsk key="ask" showDate={e.showDate} />);
   if (e.fetch?.status === "failed") parts.push(<p key="fetch" className="text-problem-text">Download failed ({fetchErrorText(e.fetch.error)})</p>);
-  for (const q of e.questions)
-    parts.push(
-      // M6: fixed in Box, Drive or Paper, not here, so no answer box.
-      q.action ? (
-        <p key={q.id} className="flex flex-col [overflow-wrap:anywhere]">
-          <span className="font-medium">{q.text}</span>
-          <span className="text-ink-soft">This clears on the next scan after you fix it.</span>
-        </p>
-      ) : q.answer ? (
-        <p key={q.id} className="flex flex-col [overflow-wrap:anywhere]">
-          <span className="font-medium">{q.text}</span>
-          <span className="text-ink-soft">You answered: {q.answer}</span>
-        </p>
-      ) : (
-        <AnswerBox key={q.id} showDate={e.showDate} q={q} ctx={ctx} />
-      ),
-    );
+  const lastTracklistFix = e.questions.findLastIndex((q) => q.fix?.type === "tracklist");
+  e.questions.forEach((q, i) => {
+    parts.push(<QuestionItem key={q.id} e={e} q={q} ctx={ctx} canChange={canChange} />);
+    if (i === lastTracklistFix && onEditTracklist) parts.push(<TracklistFixButton key="fix-tracklist" onEdit={onEditTracklist} />);
+  });
   return parts;
 }
 
-const MarkButton = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" onClick={onClick} className="min-h-11 text-sm text-ink-soft underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-signal">
-    Mark as rerun of…
-  </button>
+const ROW_ACTION = "min-h-11 text-sm text-ink-soft underline underline-offset-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-signal";
+const RowAction = ({ onClick, children }: { onClick: () => void; children: ReactNode }) => (
+  <button type="button" onClick={onClick} className={ROW_ACTION}>{children}</button>
 );
 
 const td = "border-t border-line px-3 py-2 align-middle";
@@ -119,12 +144,18 @@ const BLANK = "No show folder or tracklist found";
 /** A show (`e`) or a blank Friday (`e` null) at `showDate`. */
 export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeRow | null; showDate: string; sources: SourceStates; ctx: RowCtx; layout: Layout }) {
   const [marking, setMarking] = useState(false);
+  const [editing, setEditing] = useState(false);
   const canMark = (e ? MARKABLE.has(e.status) && !e.openRun : true) && ctx.choices.length > 0;
-  const [tone, word] = !e ? (["neutral", "Blank Friday"] as const) : e.openRun && e.packageStatus === "none" ? DRAFTING : (STATUS[e.status] ?? ["neutral", e.status]);
+  const [tone, word] = !e ? (["neutral", "Blank Friday"] as const) : e.openRun && e.packageStatus === "none" ? DRAFTING : (fixState(e) ?? STATUS[e.status] ?? ["neutral", e.status]);
   const cells = e && cellsOf(e, sources);
   const link = e && statusLink(e);
   const onMark = canMark && !marking ? () => setMarking(true) : undefined;
-  const details = e ? detailsOf(e, ctx) : [];
+  // Plan 6b: a show is fixed here until it has a package or an open run (then it is frozen: the package page).
+  const canChange = !!e && e.packageStatus === "none" && !e.openRun;
+  const canEdit = canChange && e.status !== "rerun";
+  const onEdit = canEdit && !editing ? () => setEditing(true) : undefined;
+  const details = e ? detailsOf(e, ctx, canChange, onEdit) : [];
+  if (editing && canEdit) details.push(<TracklistFix key="edit" showDate={showDate} ctx={ctx} onClose={() => setEditing(false)} />);
   if (marking && canMark) details.push(<MarkForm key="mark" showDate={showDate} ctx={ctx} onClose={() => setMarking(false)} />);
   const date = showDateLabel(showDate);
   const id = `ep-${showDate}`;
@@ -148,7 +179,13 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
         ) : (
           <p className="mt-2 text-sm text-muted">{BLANK}</p>
         )}
-        {(link || onMark) && <div className="mt-1 flex flex-wrap items-center gap-x-4">{link}{onMark && <MarkButton onClick={onMark} />}</div>}
+        {(link || onEdit || onMark) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-4">
+            {link}
+            {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
+            {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
+          </div>
+        )}
         {details.length > 0 && <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3 text-sm">{details}</div>}
       </li>
     );
@@ -166,7 +203,8 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Pill tone={tone}>{word}</Pill>
             {link}
-            {onMark && <MarkButton onClick={onMark} />}
+            {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
+            {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
           </div>
         </td>
       </tr>

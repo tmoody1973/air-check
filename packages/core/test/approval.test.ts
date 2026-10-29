@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "vitest";
-import { type Actor, ApprovalGate, AUDIO_CHANGED, AUDIO_MISSING, canPublish, fingerprint, GateError, toSections, type Transition } from "../src/index";
+import { type Actor, ApprovalGate, AUDIO_CHANGED, AUDIO_MISSING, canPublish, fingerprint, formatTrack, GateError, toSections, type Transition } from "../src/index";
 import { goldenDraft } from "./helpers/goldens";
 import { memoryStore } from "./helpers/memory-store";
 
@@ -443,5 +443,41 @@ test("editDescription: the checker's issues refuse the edit as BAD_INPUT, with t
   // the draft's own track titles count toward a pasted tracklist
   const titles = goldenDraft().tracks.filter((t) => t.title.length >= 5).slice(0, 6).map((t) => t.title).join(", ");
   expect(await issuesOf(gate.editDescription(id, titles, tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("lists tracks")] });
+  expect((await gate.decide(id, fp, "approve", tarik)).status).toBe("approved");
+});
+
+// R7: a host fixes a track on the package page; it re-fingerprints and stays in review, like the description.
+const EDITED = 'HOUR 1\nMichael Kiwanuka - "Cold Little Heart"\nTinashe - "Nasty"\nHOUR 2\nBicep - "Glue"\nKaytranada - "Lite Spots"\nHiatus Kaiyote - "Nakamarra"';
+
+test("editTracklist: a human edits while awaiting review; the tracks change, it re-fingerprints and stays in review", async () => {
+  const { id, fp } = await ready();
+  const before = transitions.length;
+  const edited = await gate.editTracklist(id, EDITED, tarik);
+  expect(edited.status).toBe("awaiting_review");
+  expect(edited.draft.tracks.map(formatTrack)).toEqual(['Michael Kiwanuka - "Cold Little Heart"', 'Tinashe - "Nasty"', 'Bicep - "Glue"', 'Kaytranada - "Lite Spots"', 'Hiatus Kaiyote - "Nakamarra"']);
+  expect(edited.draft.tracks.filter((t) => t.closing).map((t) => t.artist)).toEqual(["Tinashe", "Hiatus Kaiyote"]);
+  expect(toSections(edited.draft.tracks)[0]).toEqual({ artist: "Michael Kiwanuka", song: "Cold Little Heart" });
+  expect(edited.fingerprint).not.toBe(fp);
+  expect(transitions.slice(before)).toEqual([expect.objectContaining({ id, from: "awaiting_review", to: "awaiting_review", by: tarik.email })]);
+  expect(await code(gate.decide(id, fp, "approve", tarik))).toBe("PACKAGE_CHANGED");
+  expect((await gate.decide(id, edited.fingerprint!, "approve", tarik)).status).toBe("approved");
+});
+
+test("editTracklist: only a signed-in real human, only while awaiting review", async () => {
+  const { id, fp } = await ready();
+  expect(await code(gate.editTracklist(id, EDITED, { kind: "agent" }))).toBe("FORBIDDEN");
+  expect(await code(gate.editTracklist(id, EDITED, judge))).toBe("FORBIDDEN");
+  expect(await code(gate.editTracklist("nope", EDITED, tarik))).toBe("NOT_FOUND");
+  await gate.decide(id, fp, "approve", tarik);
+  expect(await code(gate.editTracklist(id, EDITED, tarik))).toBe("NOT_READY");
+  const pending = await gate.submit(goldenDraft({ id: "pkg-x" }));
+  expect(await code(gate.editTracklist(pending.draft.id, EDITED, tarik))).toBe("NOT_READY");
+});
+
+test("editTracklist: a bad line, a missing hour or a title lead gone from the tracks is BAD_INPUT and changes nothing", async () => {
+  const { id, fp } = await ready();
+  expect(await issuesOf(gate.editTracklist(id, `${EDITED}\nno dash here`, tarik))).toEqual({ code: "BAD_INPUT", issues: ['tracklist line 8 (no-separator): "no dash here"'] });
+  expect(await issuesOf(gate.editTracklist(id, 'HOUR 1\nMichael Kiwanuka - "x"', tarik))).toMatchObject({ code: "BAD_INPUT", issues: expect.arrayContaining(["hour 2 has no tracks"]) });
+  expect(await issuesOf(gate.editTracklist(id, EDITED.replace("Bicep", "Floating Points"), tarik))).toEqual({ code: "BAD_INPUT", issues: ["title artist not in the tracklist: Bicep"] });
   expect((await gate.decide(id, fp, "approve", tarik)).status).toBe("approved");
 });

@@ -52,6 +52,34 @@ export async function awaitingReviewCount(ctx: QueryCtx): Promise<number> {
   return n;
 }
 
+export const correctionFor = (ctx: QueryCtx, showDate: string) =>
+  ctx.db.query("corrections").withIndex("by_showDate", (q) => q.eq("showDate", showDate)).unique();
+
+/**
+ * Review Focus 3: the finished draft runs that count against a show are those made after its latest fix, so a fix
+ * earns two fresh attempts. Corrections are refused while a run is open, so none straddles a fix.
+ */
+export async function attemptsSince(ctx: QueryCtx, showDate: string): Promise<number> {
+  const since = (await correctionFor(ctx, showDate))?.updatedAt ?? 0;
+  return (await draftRunsFor(ctx, showDate)).filter((r) => !isOpenRun(r) && createdAtOf(r) >= since).length;
+}
+
+/**
+ * R4: the row still holds a scan from before Tarik's latest fix, undo or placement for this show, so drafting it now
+ * would freeze the old facts. The scanner sends the updatedAt of the correction it applied (appliedCorrectionAt).
+ */
+export async function rescanPending(ctx: QueryCtx, row: EpisodeDoc): Promise<boolean> {
+  if (((await correctionFor(ctx, row.showDate))?.updatedAt ?? 0) !== (row.appliedCorrectionAt ?? 0)) return true;
+  const placed = await ctx.db.query("placements").withIndex("by_date", (q) => q.eq("date", row.showDate)).collect();
+  return placed.some((p) => p.updatedAt > row.scannedAt);
+}
+
+/** The corrected fields in words the page can label, in a fixed order. */
+const CORRECTED = [["tracklistText", "tracklist"], ["drive", "drive"], ["paper", "paper"], ["box", "box"], ["hours", "hours"], ["folderDate", "folderDate"]] as const;
+export type CorrectedField = (typeof CORRECTED)[number][1];
+/** What a correction row still fixes; [] for a removed fix (I2: the row stays so its updatedAt keeps counting). */
+export const correctedFields = (c: Doc<"corrections">): CorrectedField[] => CORRECTED.filter(([k]) => c[k] !== undefined).map(([, name]) => name);
+
 /** What core's episodeStatus, nextToDraft and rerunCandidate read. */
 export function factsOf(e: EpisodeDoc, packageStatus: LinkedPackageStatus, draftAttempts = 0): EpisodeFacts {
   return {
@@ -77,19 +105,24 @@ export async function episodeRows(ctx: QueryCtx) {
   const docs = await ctx.db.query("episodes").withIndex("by_showDate").collect();
   return Promise.all(
     docs.map(async (e) => {
-      const { _id, _creationTime, notes: { text, ...notes }, tracklist: { tracks, ...tracklist }, ...rest } = e;
-      void _id, _creationTime, text;
+      // Never the Drive text either (it is read one show at a time, by a person: corrections.tracklistText).
+      const { _id, _creationTime, correctionStale, notes: { text, ...notes }, tracklist: { tracks, text: driveText, ...tracklist }, ...rest } = e;
+      void _id, _creationTime, text, driveText;
       const pkg = await linkedPackage(ctx, e.showDate);
       const runs = await draftRunsFor(ctx, e.showDate);
-      const draftAttempts = runs.filter((r) => !isOpenRun(r)).length;
+      const draftAttempts = await attemptsSince(ctx, e.showDate);
+      const c = await correctionFor(ctx, e.showDate);
+      const fields = c ? correctedFields(c) : [];
+      // I2: a removed fix keeps its row (and updatedAt) with no fields: nothing is corrected.
+      const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
       const openRun = runs.some((r) => isOpenRun(r));
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
     }),
   );
 }
 
-async function requireRealHuman(ctx: QueryCtx): Promise<void> {
+export async function requireRealHuman(ctx: QueryCtx): Promise<void> {
   if (workspaceOf(await actorOf(ctx)) !== "real") throw new ConvexError({ code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can do this" });
 }
 const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
@@ -131,6 +164,23 @@ export const list = query({
   handler: async (ctx) => {
     if (workspaceOf(await actorOf(ctx)) !== "real") return null;
     return { episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx) };
+  },
+});
+
+/**
+ * Plan 6b: the docs and folders the scanner could not date, for Tarik to place on a show, and (I1) the ones he placed,
+ * which a scan drops from `unplaced`, so he can still move or undo them. Real human only.
+ */
+export const unplaced = query({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") return null;
+    const placed = await ctx.db.query("placements").collect();
+    const isPlaced = (u: { source: string; id: string }) => placed.some((p) => p.source === u.source && p.id === u.id);
+    return {
+      items: (await ctx.db.query("unplaced").collect()).filter((u) => !isPlaced(u)).map(({ source, id, name, reason, seenAt }) => ({ source, id, name, reason, seenAt })),
+      placements: placed.map(({ source, id, name, date }) => ({ source, id, name: name ?? id, date })),
+    };
   },
 });
 

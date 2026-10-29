@@ -43,7 +43,10 @@ const submitPackage = httpAction(async (ctx, req) => {
     const rec = await ctx.runMutation(internal.packages.submit, { draft: built.draft });
     return json(201, { packageId: built.draft.id, status: rec.status });
   } catch (e) {
-    if (e instanceof ConvexError && (e.data as { code?: string }).code === "ALREADY_EXISTS") return json(409, { error: "ALREADY_EXISTS" });
+    const data = e instanceof ConvexError ? (e.data as { code?: string; message?: string }) : {};
+    if (data.code === "ALREADY_EXISTS") return json(409, { error: "ALREADY_EXISTS" });
+    // R6: a changed tracklist; the bridge hands these words to the agent so it can correct itself.
+    if (data.code === "BAD_INPUT") return json(400, { problems: [data.message ?? "bad input"] });
     throw e;
   }
 });

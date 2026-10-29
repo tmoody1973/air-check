@@ -5,9 +5,18 @@ import { showDateLabel } from "../lib/date";
 import { BTN } from "./MixcloudConnection";
 
 // The Episodes page's controls, shared by the table and the phone cards (EpisodeItem): answer boxes, rerun questions,
-// the rerun line with Undo, Mark as rerun of…, and the R5 how-to. Each calls an injected action, never the model.
+// the rerun line with Undo, Mark as rerun of…, and the R5 how-to (Plan 6b fixes: FixControl, TracklistFix). Each calls an injected action, never the model.
 
-type Question = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string; action?: true; answer?: string };
+export type FixSource = "box" | "drive" | "paper";
+type Choice = { id: string; name: string };
+/** What the console can offer to settle a question (mirrors the ingest service's Fix, Plan 6b). */
+export type Fix =
+  | { type: "tracklist" }
+  | { type: "pick"; source: FixSource; choices: Choice[] }
+  | { type: "hours"; choices: Choice[] }
+  | { type: "stamp"; folderDate: string; stampDate: string };
+export type Question = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string; action?: true; answer?: string; fix?: Fix };
+export type CorrectedField = "tracklist" | "drive" | "paper" | "box" | "hours" | "folderDate";
 export type EpisodeRow = {
   showDate: string;
   audio: { status: "ready" | "incomplete" | "ask" | "none" };
@@ -26,27 +35,41 @@ export type EpisodeRow = {
   fetch?: { status: "fetching" | "fetched" | "failed"; error?: string };
   rerunOf?: string;
   rerunSource?: "chat" | "episodes" | "detected";
+  /** Tarik's fix saved in Air Check (decision 017); `stale`: the scan could no longer apply it, so the show won't draft. */
+  corrected?: { fields: CorrectedField[]; at: number; stale: boolean } | null;
+  /** R4: a fix, undo or placement is saved but the scan that applies it hasn't landed yet. */
+  rescanPending?: boolean;
 };
 export type EpisodeActions = {
   answer: (a: { showDate: string; questionId: string; answer: string; rerunOf?: string }) => Promise<unknown>;
   markRerun: (a: { showDate: string; rerunOf: string }) => Promise<unknown>;
   unmarkRerun: (a: { showDate: string }) => Promise<unknown>;
+  // Plan 6b: corrections. Each is a signed-in person's mutation; Convex refuses anything else in plain words.
+  setTracklist: (a: { showDate: string; text: string }) => Promise<unknown>;
+  pick: (a: { showDate: string; source: FixSource; id: string }) => Promise<unknown>;
+  setHours: (a: { showDate: string; hour1: string; hour2: string }) => Promise<unknown>;
+  useFolderDate: (a: { showDate: string }) => Promise<unknown>;
+  clearCorrection: (a: { showDate: string }) => Promise<unknown>;
+  place: (a: { source: FixSource; id: string; date: string }) => Promise<unknown>;
+  unplace: (a: { source: FixSource; id: string }) => Promise<unknown>;
+  /** The tracklist editor's starting text: the saved fix, else the Drive doc, else the stored tracks. */
+  tracklistText: (showDate: string) => Promise<string>;
 };
 
 const SOURCE_SAID = { chat: "(you said, in Chat)", episodes: "(marked here)", detected: "(confirmed)" } as const;
 export const LINK = "font-medium text-ink underline underline-offset-2 hover:text-signal-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal";
-const SECONDARY = `${BTN} border-line-strong bg-surface text-ink hover:bg-surface-quiet disabled:opacity-60`;
-const PRIMARY = `${BTN} border-signal bg-signal text-white hover:bg-signal-deep disabled:opacity-60`;
-const FIELD = "min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal";
+export const SECONDARY = `${BTN} border-line-strong bg-surface text-ink hover:bg-surface-quiet disabled:opacity-60`;
+export const PRIMARY = `${BTN} border-signal bg-signal text-white hover:bg-signal-deep disabled:opacity-60`;
+export const FIELD = "min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal";
 
 /** Only a ConvexError's own plain message is shown; anything else (a server crash, a network error) never leaks raw text. */
-function errorText(e: unknown): string {
+export function errorText(e: unknown): string {
   const message = e instanceof ConvexError ? (e.data as { message?: unknown } | null)?.message : undefined;
   return typeof message === "string" ? message : "That didn't save. Try again.";
 }
 
 /** One row's save: busy while it runs, the reason when it is refused, a line for screen readers when it lands. */
-function useSave(announce: (msg: string) => void) {
+export function useSave(announce: (msg: string) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** True when it saved. */

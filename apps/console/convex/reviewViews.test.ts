@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -29,6 +29,7 @@ const image = (t: T) => t.run((ctx) => ctx.storage.store(new Blob(["img"], { typ
 
 async function reviewable(t: T, overrides: Parameters<typeof goldenDraft>[0] = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   if (draft.workspace === "demo")
     await t.mutation(internal.packages.attachAudio, { packageId: draft.id, audio: { hour1Id: "pending", hour2Id: "pending", mp3Sha256: HASH } });

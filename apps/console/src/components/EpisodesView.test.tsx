@@ -24,7 +24,12 @@ const ep = (showDate: string, over: Partial<EpisodeRow> = {}): EpisodeRow => ({
 });
 const connected: SourceStatus[] = (["box", "google", "dropbox"] as const).map((source) => ({ source, state: "connected" }));
 const noop = async () => undefined;
-const actions = (over: Partial<EpisodeActions> = {}): EpisodeActions => ({ answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop), ...over });
+const actions = (over: Partial<EpisodeActions> = {}): EpisodeActions => ({
+  answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop),
+  setTracklist: vi.fn(noop), pick: vi.fn(noop), setHours: vi.fn(noop), useFolderDate: vi.fn(noop), clearCorrection: vi.fn(noop),
+  place: vi.fn(noop), unplace: vi.fn(noop), tracklistText: vi.fn(async () => ""),
+  ...over,
+});
 
 function setup(episodes: EpisodeRow[], { sources = connected, today = "2026-01-23", acts = actions() } = {}) {
   render(<EpisodesView data={{ episodes, awaitingReview: 0 }} sources={sources} workspace="real" today={today} actions={acts} />);

@@ -9,15 +9,42 @@ export interface ScannedTrack {
   hour: 1 | 2; position: number; artist: string; title: string; feat?: string; raw: string; closing: boolean;
   status: "confirmed" | "spelling-fixed" | "unverified-in-notes" | "closing-track";
 }
+export interface Choice { id: string; name: string }
+/** Plan 6b: what the console can offer to settle a question. Convex accepts only ids a question offered. */
+export type Fix =
+  | { type: "tracklist" }
+  | { type: "pick"; source: "box" | "drive" | "paper"; choices: Choice[] }
+  | { type: "hours"; choices: Choice[] }
+  | { type: "stamp"; folderDate: string; stampDate: string };
+export interface Question { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true; fix?: Fix }
+/** Plan 6b: a fix Tarik saved in Air Check for one show (decision 017). Written only by a signed-in person. */
+export interface Correction {
+  showDate: string;
+  /** Used exactly as typed: Paper never changes its spelling. */
+  tracklistText?: string;
+  drive?: string; paper?: string; box?: string;
+  hours?: { hour1: string; hour2: string };
+  folderDate?: true;
+  updatedAt: number;
+}
+/** Plan 6b: Tarik put a doc or folder whose name can't be dated on a show date, in the console. Never written back. */
+export interface Placement { source: "box" | "drive" | "paper"; id: string; date: string }
+/** Plan 6b: a doc or folder whose name holds a date the scanner can't read (e.g. "9-4-226"), listed on Episodes. */
+export interface Unplaced { source: Placement["source"]; id: string; name: string; reason: string }
 export interface ScannedEpisode {
   showDate: string;
   audio: { status: "ready" | "incomplete" | "ask" | "none"; folderId?: string; hour1?: FileRef; hour2?: FileRef; pattern?: string; flags: string[] };
-  tracklist: { status: "found" | "missing"; docId?: string; tracks?: ScannedTrack[] };
+  /** `text`: the chosen Drive doc's text (at most 20,000 characters), for the console's tracklist editor; kept private. */
+  tracklist: { status: "found" | "missing"; docId?: string; tracks?: ScannedTrack[]; text?: string };
   /** `text` is Paper text: sent only here, for the draft's untrusted-notes input (Hard Rule 12). */
   notes: { status: "found" | "missing"; docId?: string; text?: string };
   /** `action`: only fixing the source settles it (M6); Episodes shows no answer box. */
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true }[];
+  questions: Question[];
   audioOnDisk?: boolean;
+  /** R1 (Plan 6b): this show's correction points at something no source has any more, so it was not used. */
+  correctionStale?: true;
+  /** R4 (Plan 6b): the `updatedAt` of the correction this scan saw for the date, stale or not; absent when none. */
+  appliedCorrectionAt?: number;
 }
 
 /** One row of ingest.list: the scanned facts without the notes text, plus what Convex knows. */
@@ -27,7 +54,7 @@ export interface IngestRow {
   tracklist: { status: "found" | "missing"; docId?: string };
   notes: { status: "found" | "missing"; docId?: string };
   tracks?: ScannedTrack[];
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true; answer?: string }[];
+  questions: (Question & { answer?: string })[];
   audioOnDisk?: boolean;
   rerunOf?: string;
   rerunSource?: "chat" | "episodes" | "detected";
@@ -35,6 +62,10 @@ export interface IngestRow {
   packageStatus: LinkedPackageStatus;
   draftAttempts: number;
   status: string;
+  /** R4: a fix or placement saved since this show's last scan; drafting waits for the rescan. */
+  rescanPending?: boolean;
+  /** Present when the show has a correction; `stale`: it points at something gone (R1). Convex sends more fields. */
+  corrected?: { stale: boolean };
 }
 
 export type DraftOutcome = { queued: true; runId: string } | { queued: false; reason: string };
@@ -42,13 +73,16 @@ export interface SourceReport { source: "box" | "google" | "dropbox"; state: "co
 
 /** Everything the ingest service needs from Convex. The token lives inside the real implementation. */
 export interface IngestConvex {
-  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number }>;
+  /** `rescanAfter`: the newest correction, placement or undo (0 for none); newer than the last scan asks for a rescan. */
+  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number; corrections: Correction[]; placements: Placement[]; rescanAfter: number }>;
   upsert(episode: ScannedEpisode): Promise<void>;
   setFetch(showDate: string, status: "fetching" | "fetched" | "failed", error?: string): Promise<void>;
   requestDraft(showDate: string): Promise<DraftOutcome>;
   sourceStatus(report: SourceReport): Promise<void>;
   /** I3: remove rows for dates not in `keep`; Convex refuses (skipped) when that would be more than 3. */
   prune(keep: string[]): Promise<{ deleted: number; skipped?: number }>;
+  /** Plan 6b: the names a complete scan could not date, replacing the last list. */
+  reportUnplaced(items: Unplaced[]): Promise<void>;
 }
 
 /** Like media and the publisher: a Convex call that never answers fails instead of wedging the pass. */
@@ -56,7 +90,7 @@ export const CONVEX_TIMEOUT_MS = 15_000;
 
 export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) });
-  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune", FunctionReference<"mutation">>;
+  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune" | "reportUnplaced", FunctionReference<"mutation">>;
   return {
     list: () => client.query(m.list, { token }),
     upsert: async (episode) => void (await client.mutation(m.upsert, { token, episode })),
@@ -64,5 +98,6 @@ export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIM
     requestDraft: (showDate) => client.mutation(m.requestDraft, { token, showDate }),
     sourceStatus: async (r) => void (await client.mutation(m.sourceStatus, { token, ...r })),
     prune: (keep) => client.mutation(m.prune, { token, keep }),
+    reportUnplaced: async (items) => void (await client.mutation(m.reportUnplaced, { token, items })),
   };
 }

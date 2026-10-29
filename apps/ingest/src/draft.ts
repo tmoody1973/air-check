@@ -6,8 +6,11 @@ export interface DraftDeps {
   convex: IngestConvex; log: (line: string) => void;
   /** The last outcome logged: the same "drafting" answer every minute is said once. */
   last: { key: string };
-  /** R14: nothing is drafted on half-read data: only after a scan that read every connected source. */
-  scan: { lastScanComplete: boolean };
+  /**
+   * R14: nothing is drafted on half-read data: only after a scan that read every connected source. R5: nor while a scan
+   * runs, nor while a save exists that the last scan never read (the minute pass rescans first).
+   */
+  scan: { lastScanComplete: boolean; scanning: boolean; seenRescanAfter: number };
 }
 
 /**
@@ -15,9 +18,12 @@ export interface DraftDeps {
  * failed drafts at most); this only picks the candidate, so two passes or two scans never queue two runs.
  */
 export async function draftPass(deps: DraftDeps): Promise<void> {
-  if (!deps.scan.lastScanComplete) return;
-  const { episodes, awaitingReview } = await deps.convex.list();
-  const next = nextToDraft(episodes.map((r) => factsOf(r)), awaitingReview);
+  if (!deps.scan.lastScanComplete || deps.scan.scanning) return;
+  const { episodes, awaitingReview, rescanAfter } = await deps.convex.list();
+  if (rescanAfter > deps.scan.seenRescanAfter) return;
+  // R4: a show whose fix the scanner hasn't applied yet waits for its rescan, without holding up the shows behind it.
+  // R5: a stale fix fell back to what Tarik rejected, so that show is never drafted until he fixes it again.
+  const next = nextToDraft(episodes.filter((r) => !r.rescanPending && !r.corrected?.stale).map((r) => factsOf(r)), awaitingReview);
   if (!next) return;
   const t0 = Date.now();
   const r = await deps.convex.requestDraft(next.showDate);

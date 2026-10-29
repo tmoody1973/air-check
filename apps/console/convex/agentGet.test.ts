@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { parseTracklist } from "@aircheck/core";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -35,6 +35,7 @@ const snapshot = (t: T) =>
 
 async function awaiting(t: T, overrides: Parameters<typeof goldenDraft>[0] = {}) {
   const draft = goldenDraft({ descriptionSources: SOURCES, coverStorageId: "kg2cover", ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   await t.mutation(internal.packages.attachAudio, { packageId: draft.id, audio: { hour1Id: "box-h1", hour2Id: "box-h2", mp3Sha256: "b".repeat(64) } });
   return draft;

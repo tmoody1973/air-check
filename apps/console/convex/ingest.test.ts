@@ -413,3 +413,178 @@ describe("ingest.sourceStatus", () => {
     await expect(t.mutation(api.ingest.sourceStatus, { token: INGEST, source: "mixcloud" as never, state: "connected" })).rejects.toThrow();
   });
 });
+
+// Plan 6b Task 2: what the scanner reads back (corrections, placements, when to rescan) and a fresh start after a fix.
+describe("Plan 6b: corrections and placements", () => {
+  const human = { subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true };
+  const GOOD = "HOUR 1\nAlfa Mist - Organic Rust\n\nHOUR 2\nKokoroko - Abusey Junction";
+  const unplacedItem = { source: "drive" as const, id: "g9", name: "Rhythm Lab Radio 9-4-226", reason: "bad year" };
+
+  test("list returns the corrections, the placements and rescanAfter (0 with none; an undo counts too)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    expect(await t.query(api.ingest.list, { token: INGEST })).toMatchObject({ corrections: [], placements: [], rescanAfter: 0 });
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    let out = await t.query(api.ingest.list, { token: INGEST });
+    expect(out.corrections).toEqual([{ showDate: "2026-01-02", tracklistText: GOOD, updatedAt: expect.any(Number) }]);
+    expect(out.rescanAfter).toBe(out.corrections[0]!.updatedAt);
+
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem] });
+    await new Promise((r) => setTimeout(r, 5));
+    await t.withIdentity(human).mutation(api.corrections.place, { source: "drive", id: "g9", date: "2026-09-04" });
+    out = await t.query(api.ingest.list, { token: INGEST });
+    expect(out.placements).toEqual([{ source: "drive", id: "g9", date: "2026-09-04" }]);
+    const placedAt = out.rescanAfter;
+    expect(placedAt).toBeGreaterThan(out.corrections[0]!.updatedAt);
+
+    await new Promise((r) => setTimeout(r, 5));
+    await t.withIdentity(human).mutation(api.corrections.unplace, { source: "drive", id: "g9" });
+    await t.withIdentity(human).mutation(api.corrections.clear, { showDate: "2026-01-02" });
+    out = await t.query(api.ingest.list, { token: INGEST });
+    // I2: a removed fix leaves {showDate, updatedAt}: no fields to apply, and its time starts the rescan.
+    expect(out).toMatchObject({ corrections: [{ showDate: "2026-01-02", updatedAt: expect.any(Number) }], placements: [] });
+    expect(Object.keys(out.corrections[0]!).sort()).toEqual(["showDate", "updatedAt"]);
+    expect(out.rescanAfter).toBeGreaterThan(placedAt); // "Remove my fix" must rescan too
+  });
+
+  test("R4: a show waits for the scan that applied its latest fix, undo or placement; a show with none never waits", async () => {
+    const t = convexTest(schema, modules);
+    const pending = async (d = "2026-01-02") => (await t.query(api.ingest.list, { token: INGEST })).episodes.find((e) => e.showDate === d)!.rescanPending;
+    const human_ = t.withIdentity(human);
+    await upsert(t, episode());
+    expect(await pending()).toBe(false);
+    expect((await human_.query(api.episodes.list, {}))!.episodes[0]!.rescanPending).toBe(false);
+
+    await human_.mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    expect(await pending()).toBe(true);
+    expect((await human_.query(api.episodes.list, {}))!.episodes[0]!.rescanPending).toBe(true);
+    await upsert(t, episode()); // a scan that did not apply it (started before the save) changes nothing
+    expect(await pending()).toBe(true);
+    const fixedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt }));
+    expect((await row(t))!.appliedCorrectionAt).toBe(fixedAt);
+    expect(await pending()).toBe(false);
+
+    // "Remove my fix": pending until a scan that read the emptied correction lands (I2: the row stays, fields gone).
+    await new Promise((r) => setTimeout(r, 5));
+    await human_.mutation(api.corrections.clear, { showDate: "2026-01-02" });
+    expect(await pending()).toBe(true);
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "rescan-pending" });
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt })); // a scan from before the removal
+    expect(await pending()).toBe(true);
+    const clearedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: clearedAt }));
+    expect(await pending()).toBe(false);
+
+    // A placement onto a date: pending until that date's next scan.
+    await upsert(t, episode({ showDate: "2026-09-04" }));
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem] });
+    await new Promise((r) => setTimeout(r, 5));
+    await human_.mutation(api.corrections.place, { source: "drive", id: "g9", date: "2026-09-04" });
+    expect(await pending("2026-09-04")).toBe(true);
+    expect(await pending()).toBe(false);
+    await new Promise((r) => setTimeout(r, 5));
+    await upsert(t, episode({ showDate: "2026-09-04" }));
+    expect(await pending("2026-09-04")).toBe(false);
+  });
+
+  test("R5: a show whose fix went stale is not drafted (the scan fell back to the doc Tarik rejected)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    const fixedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt, correctionStale: true }));
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "fix-stale" });
+    expect(await runs(t)).toEqual([]);
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt }));
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toMatchObject({ queued: true });
+  });
+
+  test("reportUnplaced keeps one row per source and id, and caps the name and reason", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem, { ...unplacedItem, name: "x".repeat(5_000), reason: "y".repeat(5_000) }] });
+    const rows = await t.run((ctx) => ctx.db.query("unplaced").collect());
+    expect(rows).toHaveLength(1);
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [{ ...unplacedItem, name: "x".repeat(5_000), reason: "y".repeat(5_000) }] });
+    const [only] = await t.run((ctx) => ctx.db.query("unplaced").collect());
+    expect([only!.name.length, only!.reason.length]).toEqual([1_000, 1_000]);
+    await t.withIdentity(human).mutation(api.corrections.place, { source: "drive", id: "g9", date: "2026-09-04" });
+  });
+
+  test("reportUnplaced is INGEST_TOKEN only, replaces the list whole, and is capped at 50", async () => {
+    const t = convexTest(schema, modules);
+    for (const token of ["", "x".repeat(48), ...Object.values(OTHER)])
+      expect(await errorCode(t.mutation(api.ingest.reportUnplaced, { token, items: [unplacedItem] }))).toBe("UNAUTHORIZED");
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem, { ...unplacedItem, id: "g8" }] });
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [{ ...unplacedItem, id: "g7" }] });
+    expect((await t.run((ctx) => ctx.db.query("unplaced").collect())).map((u) => u.id)).toEqual(["g7"]);
+    const many = Array.from({ length: 51 }, (_, i) => ({ ...unplacedItem, id: `g${i}` }));
+    expect(await errorCode(t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: many }))).toBe("BAD_INPUT");
+  });
+
+  test("prune keeps a date that has a correction; a removed one (no fields) is no correction (I2)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: [] })).toEqual({ deleted: 0 });
+    expect(await row(t)).not.toBeNull();
+    await t.withIdentity(human).mutation(api.corrections.clear, { showDate: "2026-01-02" });
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: [] })).toEqual({ deleted: 1 });
+    expect(await row(t)).toBeNull();
+  });
+
+  test("upsert stores the Drive text and the stale flag; a scan without the flag drops it", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode({ tracklist: { status: "found", docId: "g1", tracks: TRACKS, text: "HOUR 1\n..." }, correctionStale: true }));
+    expect(await row(t)).toMatchObject({ tracklist: { text: "HOUR 1\n..." }, correctionStale: true });
+    await upsert(t, episode());
+    expect((await row(t))!.correctionStale).toBeUndefined();
+    expect(await errorCode(upsert(t, episode({ tracklist: { status: "found", text: "x".repeat(20_001) } })))).toBe("BAD_INPUT");
+  });
+
+  test("Review Focus 3: a draft-failed show gets two fresh attempts after a fix; earlier runs stop counting", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    for (let i = 0; i < 2; i++) {
+      expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+      await t.run(async (ctx) => {
+        for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed", createdAt: Date.now() - 60_000 });
+      });
+    }
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "draft-failed" });
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]).toMatchObject({ draftAttempts: 0, status: "ready-to-draft", rescanPending: true });
+    expect((await t.withIdentity(human).query(api.episodes.list, {}))!.episodes[0]!.draftAttempts).toBe(0);
+    // R4: the row still holds the pre-fix scan, so nothing is drafted until the scan that applied the fix lands.
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "rescan-pending" });
+    const fixedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt }));
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]!.rescanPending).toBe(false);
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+    await t.run(async (ctx) => {
+      for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed" });
+    });
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]!.draftAttempts).toBe(1);
+  });
+
+  test("I2: draft-failed → fix → Remove my fix: the old failures don't count again, so the show drafts", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    for (let i = 0; i < 2; i++) {
+      expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+      await t.run(async (ctx) => {
+        for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed", createdAt: Date.now() - 60_000 });
+      });
+    }
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "draft-failed" });
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    await t.withIdentity(human).mutation(api.corrections.clear, { showDate: "2026-01-02" });
+    // A scan with no correction applied (it started before the removal) still waits.
+    await upsert(t, episode());
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "rescan-pending" });
+    const clearedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: clearedAt }));
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]).toMatchObject({ draftAttempts: 0, status: "ready-to-draft", rescanPending: false });
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+  });
+});

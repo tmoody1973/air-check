@@ -1,6 +1,6 @@
 "use client";
 
-import { parseTracklist, type Track } from "@aircheck/core";
+import { parseDriveTracklist, parseTracklist, type Track } from "@aircheck/core";
 import { useMemo, useRef, useState } from "react";
 
 export type DraftForm = { showDate: string; tracklistText: string; notes: string };
@@ -53,6 +53,53 @@ function TrackRow({ t }: { t: Track }) {
   );
 }
 
+/**
+ * The live line check: per-hour counts, the parsed rows with their closing tracks, and every line that can't be read.
+ * `drive`: read as a Drive export (a title above HOUR 1 is not a problem), the rule the scanner and corrections use.
+ */
+export function TracklistPreview({ text, drive = false }: { text: string; drive?: boolean }) {
+  const { tracks, bad } = useMemo(() => (drive ? parseDriveTracklist : parseTracklist)(text), [text, drive]);
+  const count = (h: 1 | 2) => tracks.filter((t) => t.hour === h).length;
+  const [h1, h2] = [count(1), count(2)];
+  const closing = tracks.filter((t) => t.closing).length;
+  return (
+    <>
+      <p className="text-sm font-medium" aria-live="polite">
+        Hour 1: {h1} {h1 === 1 ? "track" : "tracks"} · Hour 2: {h2} {h2 === 1 ? "track" : "tracks"} · {closing} closing
+        {bad.length > 0 && ` · ${bad.length} ${bad.length === 1 ? "line" : "lines"} to fix`}
+      </p>
+      {([1, 2] as const).map((hour) => {
+        const own = tracks.filter((t) => t.hour === hour);
+        const flagged = bad.filter((b) => b.hour === hour);
+        return (
+          <section key={hour} aria-label={`Hour ${hour}`} className="rounded-card border border-line bg-surface py-2">
+            <h3 className="px-4 py-1 font-mono text-[11px] tracking-widest text-muted uppercase">Hour {hour}</h3>
+            {own.length === 0 && flagged.length === 0 ? (
+              <p className="px-4 py-2 text-sm text-muted">Hour {hour} has no tracks yet.</p>
+            ) : (
+              <ul>
+                {own.map((t) => <TrackRow key={`${t.hour}.${t.position}`} t={t} />)}
+                {flagged.map((b) => (
+                  <li key={b.line} className="flex flex-wrap items-baseline gap-x-2 bg-problem-row px-4 py-2 text-sm">
+                    <span className="w-10 flex-none font-mono text-xs text-problem-text">L{b.line}</span>
+                    <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{b.raw}</span>
+                    <span className="rounded-full bg-problem-bg px-2.5 py-px text-xs text-problem-text">{REASONS[b.reason]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+      {bad.filter((b) => b.hour === null).map((b) => (
+        <p key={b.line} className="rounded-control bg-problem-row px-4 py-2 text-sm text-problem-text">
+          <span className="font-mono text-xs">L{b.line}</span> {b.raw} · {REASONS[b.reason]}
+        </p>
+      ))}
+    </>
+  );
+}
+
 export function TracklistEditor({
   draft,
   onDone,
@@ -77,7 +124,6 @@ export function TracklistEditor({
   const { tracks, bad } = useMemo(() => parseTracklist(text), [text]);
   const count = (h: 1 | 2) => tracks.filter((t) => t.hour === h).length;
   const [h1, h2] = [count(1), count(2)];
-  const closing = tracks.filter((t) => t.closing).length;
   const overLimit = text.length > MAX_TRACKLIST || notes.length > MAX_NOTES;
   const ready = showDate !== "" && h1 > 0 && h2 > 0 && bad.length === 0 && !overLimit;
 
@@ -103,12 +149,6 @@ export function TracklistEditor({
       setBusy(false);
     }
   }
-
-  const rows = (hour: 1 | 2) => {
-    const own = tracks.filter((t) => t.hour === hour);
-    const flagged = bad.filter((b) => b.hour === hour);
-    return { own, flagged };
-  };
 
   return (
     <div className="flex max-w-[980px] flex-col gap-5">
@@ -142,38 +182,7 @@ export function TracklistEditor({
         </div>
 
         <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-3">
-          <p className="text-sm font-medium" aria-live="polite">
-            Hour 1: {h1} {h1 === 1 ? "track" : "tracks"} · Hour 2: {h2} {h2 === 1 ? "track" : "tracks"} · {closing} closing
-            {bad.length > 0 && ` · ${bad.length} ${bad.length === 1 ? "line" : "lines"} to fix`}
-          </p>
-          {([1, 2] as const).map((hour) => {
-            const { own, flagged } = rows(hour);
-            return (
-              <section key={hour} aria-label={`Hour ${hour}`} className="rounded-card border border-line bg-surface py-2">
-                <h3 className="px-4 py-1 font-mono text-[11px] tracking-widest text-muted uppercase">Hour {hour}</h3>
-                {own.length === 0 && flagged.length === 0 ? (
-                  <p className="px-4 py-2 text-sm text-muted">Hour {hour} has no tracks yet.</p>
-                ) : (
-                  <ul>
-                    {own.map((t) => <TrackRow key={`${t.hour}.${t.position}`} t={t} />)}
-                    {flagged.map((b) => (
-                      <li key={b.line} className="flex flex-wrap items-baseline gap-x-2 bg-problem-row px-4 py-2 text-sm">
-                        <span className="w-10 flex-none font-mono text-xs text-problem-text">L{b.line}</span>
-                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{b.raw}</span>
-                        <span className="rounded-full bg-problem-bg px-2.5 py-px text-xs text-problem-text">{REASONS[b.reason]}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
-          {bad.filter((b) => b.hour === null).map((b) => (
-            <p key={b.line} className="rounded-control bg-problem-row px-4 py-2 text-sm text-problem-text">
-              <span className="font-mono text-xs">L{b.line}</span> {b.raw} · {REASONS[b.reason]}
-            </p>
-          ))}
-
+          <TracklistPreview text={text} />
           {error && <p role="alert" className="rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">{error}</p>}
           <button
             type="button"

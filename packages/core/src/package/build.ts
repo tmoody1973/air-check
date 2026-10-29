@@ -1,7 +1,8 @@
 import { parseTracklist } from "../tracklist/parse";
 import { checkDescription, type DescriptionIssue } from "./description";
 import type { DescriptionSource, PackageDraft } from "./mixcloud";
-import { buildTitle, checkTags, checkTitleArtists } from "./title";
+import type { Track } from "../types";
+import { buildTitle, checkTags, checkTitleArtists, titleLeads } from "./title";
 
 export interface AgentPackageInput {
   showDate: string; // ISO yyyy-mm-dd
@@ -63,6 +64,21 @@ function descriptionProblems(text: string, trackTitles: string[], privateTerms: 
   return checkDescription(text, { trackTitles, privateTerms }).map(describeIssue);
 }
 
+/** A tracklist's problems in the agent's and the Tracklist page's words: unreadable lines, then an empty hour. */
+function tracklistProblems(text: string): { tracks: Track[]; problems: string[] } {
+  const { tracks, bad } = parseTracklist(text);
+  const problems = bad.map((b) => `tracklist line ${b.line} (${b.reason}): "${b.raw}"`);
+  for (const h of [1, 2] as const) if (!tracks.some((t) => t.hour === h)) problems.push(`hour ${h} has no tracks`);
+  return { tracks, problems };
+}
+
+/** R7: a host's new tracklist for a package: read like the agent's, and the title's lead artists must still be in it. */
+export function checkTracklistEdit(draft: PackageDraft, text: string): { tracks: Track[]; problems: string[] } {
+  const { tracks, problems } = tracklistProblems(text);
+  for (const lead of checkTitleArtists(titleLeads(draft.title), tracks)) problems.push(`title artist not in the tracklist: ${lead}`);
+  return { tracks, problems };
+}
+
 /**
  * Compose the existing checks into one draft, or a list of problems. Never a partial draft.
  * `idSuffix` (demo only) makes each demo draft's id unique: demo-M-D-YY-<suffix>. The caller supplies
@@ -78,9 +94,8 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   if (!input.hour1Id.trim()) problems.push("hour1Id is empty");
   if (!input.hour2Id.trim()) problems.push("hour2Id is empty");
 
-  const { tracks, bad } = parseTracklist(input.tracklistText);
-  for (const b of bad) problems.push(`tracklist line ${b.line} (${b.reason}): "${b.raw}"`);
-  for (const h of [1, 2] as const) if (!tracks.some((t) => t.hour === h)) problems.push(`hour ${h} has no tracks`);
+  const { tracks, problems: trackProblems } = tracklistProblems(input.tracklistText);
+  problems.push(...trackProblems);
 
   input.leads.forEach((lead, i) => {
     if (!lead.trim()) problems.push(`title artist ${i + 1} is blank`);

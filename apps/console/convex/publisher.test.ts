@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -35,6 +35,7 @@ const errorCode = async (p: Promise<unknown>) => {
 /** submit -> media.attached -> awaiting_review. */
 async function reviewable(t: T, overrides: Parameters<typeof goldenDraft>[0] = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   // The media service never touches demo packages, so demo audio is attached directly (as the seed does).
   if (draft.workspace === "demo")
@@ -277,7 +278,7 @@ describe("publisher.awaitingReview", () => {
     const id = await reviewable(t, { flags: ["check spelling", "embargo"] });
     await reviewable(t, { id: "demo-10-2-26", workspace: "demo" });
     await approved(t, { id: "pkg-10-9-26", showDate: "2026-10-09" });
-    await t.mutation(internal.packages.submit, { draft: goldenDraft({ id: "pkg-prep", audio: { hour1Id: "pending", hour2Id: "pending" } }) });
+    await t.mutation(internal.packages.submit, { draft: goldenDraft({ id: "pkg-prep", audio: { hour1Id: "pending", hour2Id: "pending" } }) }); // same show and tracks: the request above
     const draft = (await pkg(t, id))!.draft;
     expect(await t.query(api.publisher.awaitingReview, { token: PUB })).toEqual([
       { packageId: id, title: draft.title, trackCount: 31, flagCount: 2 },

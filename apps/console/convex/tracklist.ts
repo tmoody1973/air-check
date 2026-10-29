@@ -4,7 +4,7 @@ import { mutation, type MutationCtx } from "./_generated/server";
 import { enqueueRun } from "./enqueue";
 import { actorOf, workspaceOf, type Workspace } from "./gate";
 
-const MAX_TRACKLIST = 50_000;
+export const MAX_TRACKLIST = 50_000;
 export const MAX_NOTES = 20_000;
 
 /** Queues a draft-package run whose instruction is built here, in code. Shared by the form and the ingest service. */

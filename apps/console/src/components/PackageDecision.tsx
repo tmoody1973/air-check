@@ -7,6 +7,7 @@ import { showDateLabel } from "../lib/date";
 import { trackFor } from "../lib/track";
 import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
 import { DescriptionEditor, type DescriptionSaveFn } from "./DescriptionEditor";
+import { TracklistBox, type TracklistSaveFn } from "./TracklistBox";
 import { DescriptionUpdate, type UpdateFns, type UpdateView } from "./DescriptionUpdate";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
@@ -16,7 +17,7 @@ import type { Workspace } from "./Shell";
 
 export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
-export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns, UpdateFns, UpdateView };
+export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns, TracklistSaveFn, UpdateFns, UpdateView };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -53,6 +54,7 @@ export function PackageDecision({
   mixcloudAccount,
   settle,
   editDescription,
+  editTracklist,
   descriptionUpdate,
 }: {
   record: PackageRecord | null;
@@ -70,6 +72,8 @@ export function PackageDecision({
   settle?: SettleFns;
   /** Real workspace: rewrite the public description while the package awaits review (re-fingerprints). */
   editDescription?: DescriptionSaveFn;
+  /** Real workspace: fix the tracks while the package awaits review (R7; re-fingerprints, the Mixcloud sections follow). */
+  editTracklist?: TracklistSaveFn;
   /** Real workspace, a show on Mixcloud: its live description and the update flow (Plan 5c Task 4). */
   descriptionUpdate?: { view: UpdateView | null | undefined; fns: UpdateFns };
 }) {
@@ -114,6 +118,14 @@ export function PackageDecision({
     record.status === "awaiting_review" && !changed && !busy && editDescription
       ? async (text) => {
           const res = await editDescription(text);
+          if (res.ok) setSnap(res.record);
+          return res;
+        }
+      : undefined;
+  const saveTracklist: TracklistSaveFn | undefined =
+    record.status === "awaiting_review" && !changed && !busy && editTracklist
+      ? async (text) => {
+          const res = await editTracklist(text);
           if (res.ok) setSnap(res.record);
           return res;
         }
@@ -209,15 +221,7 @@ export function PackageDecision({
         {open && (
           <div className="mt-2 flex flex-col gap-4 border-t border-line pt-4 text-sm">
             <DescriptionEditor draft={draft} onSave={saveDescription} />
-            <ol className="flex flex-col gap-1">
-              {draft.tracks.map((t) => (
-                <li key={`${t.hour}-${t.position}`} className="flex flex-wrap items-center gap-x-2">
-                  <span className="font-mono text-xs text-muted">{t.hour}.{t.position}</span>
-                  <span className="[overflow-wrap:anywhere]">{t.artist} – {t.title}{t.feat ? ` feat. ${t.feat}` : ""}</span>
-                  {t.closing && <span className="rounded-full bg-chip px-2 py-0.5 text-xs text-ink-soft">closing track</span>}
-                </li>
-              ))}
-            </ol>
+            <TracklistBox draft={draft} onSave={saveTracklist} />
             {(draft.alternates?.length ?? 0) > 0 && (
               <div>
                 <p className="text-xs text-muted">Other title options</p>

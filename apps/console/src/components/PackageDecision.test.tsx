@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest";
 import type { PackageRecord, Track } from "@aircheck/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type PublishState } from "./PackageDecision";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type PublishState, type TracklistSaveFn } from "./PackageDecision";
 import { PlayerProvider } from "./PlayerProvider";
 
 afterEach(cleanup);
@@ -538,6 +538,58 @@ describe("PackageDecision: edit description", () => {
     real(record());
     open();
     expect(screen.queryByText("Sources (not published)")).not.toBeInTheDocument();
+  });
+});
+
+// R7: the host fixes a track on the package page, beside Edit description. Same rule: re-fingerprints, review again.
+describe("PackageDecision: edit tracklist", () => {
+  const open = () => fireEvent.click(screen.getByRole("button", { name: /See description and tracklist/ }));
+  const box = () => screen.getByRole("textbox", { name: "Tracklist" });
+  const START = 'Hour 1\nArtist 1 - "Song 1"\n\nHour 2\nArtist 2 - "Song 2"\nArtist 3 - "Song 3"';
+
+  it("prefilled with the package's tracks; a live check; Save off while a line is bad; saved means review again", async () => {
+    const save = vi.fn<TracklistSaveFn>(async (text) => ({ ok: true, record: record({ fingerprint: "fp2" }, { tracks: [track(1), { ...track(9, true), artist: "aja monet" }] }) }));
+    real(record(), { editTracklist: save, editDescription: vi.fn() });
+    open();
+    expect(screen.getByRole("button", { name: "Edit description" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit tracklist" }));
+    expect(box()).toHaveValue(START);
+    expect(screen.getByText(/Hour 1: 1 track · Hour 2: 2 tracks · 2 closing/)).toBeInTheDocument();
+    const saveBtn = screen.getByRole("button", { name: "Save tracklist" });
+    expect(saveBtn).toBeDisabled(); // nothing changed yet
+    fireEvent.change(box(), { target: { value: `${START}\nno dash here` } });
+    expect(screen.getByText(/1 line to fix/)).toBeInTheDocument();
+    expect(saveBtn).toBeDisabled();
+    const fixed = START.replace("Artist 3", "aja monet");
+    fireEvent.change(box(), { target: { value: fixed } });
+    expect(saveBtn).toBeEnabled();
+    await act(async () => fireEvent.click(saveBtn));
+    expect(save).toHaveBeenCalledWith(fixed);
+    expect(screen.queryByRole("textbox", { name: "Tracklist" })).not.toBeInTheDocument();
+    expect(screen.getByText("Changed: review again")).toBeInTheDocument();
+    expect(screen.getByText(/aja monet/)).toBeInTheDocument(); // the saved record is what the host now reviews
+  });
+
+  it("a refused save shows Convex's reason and keeps the text", async () => {
+    const save = vi.fn<TracklistSaveFn>(async () => ({ ok: false, message: "title artist not in the tracklist: Kiwanuka" }));
+    real(record(), { editTracklist: save });
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit tracklist" }));
+    fireEvent.change(box(), { target: { value: START.replace("Artist 1", "Someone") } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save tracklist" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title artist not in the tracklist: Kiwanuka");
+    expect(box()).toHaveValue(START.replace("Artist 1", "Someone"));
+  });
+
+  it("no edit after a decision, or without the edit action (demo)", () => {
+    const { unmount } = real(withAudio({ status: "approved" }), { editTracklist: vi.fn(), publish: connected });
+    open();
+    expect(screen.queryByRole("button", { name: "Edit tracklist" })).not.toBeInTheDocument();
+    expect(screen.getByText("Artist 1 – Song 1")).toBeInTheDocument();
+    unmount();
+    render(<PlayerProvider><PackageDecision record={record()} workspace="demo" decide={ok} /></PlayerProvider>);
+    open();
+    expect(screen.queryByRole("button", { name: "Edit tracklist" })).not.toBeInTheDocument();
   });
 });
 

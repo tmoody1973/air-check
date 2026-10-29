@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildTitle, checkTags, checkTitleArtists } from "../src/index";
+import { buildTitle, checkTags, checkTitleArtists, titleLeads } from "../src/index";
 import { goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenTracks } from "./helpers/goldens";
 
@@ -30,4 +30,11 @@ test("tag rules", () => {
     "duplicate tag: jazz",
   ]);
   expect(checkTags(["Jazz", " "])).toEqual(["empty tag"]);
+});
+
+test("titleLeads reads the leads back out of a built title; [] for any other title", () => {
+  const leads = ["Michael Kiwanuka", "Tinashe", "Bicep", "Kaytranada"];
+  expect(titleLeads(buildTitle("2026-10-02", leads))).toEqual(leads);
+  expect(titleLeads(buildTitle("2026-10-02", leads, ":"))).toEqual(leads);
+  expect(titleLeads("Some other title")).toEqual([]);
 });

@@ -30,6 +30,15 @@ export function buildTitle(iso: string, leads: string[], sep: "|" | ":" = "|"): 
   return title;
 }
 
+/**
+ * The lead artists in a title buildTitle made; [] for any other title. ponytail: a lead with ", " in its name (e.g.
+ * "Walter Bishop, Jr.") comes back as two parts, each still checked against the artists, so the check stays safe.
+ */
+export function titleLeads(title: string): string[] {
+  const m = title.match(/^RLR \S+(?: \||:) (.+)\s+and more$/);
+  return m ? m[1]!.split(", ") : [];
+}
+
 /** Lead artists that do not appear in any track's artist credit. */
 export function checkTitleArtists(leads: string[], tracks: Track[]): string[] {
   const artists = tracks.map((t) => normalize(t.artist));
