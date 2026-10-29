@@ -82,10 +82,11 @@ describe("proxy options", () => {
   });
 });
 
-// Plan 8: the Release radar embeds Bandcamp's own player in an iframe. The console sets no Content-Security-Policy
-// today, so nothing blocks it. A CSP added later must allow it, or every player silently goes blank.
+// Plan 8: the Release radar embeds Bandcamp's own player in an iframe and shows cover art from Bandcamp's image host.
+// The console sets no Content-Security-Policy today (next.config.ts, the proxy and deploy/Caddyfile), so nothing blocks
+// either. A CSP added later must allow both, or every player and cover silently goes blank.
 describe("CSP note (Bandcamp player)", () => {
-  const NOTE = "A Content-Security-Policy now exists: include frame-src https://bandcamp.com so the Release radar's Bandcamp player still loads, then update this test.";
+  const NOTE = "A Content-Security-Policy now exists: include frame-src https://bandcamp.com and img-src https://*.bcbits.com so the Release radar's Bandcamp player and cover art still load, then update this test.";
 
   it("next.config.ts sets no Content-Security-Policy header", async () => {
     const { readFileSync } = await import("node:fs");
@@ -93,6 +94,12 @@ describe("CSP note (Bandcamp player)", () => {
     const source = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
     expect(config.headers, NOTE).toBeUndefined();
     expect(/content-security-policy/i.test(source), NOTE).toBe(false);
+  });
+
+  it("deploy/Caddyfile adds none either", async () => {
+    const { readFileSync } = await import("node:fs");
+    const caddy = readFileSync(new URL("../../../deploy/Caddyfile", import.meta.url), "utf8");
+    expect(/content-security-policy/i.test(caddy), NOTE).toBe(false);
   });
 
   it("the proxy adds none either", async () => {

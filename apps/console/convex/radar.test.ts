@@ -162,9 +162,20 @@ describe("received", () => {
     expect(await errorCode(received(t, "m2", mail({ body: "write to a@b.example" })))).toBe("BAD_INPUT");
     expect(await errorCode(received(t, "m3", mail({ subject: "Fwd: https://x" })))).toBe("BAD_INPUT");
     expect(await errorCode(received(t, "m4", null, { subject: "x@y.example", ignoredReason: "No" }))).toBe("BAD_INPUT");
-    expect(await errorCode(received(t, "m5", mail({ hosts: ["evil.example/path"] })))).toBe("BAD_INPUT");
     expect(await errorCode(received(t, "m6", mail({ body: "b".repeat(20_001) })))).toBe("BAD_INPUT");
     expect(await inboxRows(t)).toEqual([]);
+  });
+
+  test("final review I1: hosts, links and a sender address core would drop are dropped here too, never refused (a refusal is lost mail)", async () => {
+    const t = convexTest(schema, modules);
+    const bad = ["https://foo_bar.example.com/a", "http://localhost:3000/b", "http://[2001:db8::1]/c", "https://example.com./d"];
+    const hosts = ["foo_bar.example.com", "localhost", "[2001:db8::1]", "example.com.", "evil.example/path", "label.example"];
+    const long = `${"a".repeat(300)}@label.example`;
+    expect(await received(t, "m1", mail({ links: [...bad, "https://label.example/x"], hosts, sender: { name: "Press", address: long } }))).toEqual({ fresh: true });
+    const row = await inboxRow(t, "m1");
+    expect(row).toMatchObject({ state: "received", links: ["https://label.example/x"], linkCount: 1, sender: { name: "Press" } });
+    expect(row?.sender).not.toHaveProperty("address");
+    expect((await activity(t))[0]).toMatchObject({ destination: "label.example" });
   });
 
   test("extra keys in mail are refused by the validator", async () => {
@@ -401,7 +412,7 @@ describe("player queue (Review Focus 2)", () => {
   test("a valid page is queued and appears in embedsWanted; a second page on merge queues no second fetch", async () => {
     const t = convexTest(schema, modules);
     const id = await savedRelease(t, "m1", mail({ tab: "bandcamp", bandcampPages: [PAGE] }));
-    expect((await releases(t))[0]).toMatchObject({ bandcampPage: PAGE, embedState: "queued" });
+    expect((await releases(t))[0]).toMatchObject({ bandcampPage: PAGE, embedState: "queued", embedQueuedAt: expect.any(Number) });
     expect(await t.query(api.radar.embedsWanted, { token: INGEST })).toEqual([{ releaseId: id, pageUrl: PAGE }]);
     await received(t, "m2", mail({ bandcampPages: ["https://other.bandcamp.com/album/glass-weather"] }));
     await record(t, "m2", saved({}));
@@ -461,9 +472,12 @@ describe("player queue (Review Focus 2)", () => {
     const rows = await activity(t);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "network", result: "blocked", title: "Bandcamp page not read", destination: "palesignal.bandcamp.com", reason: "redirect_off_host" });
+    const before = (await releases(t))[0]!.embedQueuedAt!;
+    await new Promise((r) => setTimeout(r, 5));
     await t.withIdentity(human).mutation(api.radar.retryEmbed, { releaseId });
     const [rel] = await releases(t);
     expect(rel).toMatchObject({ embedState: "queued" });
+    expect(rel!.embedQueuedAt).toBeGreaterThan(before); // the stale hint counts from the retry, not the first queue
     expect(rel).not.toHaveProperty("embedError");
   });
 });

@@ -37,6 +37,7 @@ export type Release = {
   embed?: BandcampEmbed;
   embedState?: "queued" | "ready" | "failed";
   embedError?: string;
+  embedQueuedAt?: number;
   laterEmbargoNotice?: { at: number; until: string | null };
   art?: string;
   tags?: string[];
@@ -256,7 +257,7 @@ function Body({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const page = r.bandcampPage;
   const others = (r.links ?? []).filter((l) => l !== page);
   const player = (
-    <BandcampPlayer artist={r.artist} title={r.title} embed={r.embed} embedState={r.embedState} embedError={r.embedError} demo={ctx.demo} onRetry={() => ctx.actions.retryEmbed({ releaseId: r._id })} />
+    <BandcampPlayer artist={r.artist} title={r.title} embed={r.embed} embedState={r.embedState} embedError={r.embedError} embedQueuedAt={r.embedQueuedAt} demo={ctx.demo} onRetry={() => ctx.actions.retryEmbed({ releaseId: r._id })} />
   );
   return (
     <div className="flex min-w-0 flex-col gap-3">

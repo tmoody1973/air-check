@@ -9,6 +9,8 @@ import { SampleTag } from "./SampleTag";
 // bandcampEmbedSrc), never from fetched text, and loads only when Tarik taps Play: nothing reaches Bandcamp before then.
 // Audio streams from Bandcamp to his browser; Air Check stores none. The demo has no players (no real music, Hard Rule 9).
 
+const STALE_MS = 10 * 60_000; // the ingest worker reads queued pages every minute; radar.notAdded uses the same 10
+
 const FAILED: Record<string, string> = {
   not_allowed: "the link isn't a public Bandcamp album or track page",
   redirect_off_host: "the page pointed to another site, so Air Check stopped there",
@@ -44,11 +46,12 @@ export type PlayerProps = {
   embed?: BandcampEmbed;
   embedState?: "queued" | "ready" | "failed";
   embedError?: string;
+  embedQueuedAt?: number;
   demo: boolean;
   onRetry: () => Promise<unknown>;
 };
 
-export function BandcampPlayer({ artist, title, embed, embedState, embedError, demo, onRetry }: PlayerProps) {
+export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry }: PlayerProps) {
   const [playing, setPlaying] = useState(false);
   const [retry, setRetry] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
@@ -59,7 +62,16 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, d
         <SampleTag />
       </div>
     );
-  if (embedState === "queued") return <p className="text-sm text-muted">Getting the Bandcamp player…</p>;
+  if (embedState === "queued") {
+    // ponytail: read at render; a Convex update or a page visit re-renders it, no ticking clock.
+    const stale = embedQueuedAt !== undefined && Date.now() - embedQueuedAt > STALE_MS;
+    return (
+      <div className="flex flex-col gap-1 text-sm text-muted">
+        <p>Getting the Bandcamp player…</p>
+        {stale && <p>Older than 10 minutes: the ingest worker may be down.</p>}
+      </div>
+    );
+  }
   if (embedState === "failed") {
     const again = async () => {
       setRetry({ busy: true, error: null });

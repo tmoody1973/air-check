@@ -10,6 +10,7 @@ import {
   embargoMatches,
   foldText,
   isEmbargoActive,
+  isHostName,
   isShowDate,
   MAX_ABOUT_CHARS,
   MAX_STORED_CHARS,
@@ -38,6 +39,7 @@ import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from ".
 const MAX_SUBJECT = 200;
 const MAX_ID = 500;
 const MAX_ADDRESS = 320;
+const MAX_SENDER_ADDRESS = 254; // core's parseFrom limit
 const MAX_FIELD = 200;
 const MAX_LINKS = 20;
 const MAX_LINK = 500;
@@ -54,7 +56,6 @@ const MAX_SEARCH = 200;
 const WAITING_MS = 10 * 60_000;
 const PENDING_BATCH = 5;
 const EMBED_BATCH = 3;
-const HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 const EMBED_ID = /^\d{1,12}$/;
 const FAIL_CODE = /^[a-z_0-9]{1,40}$/;
 /** A redirect off Bandcamp or a page that failed the URL rule was never read: blocked. Any other code was a fetch made. */
@@ -131,6 +132,31 @@ const tooLong = (s: string | undefined, max: number) => (s?.length ?? 0) > max;
 /** An embargo's date is null (undated, still active) or a real date. "" would read as no embargo: refused. */
 const embargoDateOk = (e: Embargo | null | undefined) => !e || e.until === null || isShowDate(e.until);
 
+const linkHostOk = (l: string) => {
+  try {
+    return isHostName(new URL(l).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Hosts, links and a sender address that core already drops are dropped here too, never refused: a refusal is a 503,
+ * and after Svix's retries the email is gone with no row anywhere (final review I1).
+ */
+function tidyMail(m: CleanMailArg): CleanMailArg {
+  const { address, ...rest } = m.sender ?? {};
+  const keep = address !== undefined && address.length <= MAX_SENDER_ADDRESS;
+  const sender = { ...rest, ...(keep ? { address } : {}) };
+  const { sender: _, ...mail } = m;
+  return {
+    ...mail,
+    ...(sender.name || sender.address ? { sender } : {}),
+    links: m.links.filter((l) => !HTTP_LINK.test(l) || linkHostOk(l)), // a non-http link stays, so mailProblem refuses it
+    hosts: m.hosts.filter(isHostName),
+  };
+}
+
 function mailProblem(m: CleanMailArg): string | null {
   if (LINK_OR_ADDRESS.test(m.body) || LINK_OR_ADDRESS.test(m.subject)) return "the stored text must hold no link or address";
   if (m.body.length > MAX_STORED_CHARS) return `the body is over ${MAX_STORED_CHARS} characters`;
@@ -138,7 +164,7 @@ function mailProblem(m: CleanMailArg): string | null {
   if (m.links.length > MAX_LINKS || m.links.some((l) => l.length > MAX_LINK)) return `at most ${MAX_LINKS} links of ${MAX_LINK} characters`;
   if (m.bandcampPages.length > MAX_PAGES || m.bandcampPages.some((l) => l.length > MAX_LINK)) return `at most ${MAX_PAGES} Bandcamp pages`;
   if ([...m.links, ...m.bandcampPages].some((l) => !HTTP_LINK.test(l))) return "stored links must be http or https";
-  if (m.hosts.length > MAX_HOSTS || m.hosts.some((h) => h.length > 253 || !HOST.test(h))) return "hosts must be host names only";
+  if (m.hosts.length > MAX_HOSTS) return `at most ${MAX_HOSTS} hosts`;
   return null;
 }
 
@@ -178,12 +204,13 @@ export const received = mutation({
     if (LINK_OR_ADDRESS.test(a.subject)) throw badInput("the stored text must hold no link or address");
     if (!a.mail && !a.ignoredReason?.trim()) throw badInput("an ignored email needs a reason");
     if (tooLong(a.ignoredReason, MAX_REASON)) throw badInput(`the reason is over ${MAX_REASON} characters`);
-    const problem = a.mail && mailProblem(a.mail);
+    const tidy = a.mail && tidyMail(a.mail);
+    const problem = tidy && mailProblem(tidy);
     if (problem) throw badInput(problem);
     if (await inboxByMessageId(ctx, a.messageId)) return { fresh: false };
 
     const base = { messageId: a.messageId, receivedAt: a.receivedAt, from: a.from, subject: a.subject.slice(0, MAX_SUBJECT) };
-    const m = a.mail;
+    const m = tidy;
     if (!m) {
       await ctx.db.insert("inbox", { ...base, state: "ignored", reasons: [a.ignoredReason!.trim()], linkCount: 0 });
       await pruneIgnored(ctx);
@@ -274,7 +301,7 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
   const sender = { ...row.sender, messageId: row.messageId, at: row.receivedAt };
   // The stored page passes the URL rule again here: a page forged past the console queues nothing.
   const page = (row.bandcampPages ?? []).map(bandcampPageUrl).find((p): p is string => p !== null);
-  const queue = page ? { bandcampPage: page, embedState: "queued" as const } : {};
+  const queue = page ? { bandcampPage: page, embedState: "queued" as const, embedQueuedAt: Date.now() } : {};
   const cur = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
   if (!cur) {
     const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as ReleaseFields;
@@ -448,7 +475,7 @@ export const retryEmbed = mutation({
   handler: async (ctx, { releaseId }) => {
     const doc = await ownRelease(ctx, releaseId);
     if (doc.embedState !== "failed") throw badInput("only a player that failed can be tried again");
-    await ctx.db.patch(releaseId, { embedState: "queued", embedError: undefined });
+    await ctx.db.patch(releaseId, { embedState: "queued", embedError: undefined, embedQueuedAt: Date.now() });
   },
 });
 

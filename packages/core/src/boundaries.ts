@@ -35,6 +35,7 @@ const AGENTMAIL_ALLOWED = "apps/console/src/lib/agentmail.ts";
 const TOKEN_FACTORY_HOST = "tokenfactory.nebius.com";
 const TOKEN_FACTORY_ALLOWED = "apps/ingest/src/tokenFactory.ts";
 const BANDCAMP_FETCH_ALLOWED = "apps/ingest/src/bandcamp.ts";
+const BANDCAMP_PAGE_USE = /\bbandcampPageUrl\b|\.embedsWanted\(/;
 const MAIL_ONLY_READS = ["/attachments", "messages/send"];
 const isTest = (path: string) => /(?:^|\/)test\/|\.test\.[cm]?[jt]sx?$/.test(path);
 
@@ -79,6 +80,9 @@ function plan8Violations(path: string, content: string): string[] {
   const fetches = content.includes("fetch(") || (path.startsWith("apps/ingest/") && content.includes("call("));
   if (content.includes("bandcamp.com") && fetches && path !== BANDCAMP_FETCH_ALLOWED)
     found.push(`${path}: fetches next to bandcamp.com outside ${BANDCAMP_FETCH_ALLOWED} (Plan 8)`);
+  // The page list without the domain: `.embedsWanted(` is a use; convex.ts only defines it (and hands Convex a fetch).
+  if (path.startsWith("apps/ingest/") && fetches && path !== BANDCAMP_FETCH_ALLOWED && BANDCAMP_PAGE_USE.test(content))
+    found.push(`${path}: uses the Bandcamp page list and fetches outside ${BANDCAMP_FETCH_ALLOWED} (Plan 8)`);
   if (path.startsWith("apps/") && MAIL_ONLY_READS.some((s) => content.includes(s)))
     found.push(`${path}: AgentMail attachments or send call in apps/ (Plan 8)`);
   return found;

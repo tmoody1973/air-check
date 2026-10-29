@@ -130,7 +130,7 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     expect(convex.calls).toHaveLength(0);
   });
 
-  it("a chunked body over 1.5 MB with no Content-Length → 413, read no further than the limit", async () => {
+  it("a chunked body over 3 MB with no Content-Length → 413, read no further than the limit", async () => {
     const chunk = new Uint8Array(256 * 1024).fill(97);
     let sent = 0;
     const stream = new ReadableStream<Uint8Array>({
@@ -144,14 +144,21 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     const req = new Request("http://internal:3000/api/agentmail/inbound", { method: "POST", body: stream, duplex: "half" } as RequestInit);
     expect(req.headers.get("content-length")).toBeNull();
     expect((await POST(req)).status).toBe(413);
-    expect(sent).toBeLessThanOrEqual(8);
+    expect(sent).toBeLessThanOrEqual(14);
     expect(convex.calls).toHaveLength(0);
   });
 
-  it("a body over 1.5 MB → 413, nothing stored", async () => {
-    const body = event({ ...fixture("cosign-forwarded.json"), text: "a".repeat(1_600_000) });
+  it("a body over 3 MB → 413, nothing stored", async () => {
+    const body = event({ ...fixture("cosign-forwarded.json"), text: "a".repeat(3_200_000) });
     expect((await post(body)).status).toBe(413);
     expect(convex.calls).toHaveLength(0);
+  });
+
+  it("a 2 MB body (AgentMail's 1 MB text plus its html) is read and stored", async () => {
+    const body = event({ ...fixture("cosign-forwarded.json"), html: `<p>${"a ".repeat(1_000_000)}</p>` });
+    expect(body.length).toBeGreaterThan(2_000_000);
+    expect((await post(body)).status).toBe(200);
+    expect(calls()).toHaveLength(1);
   });
 
   it("an allowlisted From whose DKIM failed → stored ignored with the reason and no body", async () => {
@@ -208,6 +215,9 @@ describe("delivery (Review Focus 4)", () => {
     }
     expect(convex.calls).toHaveLength(0);
     expect(fetchSpy).not.toHaveBeenCalled();
+    // Codes only: a wrong RADAR_INBOX would otherwise drop every email with no trace.
+    expect(logs.filter((l) => l === "radar step=inbox ok=false")).toHaveLength(2);
+    expect(logs.join(" ")).not.toContain("someone-else");
   });
 
   it("a signed body that is not JSON → 400, no Convex call", async () => {

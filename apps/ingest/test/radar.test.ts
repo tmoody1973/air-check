@@ -187,11 +187,15 @@ describe("chatJson (the one Token Factory client)", () => {
     }
   });
 
-  test("firstObject is linear on hostile text (200k characters)", () => {
+  test("firstObject is linear on hostile text (200k characters)", { timeout: 30_000 }, () => {
     for (const s of ["{".repeat(200_000), '{"'.repeat(100_000), "\\".repeat(200_000), "x".repeat(200_000)]) {
-      const t0 = performance.now();
-      expect(firstObject(s)).toBeNull();
-      expect(performance.now() - t0).toBeLessThan(200);
+      // Best of three, so a busy machine's spike doesn't fail it; a quadratic scan takes seconds here.
+      const times = [0, 1, 2].map(() => {
+        const t0 = performance.now();
+        expect(firstObject(s)).toBeNull();
+        return performance.now() - t0;
+      });
+      expect(Math.min(...times)).toBeLessThan(200);
     }
   });
 });

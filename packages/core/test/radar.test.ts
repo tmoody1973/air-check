@@ -24,6 +24,8 @@ import {
   stripLinks,
   unwrapForward,
   type InboundMail,
+  HOST_NAME,
+  isHostName,
 } from "../src/index";
 import { readFixture } from "./helpers/fixtures";
 
@@ -600,7 +602,8 @@ describe("embargo matching: credits, versions and the agent's own words", () => 
     expect(agentEmbargoLines({ tracks: [{ artist: "Ama Ferrell", title: "Elsewhere" }] }, [home])).toEqual([]); // same artist: never told
   });
   const fast = (label: string, run: () => unknown) =>
-    test(`${label} finishes under 200 ms`, () => {
+    // The budget is the 200 ms; the 30 s timeout only gives a loaded machine time to run three tries.
+    test(`${label} finishes under 200 ms`, { timeout: 30_000 }, () => {
       const times = [0, 1, 2].map(() => {
         const t = performance.now();
         run();
@@ -619,7 +622,8 @@ describe("embargo matching: credits, versions and the agent's own words", () => 
 describe("no catastrophic regex time on hostile input", () => {
   // Best of three, so a busy machine's spike doesn't fail it; a quadratic pattern takes seconds to minutes here.
   const fast = (label: string, run: () => unknown) =>
-    test(`${label} finishes under 200 ms`, () => {
+    // The budget is the 200 ms; the 30 s timeout only gives a loaded machine time to run three tries.
+    test(`${label} finishes under 200 ms`, { timeout: 30_000 }, () => {
       const times = [0, 1, 2].map(() => {
         const t = performance.now();
         run();
@@ -664,5 +668,29 @@ describe("cleanMail caps before it cleans (fix round 1)", () => {
   test("a link inside the limit is still collected", () => {
     const c = cleanMail({ ...inbound("cosign-forwarded"), text: `hi https://example.invalid/a ${"word ".repeat(10_000)}`, hrefs: [] }, ok);
     expect(c.links).toEqual(["https://example.invalid/a"]);
+  });
+});
+
+// Final review I1: Convex refuses what core used to pass on (503 → Svix retries, then drops the email for good).
+describe("hosts and addresses that radar.received would refuse are dropped in core", () => {
+  const ok = { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" } as const;
+  test("HOST_NAME: plain dotted host names only", () => {
+    for (const h of ["label.example", "a-b.c.example", "1.2.3.4"]) expect(HOST_NAME.test(h)).toBe(true);
+    for (const h of ["foo_bar.example.com", "localhost", "[2001:db8::1]", "example.com.", "x".repeat(254) + ".example"]) expect(isHostName(h)).toBe(false);
+  });
+  test("an underscore host, localhost, an IPv6 link and a trailing-dot host: no host, no link, text still [link]", () => {
+    const bad = ["https://foo_bar.example.com/a", "http://localhost:3000/b", "http://[2001:db8::1]/c", "https://example.com./d"];
+    const c = cleanMail({ ...inbound("cosign-forwarded"), text: `see ${bad.join(" and ")} and https://good.example/e`, hrefs: [] }, ok);
+    expect(c.hosts).toEqual(["good.example"]);
+    expect(c.links).toEqual(["https://good.example/e"]);
+    expect(c.body).not.toMatch(/foo_bar|localhost|2001|example\.com\./);
+    expect(c.body.match(/\[link\]/g)).toHaveLength(5);
+  });
+  test("an address over 254 characters is not an address (direct and forwarded senders)", () => {
+    const long = `${"a".repeat(290)}@label.example`;
+    expect(senderDecision({ from: `X <${long}>`, text: "", headers: {} }, [long], ID)).toEqual({ ok: false, reason: "Sender not on the list" });
+    const fwd = `---------- Forwarded message ---------\nFrom: Press <${long}>\nSubject: hi\n\nHello there`;
+    const c = cleanMail({ ...inbound("cosign-forwarded"), text: fwd }, ok);
+    expect(c.sender?.address).toBeUndefined();
   });
 });

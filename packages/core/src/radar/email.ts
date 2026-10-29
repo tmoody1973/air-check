@@ -146,6 +146,11 @@ export function parseAllowlist(raw: string | undefined): string[] {
 }
 
 const ADDRESS = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/;
+const MAX_ADDRESS_CHARS = 254; // RFC 5321's path limit; radar.received refuses over 320
+
+/** A plain dotted host name (no port, brackets, underscore or trailing dot). radar.received refuses any other. */
+export const HOST_NAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+export const isHostName = (h: string): boolean => h.length <= 253 && HOST_NAME.test(h);
 
 /** "Name <a@b.c>" or "a@b.c" → its parts; the address only when it looks like one. */
 function parseFrom(full: string): { name?: string; address?: string } {
@@ -153,7 +158,7 @@ function parseFrom(full: string): { name?: string; address?: string } {
   const angle = raw.match(/^(.*?)<([^<>]+)>\s*$/);
   const address = (angle ? angle[2]! : raw).trim().toLowerCase().replace(/^mailto:/, "");
   const name = angle?.[1]?.trim().replace(/^["'*\s]+|["'*\s]+$/g, "");
-  return { ...(name ? { name } : {}), ...(ADDRESS.test(address) ? { address } : {}) };
+  return { ...(name ? { name } : {}), ...(address.length <= MAX_ADDRESS_CHARS && ADDRESS.test(address) ? { address } : {}) };
 }
 
 /**
@@ -281,8 +286,9 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
     .replace(TOKEN, (t) => (t.includes("://") || t.includes("[.]") ? asLink(t) : t))
     .replace(WWW_IN_TEXT, asLink);
   const stripped = replaceEmails(linked).replace(HOST_PATH, asLink).replace(/@/g, "(at)");
+  // A link whose host radar.received would refuse (localhost, [::1], foo_bar, a trailing dot) is dropped, not kept for Tarik.
   const links = [...new Set([...found, ...hrefs].map(httpLink).filter((l): l is string => l !== null))]
-    .filter((l) => l.length <= MAX_LINK_CHARS)
+    .filter((l) => l.length <= MAX_LINK_CHARS && isHostName(new URL(l).hostname))
     .slice(0, MAX_LINKS);
   const pages = links.map((l) => [l, bandcampPageUrl(l)] as const);
   const bandcampPages = [...new Set(pages.flatMap(([, p]) => (p ? [p] : [])))].slice(0, MAX_PAGES);

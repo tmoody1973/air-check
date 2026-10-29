@@ -100,6 +100,19 @@ test("in apps/ingest, the shared call( helper next to bandcamp.com trips the wir
   expect(one("apps/console/src/lib/x.ts", 'call(x, "bandcamp.com")')).toEqual([]);
 });
 
+test("final review: an ingest file that uses bandcampPageUrl or .embedsWanted( and fetches is flagged, even without the domain", () => {
+  const msg = (path: string) => `${path}: uses the Bandcamp page list and fetches outside apps/ingest/src/bandcamp.ts (Plan 8)`;
+  const uses = ['import { bandcampPageUrl } from "@aircheck/core"; await fetch(u);', "for (const w of await deps.convex.embedsWanted()) await call(http, w.pageUrl);"];
+  for (const code of uses) {
+    expect(one("apps/ingest/src/bandcamp.ts", code)).toEqual([]);
+    expect(one("apps/ingest/src/radar.ts", code)).toEqual([msg("apps/ingest/src/radar.ts")]);
+  }
+  // The Convex client defines embedsWanted and passes Convex its own fetch: not a Bandcamp fetch.
+  const client = "embedsWanted(): Promise<W[]>; new ConvexHttpClient(url, { fetch: (i, n) => fetch(i, n) }); embedsWanted: () => client.query(r.embedsWanted, { token }),";
+  expect(one("apps/ingest/src/convex.ts", client)).toEqual([]);
+  expect(one("apps/ingest/src/x.ts", "bandcampPageUrl(u)")).toEqual([]); // no fetch
+});
+
 test("no attachments or send call anywhere in apps/", () => {
   for (const s of ['`/inboxes/${i}/messages/${m}/attachments/${a}`', '"/inboxes/x/messages/send"']) {
     for (const path of ["apps/console/src/lib/agentmail.ts", "apps/ingest/src/x.ts", "apps/console/convex/x.ts"]) {

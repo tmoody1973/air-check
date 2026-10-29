@@ -106,7 +106,8 @@ describe("readBandcampDetails", () => {
 
 describe("page parsing stays linear on a hostile 200k-character page", () => {
   const fast = (label: string, run: () => unknown) =>
-    test(`${label} finishes under 200 ms`, () => {
+    // The budget is the 200 ms; the 30 s timeout only gives a loaded machine time to run three tries.
+    test(`${label} finishes under 200 ms`, { timeout: 30_000 }, () => {
       const times = [0, 1, 2].map(() => {
         const t = performance.now();
         run();

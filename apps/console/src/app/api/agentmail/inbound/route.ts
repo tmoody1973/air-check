@@ -12,7 +12,8 @@ import { RADAR_INBOX, getMessage } from "@/lib/agentmail";
 // sender must be on RADAR_SENDERS with an aligned DKIM pass, or only an "ignored" row with its reason is kept.
 // Logs carry the step and state only (Hard Rule 8).
 
-const MAX_BODY_BYTES = 1.5 * 1024 * 1024;
+// AgentMail sends text and html up to 1 MB each, plus headers and JSON escaping; the read streams, so 3 MB costs little.
+const MAX_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_FROM = 320;
 
 const reply = (status: number, body: Record<string, unknown>) => Response.json(body, { status });
@@ -64,7 +65,10 @@ export async function POST(req: Request) {
   }
   if (event?.event_type !== "message.received") return reply(200, { ignored: true });
   // Only the radar's inbox: a delivery for any other inbox on the account is not ours to store or fetch.
-  if ((event.message as { inbox_id?: unknown } | undefined)?.inbox_id !== RADAR_INBOX) return reply(200, { ignored: true });
+  if ((event.message as { inbox_id?: unknown } | undefined)?.inbox_id !== RADAR_INBOX) {
+    console.log("radar step=inbox ok=false"); // codes only: a wrong RADAR_INBOX shows up here, not as silence
+    return reply(200, { ignored: true });
+  }
 
   let mail = pickInbound(event.message);
   if (!mail) return reply(200, { ignored: true }); // no message id or sender: nothing to key a row on

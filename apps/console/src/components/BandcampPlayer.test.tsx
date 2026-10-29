@@ -40,6 +40,16 @@ describe("BandcampPlayer", () => {
     expect(container.querySelector("iframe")).toBeNull();
   });
 
+  it("queued for over 10 minutes: the same hint the Not added rows use", () => {
+    const now = Date.now();
+    const { rerender } = render(<BandcampPlayer {...base} embedState="queued" embedQueuedAt={now - 11 * 60_000} />);
+    expect(screen.getByText("Older than 10 minutes: the ingest worker may be down.")).toBeInTheDocument();
+    rerender(<BandcampPlayer {...base} embedState="queued" embedQueuedAt={now - 60_000} />);
+    expect(screen.queryByText(/Older than 10 minutes/)).toBeNull();
+    rerender(<BandcampPlayer {...base} embedState="queued" />); // rows queued before the timestamp existed: no guess
+    expect(screen.queryByText(/Older than 10 minutes/)).toBeNull();
+  });
+
   it("failed: a plain reason and Try again calls retryEmbed", () => {
     const onRetry = vi.fn(async () => undefined);
     render(<BandcampPlayer {...base} onRetry={onRetry} embedState="failed" embedError="redirect_off_host" />);

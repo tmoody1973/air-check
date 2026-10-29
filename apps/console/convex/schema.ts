@@ -210,6 +210,7 @@ export default defineSchema({
     embed: v.optional(v.object({ kind: v.union(v.literal("album"), v.literal("track")), id: v.string() })),
     embedState: v.optional(v.union(v.literal("queued"), v.literal("ready"), v.literal("failed"))),
     embedError: v.optional(v.string()),
+    embedQueuedAt: v.optional(v.number()), // when the page was last queued: the player shows a stale hint after 10 minutes
     key: v.optional(v.string()),
     receivedAt: v.optional(v.number()),
     editedFields: v.optional(v.array(v.string())),
