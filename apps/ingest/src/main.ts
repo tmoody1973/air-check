@@ -39,7 +39,7 @@ function main(): void {
     convex, log, memory: newMemory(), tokenDir: config.tokenDir, inboxDir: config.inboxDir, preparedDir: config.preparedDir,
     box: boxSide,
     google: google ? (rt) => driveClient(realHttp, google, rt) : null,
-    dropbox: dropbox ? (rt) => dropboxClient(realHttp, dropbox, rt) : null,
+    dropbox: dropbox ? (rt) => dropboxClient(realHttp, dropbox, rt, { folder: config.dropboxFolder }) : null,
   };
   const fetchDeps = { convex, log, box: boxSide?.client ?? null, inboxDir: config.inboxDir, preparedDir: config.preparedDir, failures: new Map<string, { count: number; at: number }>() };
   const draftDeps = { convex, log, last: { key: "" }, scan: scanDeps.memory };
