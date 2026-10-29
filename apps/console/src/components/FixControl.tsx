@@ -20,10 +20,13 @@ export const hasAudioFix = (qs: readonly Question[]) =>
  */
 export const withoutHandCopy = (text: string) => text.replace(/\s*If \S+ should be posted, copy its two hour WAVs into the inbox by hand\.$/, "");
 
-/** The control that settles one question in Air Check. `onEditTracklist` opens the row's one tracklist editor. */
-export function FixControl({ showDate, fix, ctx, onEditTracklist }: { showDate: string; fix: Fix; ctx: RowCtx; onEditTracklist: () => void }) {
+/**
+ * The control that settles one question in Air Check. `onEditTracklist` opens the row's one tracklist editor; it is
+ * absent on a frozen show (package or open run), so no button leads nowhere.
+ */
+export function FixControl({ showDate, fix, ctx, onEditTracklist }: { showDate: string; fix: Fix; ctx: RowCtx; onEditTracklist?: () => void }) {
   if (fix.type === "tracklist")
-    return (
+    return onEditTracklist && (
       <div>
         <button type="button" className={SECONDARY} onClick={onEditTracklist}>Fix the tracklist</button>
       </div>

@@ -84,7 +84,7 @@ function statusLink(e: EpisodeRow): ReactNode {
 }
 
 /** One question: its words, then the answer box or the "fix it in the source" line, then any in-console fix (Plan 6b). */
-function QuestionItem({ e, q, ctx, onEditTracklist }: { e: EpisodeRow; q: Question; ctx: RowCtx; onEditTracklist: () => void }) {
+function QuestionItem({ e, q, ctx, onEditTracklist }: { e: EpisodeRow; q: Question; ctx: RowCtx; onEditTracklist?: () => void }) {
   const fix = q.fix && <FixControl showDate={e.showDate} fix={q.fix} ctx={ctx} onEditTracklist={onEditTracklist} />;
   const said = (line: ReactNode) => (
     <p className="flex flex-col [overflow-wrap:anywhere]">
@@ -110,7 +110,7 @@ function QuestionItem({ e, q, ctx, onEditTracklist }: { e: EpisodeRow; q: Questi
 }
 
 /** The explanations and controls under a show, in reading order. */
-function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTracklist: () => void): ReactNode[] {
+function detailsOf(e: EpisodeRow, ctx: RowCtx, canChange: boolean, onEditTracklist?: () => void): ReactNode[] {
   const parts: ReactNode[] = [];
   if (e.status === "rerun" && e.rerunOf) parts.push(<RerunLine key="rerun" e={e} ctx={ctx} />);
   if (e.corrected || e.rescanPending) parts.push(<CorrectedLine key="corrected" e={e} ctx={ctx} canChange={canChange} />);
@@ -147,7 +147,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
   const canChange = !!e && e.packageStatus === "none" && !e.openRun;
   const canEdit = canChange && e.status !== "rerun";
   const onEdit = canEdit && !editing ? () => setEditing(true) : undefined;
-  const details = e ? detailsOf(e, ctx, canChange, () => setEditing(true)) : [];
+  const details = e ? detailsOf(e, ctx, canChange, canEdit ? () => setEditing(true) : undefined) : [];
   if (editing && canEdit) details.push(<TracklistFix key="edit" showDate={showDate} ctx={ctx} onClose={() => setEditing(false)} />);
   if (marking && canMark) details.push(<MarkForm key="mark" showDate={showDate} ctx={ctx} onClose={() => setMarking(false)} />);
   const date = showDateLabel(showDate);

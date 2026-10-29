@@ -114,6 +114,11 @@ describe("fix controls under each question", () => {
 });
 
 describe("Edit tracklist on the row", () => {
+  it("a frozen show (open run) offers no tracklist button that would lead nowhere", () => {
+    setup([ep("2026-01-09", { status: "question", openRun: true, questions: [badLine] })]);
+    expect(within(rowOf("2026-01-09")).queryByRole("button", { name: "Fix the tracklist" })).not.toBeInTheDocument();
+  });
+
   it("is offered with no package, no open run and no rerun mark", async () => {
     const { acts } = setup([
       ep("2026-01-02", { status: "awaiting-review", packageStatus: "awaiting_review" }),
