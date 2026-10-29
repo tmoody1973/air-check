@@ -95,14 +95,19 @@ describe("judgeClaim (Review Focus 1 and 2)", () => {
     expect(unflagged.status).toBe("could-not-verify");
   });
 
-  it("R8b: a Crate source counts as its tool family's one publisher, whatever host its URL has", () => {
+  it("R8b/R8c: a Crate source off its family's own domains counts as the family's one publisher, never primary", () => {
     const crate = (host: string, family: string, path = host) => ({ ...S(host, "Released 2026-10-10", path), via: `crate:${family}_search` });
     const itunes = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: crate("music.apple.com", "itunes"), S2: crate("is1-ssl.mzstatic.com", "itunes") });
     expect(itunes).toMatchObject({ status: "could-not-verify", check: "Only one source: apple.com" });
     const wikiLink = judgeClaim(date([{ id: "S1", primary: true }]), { S1: crate("label.example", "wikipedia") });
-    expect(wikiLink.status).toBe("could-not-verify");
+    expect(wikiLink).toMatchObject({ status: "could-not-verify", check: "Only one source: wikipedia.org" });
+    const offPlusWiki = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: crate("label.example", "wikipedia"), S2: crate("en.wikipedia.org", "wikipedia") });
+    expect(offPlusWiki.status).toBe("could-not-verify");
+    // R8c: inside the family's own domains the normal rules apply (Review Focus 2, R5).
     const bc = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: crate("a.bandcamp.com", "bandcamp"), S2: crate("b.bandcamp.com", "bandcamp") });
-    expect(bc.status).toBe("could-not-verify");
+    expect(bc.status).toBe("confirmed");
+    const ownPage = judgeClaim(date([{ id: "S1", primary: true }]), { S1: crate("artist.bandcamp.com", "bandcamp") });
+    expect(ownPage.status).toBe("confirmed");
     const mbAndWeb = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: crate("musicbrainz.org", "musicbrainz"), S2: S("musicbrainz.org", "2026-10-10", "x") });
     expect(mbAndWeb.status).toBe("could-not-verify");
     const twoFamilies = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: crate("musicbrainz.org", "musicbrainz"), S2: crate("en.wikipedia.org", "wikipedia") });

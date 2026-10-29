@@ -18,12 +18,25 @@ export function publisherOf(host: string): string {
   return parts.slice(-n).join(".");
 }
 
-/** R8b: a Crate result's text is its family's text (an iTunes item's artwork link is still iTunes), so one family is one publisher. */
-const CRATE_FAMILY: Record<string, string> = { musicbrainz: "musicbrainz.org", wikipedia: "wikipedia.org", bandcamp: "bandcamp.com", itunes: "apple.com" };
-function publisherOfSource(s: { host: string; via: string }): string {
-  if (!s.via.startsWith("crate:")) return publisherOf(s.host);
-  const family = s.via.slice("crate:".length).split("_")[0]!;
-  return CRATE_FAMILY[family] ?? `crate:${family}`;
+/**
+ * R8b/R8c: Crate sources. A host inside the tool family's own domains is judged like any page (two *.bandcamp.com
+ * pages are two publishers; an artist's own Bandcamp page may be primary). A host outside them is the family's text
+ * about another page (an iTunes artwork link, a link inside a Wikipedia summary): it counts as the family's one
+ * publisher and is never primary.
+ */
+const CRATE_FAMILY: Record<string, { publisher: string; owns: (host: string) => boolean }> = {
+  musicbrainz: { publisher: "musicbrainz.org", owns: (h) => h === "musicbrainz.org" },
+  wikipedia: { publisher: "wikipedia.org", owns: (h) => h === "wikipedia.org" || h.endsWith(".wikipedia.org") },
+  bandcamp: { publisher: "bandcamp.com", owns: (h) => h === "bandcamp.com" || h.endsWith(".bandcamp.com") },
+  itunes: { publisher: "apple.com", owns: (h) => h === "apple.com" || h.endsWith(".apple.com") },
+};
+function publisherOfSource(s: { host: string; via: string }): { publisher: string; offFamily: boolean } {
+  if (!s.via.startsWith("crate:")) return { publisher: publisherOf(s.host), offFamily: false };
+  const name = s.via.slice("crate:".length).split("_")[0]!;
+  const family = CRATE_FAMILY[name];
+  const host = s.host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+  if (family?.owns(host)) return { publisher: publisherOf(s.host), offFamily: false };
+  return { publisher: family?.publisher ?? `crate:${name}`, offFamily: true };
 }
 
 const fold = foldText;
@@ -146,8 +159,11 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
   if (groups.size > 1) return { ...base, status: "conflict", check: `Sources disagree: ${listed.join(" vs ")}` };
   if (own !== undefined && !groups.has(own)) return { ...base, status: "conflict", check: `Sources show ${listed[0]}, not ${claim.value}` };
 
-  const publishers = unique(usable.map(publisherOfSource));
-  const primary = usable.some((s) => s.primary && !AGGREGATORS.includes(publisherOfSource(s)));
+  const publishers = unique(usable.map((s) => publisherOfSource(s).publisher));
+  const primary = usable.some((s) => {
+    const p = publisherOfSource(s);
+    return s.primary && !p.offFamily && !AGGREGATORS.includes(p.publisher);
+  });
   const yearOnly = claim.kind === "release-date" && own?.length === 4;
   const monthShown = usable.some((s) => datesIn(textOf.get(s)!).some((d) => d.length >= 7 && d.startsWith(`${own}-`)));
   if (yearOnly && !monthShown) return { ...base, status: "could-not-verify", check: `Only the year ${own} is shown; check the full date` };
