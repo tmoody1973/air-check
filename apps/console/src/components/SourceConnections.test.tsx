@@ -24,6 +24,7 @@ describe("SourceConnections", () => {
   it("nothing recorded yet: Google Drive and Dropbox offer Connect; Box is not configured and has no button", () => {
     render(<SourceConnections sources={[]} workspace="real" />);
     expect(within(card("Google Drive")).getByText("Not connected")).toBeInTheDocument();
+    expect(card("Google Drive")).toHaveTextContent("Air Check reads the tracklist docs here.");
     expectPostForm(card("Google Drive"), "Connect Google Drive", "/api/google/authorize");
     expectPostForm(card("Dropbox"), "Connect Dropbox", "/api/dropbox/authorize");
     expect(within(card("Google Drive")).queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();

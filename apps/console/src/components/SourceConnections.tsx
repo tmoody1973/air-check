@@ -19,7 +19,7 @@ export type SourceNoticeT =
 
 const NAME: Record<SourceName, string> = { google: "Google Drive", dropbox: "Dropbox", box: "Box" };
 const READS: Record<SourceName, string> = {
-  google: "Air Check reads the 2026 tracklist docs here.",
+  google: "Air Check reads the tracklist docs here.",
   dropbox: "Air Check reads the show notes in Dropbox Paper.",
   box: "Show audio comes from the Full Episodes folder. Box is set up on the server, in ingest.env, so there is nothing to connect here.",
 };

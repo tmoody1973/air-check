@@ -46,12 +46,12 @@ describe("Today backlog line", () => {
     results["today.summary"] = summary;
     results["episodes.list"] = { episodes: [ep("published"), ep("rerun"), ep("question"), ep("ready-to-draft")], awaitingReview: 0 };
     render(<TodayPage />);
-    expect(screen.getByRole("link", { name: "2026 backlog: 2 shows to go" })).toHaveAttribute("href", "/episodes");
+    expect(screen.getByRole("link", { name: "Backlog: 2 shows to go" })).toHaveAttribute("href", "/episodes");
   });
 
   it("no line when Episodes is not available (demo or not staff)", () => {
     results["today.summary"] = summary;
     render(<TodayPage />);
-    expect(screen.queryByRole("link", { name: /2026 backlog/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Backlog:/ })).not.toBeInTheDocument();
   });
 });
