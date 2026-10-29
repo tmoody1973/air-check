@@ -116,11 +116,13 @@ export async function episodeRows(ctx: QueryCtx) {
       // I2: a removed fix keeps its row (and updatedAt) with no fields: nothing is corrected.
       const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
-      const openRun = runs.some((r) => isOpenRun(r));
+      const open = runs.filter((r) => isOpenRun(r)).sort((a, b) => createdAtOf(b) - createdAtOf(a));
+      const openRun = open.length > 0;
+      const openRunId = open[0]?.runId; // "Watch it work": the id /runs/[id] takes; nothing else from the run
       const derived = episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts));
       // A removed 2025 date whose row stays (a correction, a package, prune's cap) is not backlog: never drafted or counted.
       const status = (await inScope(ctx, e.showDate)) ? derived.status : "not-in-backlog";
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...derived, status };
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, ...(openRunId && { openRunId }), corrected, rescanPending: await rescanPending(ctx, e), ...derived, status };
     }),
   );
 }
