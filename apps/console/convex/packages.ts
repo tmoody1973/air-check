@@ -1,6 +1,5 @@
 import {
-  checkDescriptionChange, formatTrack, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
-  type Track,
+  checkDescriptionChange, formatTracklist, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
 } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
@@ -270,10 +269,6 @@ export const revise = internalMutation({
   },
 });
 
-/** Both hours in the package's own spellings, one formatTrack line each; parses back to the same tracks. */
-const tracklistText = (tracks: Track[]) =>
-  ([1, 2] as const).map((h) => [`Hour ${h}`, ...tracks.filter((t) => t.hour === h).map(formatTrack)].join("\n")).join("\n\n");
-
 /**
  * Internal (the agent's /agent/packages/get): what the agent needs to rewrite a description, read-only, in its token's
  * workspace only. For a show on Mixcloud the description is the live one (R10) and the open update's status is named.
@@ -291,7 +286,7 @@ export const agentGet = internalQuery({
     const open = updates.find(isOpen);
     return {
       packageId: doc.packageId, showDate: draft.showDate, status: doc.status, title: draft.title, tags: draft.tags,
-      tracklistText: tracklistText(draft.tracks), description: live.description,
+      tracklistText: formatTracklist(draft.tracks), description: live.description,
       ...(live.descriptionSources?.length && { descriptionSources: live.descriptionSources }),
       ...(open && { openUpdate: open.status }),
     };

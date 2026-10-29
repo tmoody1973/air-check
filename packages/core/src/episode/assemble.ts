@@ -1,3 +1,5 @@
+import { isShowDate } from "./dates";
+
 export interface BoxFile {
   id: string;
   name: string;
@@ -12,6 +14,8 @@ export interface EpisodeAssembly {
   hour1?: BoxFile;
   hour2?: BoxFile;
   pattern?: AssemblyPattern;
+  /** ISO date from the MMDDYY stamp in the hour file names, when they carry one. */
+  stampDate?: string;
   ignored: string[];
   flags: string[];
 }
@@ -64,9 +68,12 @@ export function assembleEpisode(folderName: string, files: BoxFile[]): EpisodeAs
     const h2 = candidates.find((f) => p.h2.test(f.name));
     if (!h1 || !h2) continue;
     const suffixes = [h1.name.match(p.h1)?.[1], h2.name.match(p.h2)?.[1]].filter(Boolean);
+    const stamp = suffixes[0]?.match(/^(\d{2})(\d{2})(\d{2})$/);
+    const stamped = stamp && `20${stamp[3]}-${stamp[1]}-${stamp[2]}`;
+    const stampDate = stamped && isShowDate(stamped) ? { stampDate: stamped } : {};
     if (suffixes.some((s) => s !== date.mmddyy))
-      return { status: "ask", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ignored, flags: ["date mismatch"] };
-    return { status: "ready", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ignored, flags: sizeFlags(h1, h2) };
+      return { status: "ask", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ...stampDate, ignored, flags: ["date mismatch"] };
+    return { status: "ready", date: date.iso, hour1: h1, hour2: h2, pattern: p.name, ...stampDate, ignored, flags: sizeFlags(h1, h2) };
   }
 
   const hour1 = PATTERNS.map((p) => candidates.find((f) => p.h1.test(f.name))).find(Boolean);

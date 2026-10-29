@@ -142,6 +142,14 @@ describe("runPass", () => {
     expect(convex.waitingCalls[0]![0]!.reason).toBe("Encoding failed for 2026-10-02; will retry");
   });
 
+  test("an ingest download in progress (.ingest-part) is not a WAV: the folder waits, nothing is encoded", async () => {
+    await addShow("2026-10-02", ["1-9125.wav", "2-9126.wav.ingest-part"]);
+    const convex = fakeConvex([{ packageId: "pkg-10-2-26", showDate: "2026-10-02" }]);
+    await pass(convex, okExec());
+    expect(calls).toEqual([]);
+    expect(convex.waitingCalls).toEqual([[{ showDate: "2026-10-02", reason: "2026-10-02 needs exactly two .wav files; found 1 (ignored 1 other file)" }]]);
+  });
+
   test("a folder without a package is reported, not encoded", async () => {
     await addShow("2026-10-09");
     const convex = fakeConvex([]);

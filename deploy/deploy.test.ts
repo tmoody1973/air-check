@@ -26,9 +26,11 @@ describe("deploy files", () => {
     expect(web.env_file).toBe("${HOME}/.aircheck/console.env");
   });
 
-  it("console mounts only the Mixcloud token folder (rw) and the prepared audio (ro)", () => {
+  it("console mounts only the Mixcloud and ingest token folders (rw) and the prepared audio (ro)", () => {
     expect(web.read_only).toBe(true);
-    expect(web.volumes).toEqual(["${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/aircheck-audio/prepared:/audio:ro"]);
+    expect(web.volumes).toEqual([
+      "${HOME}/.aircheck/mixcloud:/mixcloud:rw", "${HOME}/.aircheck/ingest-tokens:/ingest-tokens:rw", "${HOME}/aircheck-audio/prepared:/audio:ro",
+    ]);
   });
 
   it("caddy keeps only the bind capability", () => {
@@ -95,6 +97,7 @@ describe("deploy files", () => {
       "NEXT_PUBLIC_CONVEX_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_APP_URL",
       "CLERK_SECRET_KEY", "AIRCHECK_DEMO_USER_ID", "NEXT_TELEMETRY_DISABLED", "CLERK_TELEMETRY_DISABLED",
       "MIXCLOUD_CLIENT_ID", "MIXCLOUD_CLIENT_SECRET", "MIXCLOUD_TOKEN_FILE",
+      "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "INGEST_TOKEN_DIR",
     ]);
   });
 
@@ -146,6 +149,31 @@ describe("deploy files", () => {
       /^ExecStartPre=\+\/usr\/bin\/install -d -m 0755 -o user -g user \/home\/user\/aircheck-audio \/home\/user\/aircheck-audio\/inbox \/home\/user\/aircheck-audio\/prepared$/m,
     );
     expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
+  });
+
+  it("the ingest unit creates the audio folders, may write only there, and its env example holds names only", () => {
+    const unit = read("ingest/aircheck-ingest.service");
+    expect(unit).toMatch(
+      /^ExecStartPre=\+\/usr\/bin\/install -d -m 0755 -o user -g user \/home\/user\/aircheck-audio \/home\/user\/aircheck-audio\/inbox \/home\/user\/aircheck-audio\/prepared$/m,
+    );
+    expect(unit.indexOf("ExecStartPre=")).toBeLessThan(unit.indexOf("ExecStart=/"));
+    expect(unit.match(/^ReadWritePaths=.*$/gm)).toEqual(["ReadWritePaths=-/home/user/aircheck-audio"]);
+    for (const l of ["ProtectSystem=strict", "ProtectHome=read-only", "NoNewPrivileges=yes", "User=user", "EnvironmentFile=/home/user/.aircheck/ingest.env"])
+      expect(unit).toContain(l);
+    const env = read("ingest/ingest.env.example").split("\n").filter((l) => l && !l.startsWith("#"));
+    for (const l of env) expect(l).toMatch(/^[A-Z_]+=$/);
+    expect(env.map((l) => l.slice(0, -1))).toEqual(expect.arrayContaining([
+      "CONVEX_URL", "INGEST_TOKEN", "BOX_CLIENT_ID", "BOX_CLIENT_SECRET", "BOX_ENTERPRISE_ID", "BOX_FOLDER_ID",
+      "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "INGEST_TOKEN_DIR", "INBOX_DIR", "PREPARED_DIR",
+    ]));
+  });
+
+  it("DEPLOY creates the ingest token folder before the console rebuild in the deploy order, and says why (M7)", () => {
+    const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
+    const order = doc.slice(doc.indexOf("## Deploy order"), doc.indexOf("## Certificates"));
+    expect(order.indexOf("~/.aircheck/ingest-tokens")).toBeGreaterThan(-1);
+    expect(order.indexOf("~/.aircheck/ingest-tokens")).toBeLessThan(order.indexOf("dc up -d --build"));
+    expect(order).toMatch(/Docker creates the folder as root and Connect fails/);
   });
 
   it("DEPLOY copies WAVs under a temporary name so a half-copied file is never an inbox WAV (C1)", () => {

@@ -1,0 +1,31 @@
+# Air Check ingest service: the only program that holds Box, Google Drive and Dropbox credentials (Hard Rule 2). Scans
+# the 2026 Rhythm Lab backlog hourly (Box audio folders, Drive tracklists, Paper notes), stores one episode per show
+# date in Convex, downloads a show's two hour WAVs into the media inbox when it is next (about 3 shows on disk at a
+# time), and asks Convex to queue the agent's draft, one show at a time. Read-only at every provider.
+# Install: sudo cp to /etc/systemd/system/ && sudo systemctl enable --now aircheck-ingest
+[Unit]
+Description=Air Check: Box / Drive / Paper ingest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=user
+EnvironmentFile=/home/user/.aircheck/ingest.env
+Environment=PATH=/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+WorkingDirectory=/home/user/aircheck-ingest
+# The audio folders must exist before the sandbox is set up (ReadWritePaths needs them); "+" runs this one step unsandboxed.
+ExecStartPre=+/usr/bin/install -d -m 0755 -o user -g user /home/user/aircheck-audio /home/user/aircheck-audio/inbox /home/user/aircheck-audio/prepared
+ExecStart=/home/user/.nvm/versions/node/v22.23.4/bin/node /home/user/aircheck-ingest/dist/main.js
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+# Read-only: the Google/Dropbox token files (/home/user/.aircheck/ingest-tokens, written by the console's Connect
+# buttons, owner user, mode 640) and the prepared MP3s (counted toward the 3 shows on disk).
+ProtectHome=read-only
+# Write: only the audio inbox, where downloads land as .part and are renamed when whole. Never ~/.aircheck.
+ReadWritePaths=-/home/user/aircheck-audio
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

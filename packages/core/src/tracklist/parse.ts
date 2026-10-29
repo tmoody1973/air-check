@@ -61,3 +61,8 @@ export function parseTracklist(text: string): ParsedTracklist {
 export function formatTrack(t: Pick<Track, "artist" | "title" | "feat">): string {
   return `${t.artist} - "${t.title}"${t.feat ? ` feat. ${t.feat}` : ""}`;
 }
+
+/** Both hours under "Hour 1"/"Hour 2", one formatTrack line each; parses back to the same tracks. */
+export function formatTracklist(tracks: Pick<Track, "hour" | "artist" | "title" | "feat">[]): string {
+  return ([1, 2] as const).map((h) => [`Hour ${h}`, ...tracks.filter((t) => t.hour === h).map(formatTrack)].join("\n")).join("\n\n");
+}

@@ -29,7 +29,7 @@ const ERROR_TEXT: Record<ErrorReason | "unknown", string> = {
   unknown: "Something went wrong with Mixcloud. Try again.",
 };
 
-const BTN =
+export const BTN =
   "inline-flex min-h-11 items-center whitespace-nowrap rounded-control border px-5 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal";
 
 function Notice({ notice }: { notice: NonNullable<MixcloudNotice> }) {
@@ -54,6 +54,11 @@ function StatusLine({ status }: { status: MixcloudStatus }) {
       : status.state === "needs_reconnect"
         ? ["bg-problem-text", "Reconnect needed: Mixcloud says the permission was revoked", "text-problem-text"]
         : ["bg-line-strong", "Not connected", "text-ink"];
+  return <StatusMark mark={mark} text={text} tone={tone} />;
+}
+
+/** One status line: the words carry the state; the square repeats it in color (Word Plus Color Rule). */
+export function StatusMark({ mark, text, tone }: { mark: string; text: string; tone: string }) {
   return (
     <p className={`flex items-baseline gap-2.5 text-[15px] font-medium ${tone}`}>
       <span aria-hidden="true" className={`size-2 shrink-0 translate-y-[-1px] rounded-[2px] ${mark}`} />

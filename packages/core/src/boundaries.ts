@@ -13,13 +13,27 @@ const IMPORTS_SERVICES = /(?:from\s+|require\(\s*|import\(\s*)["'](?:[^"']*\bser
 const GATE_ACCESS = /\bApprovalGate\b|\.decide\(|\bclaimForPublish\b|\brecordResult\b|\bunclaim\b/;
 const SOURCE_CREDENTIAL = /\b(?:MIXCLOUD|BOX|GOOGLE|DROPBOX|SUBSONIC)_[A-Z0-9_]+/;
 const START_TIME = "start_time";
+// Hard Rule 2: only the ingest service (and the console's Connect Google / Connect Dropbox routes, which mint the refresh
+// token) talk to Box, Google Drive or Dropbox. fonts.googleapis.com is not matched.
+const SOURCE_HOST = /\b(?:api\.box\.com|[a-z0-9-]+\.boxcloud\.com|oauth2\.googleapis\.com|www\.googleapis\.com|accounts\.google\.com|(?:api|content)\.dropboxapi\.com|www\.dropbox\.com)\b/;
+const SOURCE_HOST_ALLOWED = [
+  "apps/ingest/src/",
+  "apps/ingest/test/", // the download-host allow-list is tested by name; tests only ever reach 127.0.0.1
+  "apps/console/src/lib/oauth.ts",
+  "apps/console/src/lib/ingestOAuth.ts",
+  "apps/console/src/lib/ingestOAuth.test.ts",
+  "apps/console/src/app/api/google/",
+  "apps/console/src/app/api/dropbox/",
+  "apps/console/src/app/api/ingestSources.routes.test.ts",
+];
 
 const exempt = (path: string) =>
   path.endsWith(".md") || EXEMPT_FILES.has(path) || EXEMPT_PREFIXES.some((p) => path.startsWith(p));
 
 /**
  * Structural checks for Hard Rules 1, 2 and 11:
- * only the publisher talks to the Mixcloud upload API, the agent holds no source or Mixcloud
+ * only the publisher talks to the Mixcloud upload API, only the ingest service and the Connect routes name the Box,
+ * Google or Dropbox API hosts, the agent holds no source or Mixcloud
  * credentials and imports nothing from the services, and no code carries track start times.
  * This is a tripwire, not proof: string tricks can evade it. Hard Rule 2's real enforcement is the agent container's environment.
  */
@@ -35,6 +49,8 @@ export function findBoundaryViolations(files: SourceFile[]): string[] {
       found.push(`${path}: agent code reaches the approval gate or publish steps (Hard Rule 1)`);
     if (path.startsWith("agent/") && SOURCE_CREDENTIAL.test(content))
       found.push(`${path}: agent code references a source or Mixcloud credential (Hard Rule 2)`);
+    if (SOURCE_HOST.test(content) && !SOURCE_HOST_ALLOWED.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p))
+      found.push(`${path}: Box, Google or Dropbox API host outside apps/ingest/src and the Connect routes (Hard Rule 2)`);
     if (content.includes(START_TIME)) found.push(`${path}: contains ${START_TIME} (Hard Rule 11)`);
     return found;
   });

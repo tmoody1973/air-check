@@ -17,7 +17,62 @@ export const runStatusV = v.union(
   v.literal("completed"), v.literal("cancelled"), v.literal("failed"),
 );
 
+// Plan 6: one 2026 show as the ingest service found it. Strict objects, so no credential, URL or start time can be stored
+// (Hard Rules 2 and 11). Real workspace only (Hard Rule 9). `notes.text` is Paper text: draft input and Tarik's view
+// only, never returned by a list and never sent anywhere public (Hard Rule 12).
+const fileV = v.object({ id: v.string(), name: v.string(), size: v.number() });
+export const episodeTrackV = v.object({
+  hour: v.union(v.literal(1), v.literal(2)),
+  position: v.number(),
+  artist: v.string(),
+  title: v.string(),
+  feat: v.optional(v.string()),
+  raw: v.string(),
+  closing: v.boolean(),
+  status: v.union(v.literal("confirmed"), v.literal("spelling-fixed"), v.literal("unverified-in-notes"), v.literal("closing-track")),
+});
+export const questionKindV = v.union(v.literal("audio"), v.literal("date"), v.literal("tracklist"), v.literal("rerun"));
+/** What the scan finds; the ingest service sends exactly this. */
+export const scannedEpisodeFields = {
+  showDate: v.string(),
+  audio: v.object({
+    status: v.union(v.literal("ready"), v.literal("incomplete"), v.literal("ask"), v.literal("none")),
+    folderId: v.optional(v.string()),
+    hour1: v.optional(fileV),
+    hour2: v.optional(fileV),
+    pattern: v.optional(v.string()),
+    flags: v.array(v.string()),
+  }),
+  tracklist: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), tracks: v.optional(v.array(episodeTrackV)) }),
+  notes: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), text: v.optional(v.string()) }),
+  // `rerunOf` on a rerun question is the candidate original; "" means unknown (R8). `action`: fixed in the source, never
+  // answered (M6).
+  questions: v.array(v.object({ id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)) })),
+  audioOnDisk: v.optional(v.boolean()),
+};
+export const sourceStateV = v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected"));
+
 export default defineSchema({
+  episodes: defineTable({
+    ...scannedEpisodeFields,
+    questions: v.array(v.object({
+      id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)),
+      answer: v.optional(v.string()), answeredAt: v.optional(v.number()),
+    })),
+    scannedAt: v.number(), // 0 for a row a person created before the scan found the show (a rerun marked ahead of time)
+    fetch: v.optional(v.object({ status: v.union(v.literal("fetching"), v.literal("fetched"), v.literal("failed")), at: v.number(), error: v.optional(v.string()) })),
+    rerunOf: v.optional(v.string()),
+    rerunSource: v.optional(v.union(v.literal("chat"), v.literal("episodes"), v.literal("detected"))),
+    rerunDeclined: v.optional(v.literal(true)), // Tarik answered No to "is this a rerun?"; never asked again
+  }).index("by_showDate", ["showDate"]),
+  // One row per source the ingest service reads. Hard Rule 2: state and account only, never a credential.
+  ingestSources: defineTable({
+    source: v.union(v.literal("box"), v.literal("google"), v.literal("dropbox")),
+    state: sourceStateV,
+    account: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    checkedAt: v.number(),
+  }).index("by_source", ["source"]),
   packages: defineTable({
     packageId: v.string(),
     workspace: workspaceV,
@@ -115,7 +170,8 @@ export default defineSchema({
     .index("by_runId", ["runId"])
     .index("by_status", ["status"])
     .index("by_session_created", ["sessionKey", "createdAt"])
-    .index("by_workspace_source_created", ["workspace", "source", "createdAt"]),
+    .index("by_workspace_source_created", ["workspace", "source", "createdAt"])
+    .index("by_kind_showDate", ["kind", "form.showDate"]),
   conversations: defineTable({
     workspace: workspaceV,
     title: v.string(),

@@ -14,6 +14,7 @@ export default defineConfig({
       "apps/relay",
       "apps/media",
       "apps/publisher",
+      "apps/ingest",
     ],
   },
 });

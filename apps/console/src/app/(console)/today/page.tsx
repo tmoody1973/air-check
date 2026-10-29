@@ -8,6 +8,7 @@ import { api } from "../../../../convex/_generated/api";
 import { AudioIssues } from "@/components/AudioIssues";
 import { Pill } from "@/components/Pill";
 import { SampleTag } from "@/components/SampleTag";
+import { backlogCount } from "@/lib/episodes";
 import { Shell, useWorkspace } from "@/components/Shell";
 
 const card = "rounded-card border border-line bg-surface p-5";
@@ -36,6 +37,8 @@ export default function TodayPage() {
   const s = useQuery(api.today.summary);
   // Real workspace only (the query returns [] for anyone else), so demo never shows the card.
   const audioIssues = useQuery(api.media.issues, {});
+  // Real workspace only too (null otherwise), so demo never shows the backlog line.
+  const episodes = useQuery(api.episodes.list, {});
   const { isSignedIn } = useAuth();
 
   return (
@@ -54,6 +57,13 @@ export default function TodayPage() {
             Since 6:00 pm yesterday
             {workspace === "demo" && <SampleTag />}
           </p>
+          {episodes && (
+            <p className="-mt-2 text-sm">
+              <Link href="/episodes" className="font-medium underline underline-offset-2 hover:text-signal-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal">
+                2026 backlog: {plural(backlogCount(episodes.episodes), "show")} to go
+              </Link>
+            </p>
+          )}
           <div className="grid items-start gap-5 min-[900px]:grid-cols-2">
             <div className="flex flex-col gap-5">
               <Card title="Ready to approve" badge={s.awaiting.length > 0 && <Pill tone="ready">{s.awaiting.length}</Pill>}>

@@ -39,10 +39,17 @@ test("the public writes are exactly the allowlist", async () => {
       "media.attached", "media.waiting",
       "publisher.claim", "publisher.result", "publisher.reconcile", "publisher.setMixcloud", "publisher.unclaim",
       "mixcloud.connected", "mixcloud.disconnected",
+      // Plan 6: the ingest service (its own token) and the Episodes page (a signed-in real human). None can decide.
+      "ingest.upsert", "ingest.setFetch", "ingest.requestDraft", "ingest.sourceStatus",
+      // I3: removes episode rows for dates gone from every source; never one with a package or a rerun mark.
+      "ingest.prune",
+      "episodes.answer", "episodes.markRerun", "episodes.unmarkRerun",
+      // Plan 6 Task 3: Connect Google / Connect Dropbox record state and an account label only (a signed-in real human).
+      "episodes.sourceConnected", "episodes.sourceDisconnected",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
-    ["packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
+    ["episodes.agentMarkRerun", "packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
   );
 });
 
@@ -81,12 +88,12 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP routes are the agent's submit, revise and read-only get", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"]]);
+test("the only HTTP routes are the agent's submit, revise, read-only get and rerun mark", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/episodes/rerun", "POST"], ["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"]]);
 });
 
-test("the agent routes reach only internal.packages.submit, internal.packages.revise and internal.packages.agentGet", () => {
-  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet"];
+test("the agent routes reach only internal.packages.submit, internal.packages.revise, internal.packages.agentGet and internal.episodes.agentMarkRerun", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet", "internal.episodes.agentMarkRerun"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
@@ -178,7 +185,7 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation"]);
 });
 
 // The agent reads a package before it revises one. Read-only: an internal query (Convex gives it no writer), and its
@@ -269,7 +276,7 @@ test("a package never approved through packages.decide cannot be claimed", async
   expect(doc?.status).toBe("awaiting_review");
 });
 
-test("the relay's and the agent's tokens are refused by every media and publisher function", async () => {
+test("the relay's, the agent's and the ingest service's tokens are refused by every media and publisher function", async () => {
   const RELAY = "r".repeat(48);
   const AGENT = "a".repeat(48);
   vi.stubEnv("RELAY_TOKEN", RELAY);
@@ -277,12 +284,13 @@ test("the relay's and the agent's tokens are refused by every media and publishe
   vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", "d".repeat(48));
   vi.stubEnv("PUBLISHER_TOKEN", "p".repeat(48));
   vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
+  vi.stubEnv("INGEST_TOKEN", "i".repeat(48));
   const t = convexTest(schema, modules);
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
   await t.mutation(internal.packages.submit, { draft });
   const cover = await t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
   const before = await t.run((ctx) => ctx.db.query("packages").collect());
-  for (const token of [RELAY, AGENT, "d".repeat(48)]) {
+  for (const token of [RELAY, AGENT, "d".repeat(48), "i".repeat(48)]) {
     const id = draft.id;
     const calls = [
       t.query(api.media.pending, { token }),
@@ -369,4 +377,44 @@ test("reopening an audio failure goes to preparing_audio, never approved, and ca
   // The old fingerprint cannot approve it either: there is no MP3 to approve until media rebuilds it.
   expect(await staff.mutation(api.packages.decide, { packageId: draft.id, fingerprint: fp, decision: "approve" })).toMatchObject({ ok: false, code: "NOT_READY" });
   expect((await t.run((ctx) => ctx.db.query("packages").first()))?.status).toBe("preparing_audio");
+});
+
+// Plan 6: the ingest service and the Episodes page sit beside the publish path and must never reach it (source pins).
+// requestDraft only queues the same draft-package run the Tracklist page does: the agent drafts, Tarik approves.
+test("ingest and episodes code never reach the gate, decide, publish or description updates, and only read packages", () => {
+  for (const name of ["ingest", "episodes"]) {
+    const text = src(name);
+    for (const banned of ["decide", "claimForPublish", "recordResult", "attachAudio", "unclaim", "reopen", "confirmPosted", "gateFor", "ApprovalGate", "convexPackageStore", "compareAndSwap", "descriptionUpdates", "proposeUpdate", "scheduler"])
+      expect(text, `${name}.ts mentions ${banned}`).not.toMatch(new RegExp(`\\b${banned}\\b`));
+    for (const banned of ["internal.packages", "api.packages"]) expect(text, `${name}.ts mentions ${banned}`).not.toContain(banned);
+    expect(text, `${name}.ts imports packages`).not.toMatch(/from "\.\/packages/);
+    for (const m of text.matchAll(/"packages"/g))
+      expect(text.slice(Math.max(0, m.index! - 15), m.index! + 10), `${name}.ts uses "packages" outside ctx.db.query`).toMatch(/ctx\.db\.query\("packages"/);
+    expect(text).not.toMatch(/(?:patch|insert|replace|delete)\("packages"/);
+    const gateNames = [...text.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"\.\/gate"/g)].flatMap((m) => m[1]!.split(",").map((x) => x.trim()).filter(Boolean));
+    expect(gateNames.filter((n) => !["actorOf", "workspaceOf"].includes(n)), `${name}.ts gate imports`).toEqual([]);
+  }
+});
+
+test("every ingest function checks INGEST_TOKEN first", () => {
+  const text = src("ingest");
+  const names = [...text.matchAll(/export const (\w+) = (?:query|mutation)\(/g)].map((m) => m[1]!);
+  expect(names.sort()).toEqual(["list", "prune", "requestDraft", "setFetch", "sourceStatus", "upsert"]);
+  for (const name of names) expect(fnBody(text, `export const ${name} = `), name).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requireIngest\(token\);/);
+  expect(text).not.toMatch(/\b(?:internalMutation|internalQuery|action|httpAction)\b/);
+});
+
+test("ingest.requestDraft writes only a draft-package run, through tracklist's queueDraft, in the real workspace", () => {
+  const fn = fnBody(src("ingest"), "export const requestDraft = mutation(");
+  expect(fn.match(/queueDraft\(/g)).toEqual(["queueDraft("]);
+  expect(fn).toContain(`queueDraft(ctx, "real", `);
+  expect(fn).not.toMatch(/\.(?:insert|patch|replace|delete)\(/);
+  const helper = src("tracklist").slice(src("tracklist").indexOf("export function queueDraft("));
+  expect(helper.slice(0, helper.indexOf("\n}\n"))).toMatch(/enqueueRun\(ctx, \{[^}]*kind: "draft-package"/);
+});
+
+// Review Focus 5 / Hard Rule 12: nothing on the way to Mixcloud reads an episode, so Paper notes cannot reach a public field.
+test("the publish path never reads episodes or ingest code", () => {
+  for (const name of ["publisher", "descriptionUpdates", "media", "mixcloud", "packages", "packageStore", "gate"])
+    expect(src(name), name).not.toMatch(/"episodes"|\.\/(?:episodes|ingest)"|(?:api|internal)\.(?:episodes|ingest)\b/);
 });
