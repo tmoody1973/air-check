@@ -3,6 +3,7 @@ import {
   BANDCAMP_DOMAIN,
   MAX_EMAIL_CHARS,
   MAX_STORED_CHARS,
+  MAX_SUBJECT_CHARS,
   bandcampEmbedSrc,
   bandcampPageUrl,
   checkExtraction,
@@ -535,5 +536,57 @@ describe("embargo helpers", () => {
   });
   test("the same artist with a different title is sameArtist only", () => {
     expect(embargoHits({ tracks: [{ artist: "Ferro Lane", title: "Night Rooms" }] }, [dated])).toEqual({ blocking: [], sameArtist: [describeEmbargo(dated)] });
+  });
+});
+
+// Task 3 review, fix round 1: these run on a public webhook before the sender check, so every pattern must be linear.
+describe("no catastrophic regex time on hostile input", () => {
+  // Best of three, so a busy machine's spike doesn't fail it; a quadratic pattern takes seconds to minutes here.
+  const fast = (label: string, run: () => unknown) =>
+    test(`${label} finishes under 200 ms`, () => {
+      const times = [0, 1, 2].map(() => {
+        const t = performance.now();
+        run();
+        return performance.now() - t;
+      });
+      expect(Math.min(...times)).toBeLessThan(200);
+    });
+  fast("stripLinks: 200k chars, no ://", () => stripLinks("x".repeat(200_000)));
+  fast("stripLinks: a. x 100k (HOST_PATH)", () => stripLinks("a.".repeat(100_000)));
+  fast("stripLinks: a[ x 100k (DEFANGED)", () => stripLinks("a[".repeat(100_000)));
+  fast("stripLinks: a[.] runs (DEFANGED)", () => stripLinks("a[.]".repeat(50_000)));
+  fast("stripLinks: x@ runs (EMAIL)", () => stripLinks("x.x+".repeat(50_000) + "@"));
+  fast("stripLinks: :/ runs (ANY_SCHEME)", () => stripLinks("a:/".repeat(70_000)));
+  fast("stripLinks: a URL with 200k trailing commas (TRAILING)", () => stripLinks("https://e.example/" + ",".repeat(200_000) + "x"));
+  fast("htmlToText: unclosed <script x 50k", () => htmlToText("<script".repeat(50_000)));
+  fast("htmlToText: unclosed comments x 50k", () => htmlToText("<!--".repeat(50_000)));
+  fast("htmlToText: < x 200k", () => htmlToText("<".repeat(200_000)));
+  fast("htmlToText: unclosed <p x 100k", () => htmlToText("<p ".repeat(100_000)));
+  fast("senderDecision: a 200k From with quotes and an Authentication-Results full of (", () =>
+    senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "", headers: { "Authentication-Results": `${ID}; dkim=pass ${"(".repeat(200_000)}` } }, ALLOW, ID));
+  fast("readBandcampEmbed: unclosed <meta x 100k", () => readBandcampEmbed("<meta".repeat(100_000)));
+  fast("parseBandcampEmail: one 20k line of template words", () => parseBandcampEmail("s", "a just released ".repeat(1_300)));
+  fast("cleanMail: a 1.4 MB body and subject", () =>
+    cleanMail({ ...inbound("cosign-forwarded"), subject: "a.".repeat(700_000), text: "a[".repeat(700_000) }, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" }));
+});
+
+describe("cleanMail caps before it cleans (fix round 1)", () => {
+  const ok = { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" } as const;
+  test("an over-long display name is cut to 200 characters", () => {
+    const c = cleanMail({ ...inbound("cosign-forwarded"), from: `${"N".repeat(5_000)} <tarik@radiomilwaukee.org>`, text: "hi" }, ok);
+    expect(c.sender?.name).toHaveLength(200);
+  });
+  test(`the subject is cut to ${MAX_SUBJECT_CHARS} characters before cleaning`, () => {
+    expect(cleanMail({ ...inbound("cosign-forwarded"), subject: "s".repeat(50_000) }, ok).subject).toHaveLength(MAX_SUBJECT_CHARS);
+  });
+  test("a long body is cut on a space, so no half link is collected", () => {
+    const pad = "word ".repeat(Math.ceil((MAX_STORED_CHARS + 1_000) / 5));
+    const c = cleanMail({ ...inbound("cosign-forwarded"), text: `${pad}https://example.invalid/far-past-the-limit`, hrefs: [] }, ok);
+    expect(c.body.length).toBeLessThanOrEqual(MAX_STORED_CHARS);
+    expect(c.links).toEqual([]);
+  });
+  test("a link inside the limit is still collected", () => {
+    const c = cleanMail({ ...inbound("cosign-forwarded"), text: `hi https://example.invalid/a ${"word ".repeat(10_000)}`, hrefs: [] }, ok);
+    expect(c.links).toEqual(["https://example.invalid/a"]);
   });
 });

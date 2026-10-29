@@ -25,6 +25,12 @@ export interface CleanMail {
 }
 
 export const MAX_STORED_CHARS = 20_000;
+/** A subject is cut to this before it is cleaned (radar.received keeps 200). */
+export const MAX_SUBJECT_CHARS = 1_000;
+const MAX_NAME_CHARS = 200; // radar.received's field limit
+const BODY_MARGIN = 1_000; // the body is cut to its stored limit plus this before cleaning, then to the limit after
+const MAX_FROM_CHARS = 998; // RFC 5322's line limit
+const MAX_AUTH_RESULTS_CHARS = 4_096; // real Authentication-Results headers are well under 1 KB
 const MAX_LINKS = 20;
 const MAX_LINK_CHARS = 500;
 const MAX_PAGES = 3;
@@ -77,22 +83,52 @@ function decodeEntities(s: string): string {
   });
 }
 
+const BLOCK_OPEN = /<(script|style|head|title)\b|<!--/g;
+
+/**
+ * Script, style, head and title blocks and comments, dropped in one pass with indexOf (a lazy [\s\S]*? regex is
+ * quadratic on many unclosed opens). An unclosed block is left in place, as before, and its kind is never searched again.
+ */
+function dropBlocks(html: string): string {
+  const lower = html.toLowerCase();
+  const unclosed = new Set<string>();
+  let out = "";
+  let from = 0;
+  BLOCK_OPEN.lastIndex = 0;
+  for (let m = BLOCK_OPEN.exec(lower); m; m = BLOCK_OPEN.exec(lower)) {
+    const kind = m[1] ?? "!--";
+    const close = m[1] ? `</${m[1]}` : "-->";
+    const end = unclosed.has(kind) ? -1 : lower.indexOf(close, BLOCK_OPEN.lastIndex);
+    if (end < 0) {
+      unclosed.add(kind);
+      continue;
+    }
+    const after = m[1] ? lower.indexOf(">", end) : end + 2;
+    if (after < 0) {
+      unclosed.add(kind);
+      continue;
+    }
+    out += `${html.slice(from, m.index)} `;
+    from = after + 1;
+    BLOCK_OPEN.lastIndex = from;
+  }
+  return out + html.slice(from);
+}
+
 // ponytail: regex-based, fine for mail bodies. Swap to a parser if a real email breaks it.
 /** Plain text and every href from an HTML mail body. Script, style and head are dropped. */
 export function htmlToText(html: string): { text: string; hrefs: string[] } {
-  const visible = html
-    .replace(/<(script|style|head|title)\b[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(?:link|base)\b[^>]*>/gi, " ");
+  // [^<>] rather than [^>]: an unclosed "<" then scans only to the next tag, so a run of them stays linear.
+  const visible = dropBlocks(html).replace(/<(?:link|base)\b[^<>]*>/gi, " ");
   const hrefs = [...visible.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)]
     .map((m) => decodeEntities((m[1] ?? m[2] ?? m[3] ?? "").trim()))
     .filter(Boolean);
   const text = decodeEntities(
     visible
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/?(?:p|div|tr|li|ul|ol|h[1-6]|table|blockquote|section|article|header|footer|hr)\b[^>]*>/gi, "\n")
-      .replace(/<\/?(?:td|th)\b[^>]*>/gi, " ")
-      .replace(/<[^>]*>/g, ""),
+      .replace(/<\/?(?:p|div|tr|li|ul|ol|h[1-6]|table|blockquote|section|article|header|footer|hr)\b[^<>]*>/gi, "\n")
+      .replace(/<\/?(?:td|th)\b[^<>]*>/gi, " ")
+      .replace(/<[^<>]*>/g, ""),
   )
     .replace(/[ \t ]+/g, " ")
     .replace(/ *\n */g, "\n")
@@ -112,7 +148,8 @@ export function parseAllowlist(raw: string | undefined): string[] {
 const ADDRESS = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/;
 
 /** "Name <a@b.c>" or "a@b.c" → its parts; the address only when it looks like one. */
-function parseFrom(raw: string): { name?: string; address?: string } {
+function parseFrom(full: string): { name?: string; address?: string } {
+  const raw = full.slice(-MAX_FROM_CHARS); // the end: the <address> is last; a long name only bounds the trim's work
   const angle = raw.match(/^(.*?)<([^<>]+)>\s*$/);
   const address = (angle ? angle[2]! : raw).trim().toLowerCase().replace(/^mailto:/, "");
   const name = angle?.[1]?.trim().replace(/^["'*\s]+|["'*\s]+$/g, "");
@@ -127,7 +164,7 @@ function parseFrom(raw: string): { name?: string; address?: string } {
 function dkimAligned(headers: Record<string, string>, domain: string, authservId: string): boolean {
   const key = Object.keys(headers).find((k) => k.toLowerCase() === "authentication-results");
   // A string holding several unfolded header lines: only the first is the topmost header.
-  const value = (key ? headers[key]! : "").split(/\r?\n(?=\S)/)[0]!;
+  const value = (key ? headers[key]! : "").split(/\r?\n(?=\S)/)[0]!.slice(0, MAX_AUTH_RESULTS_CHARS);
   const [server, ...clauses] = value.split(";");
   if (server?.trim().split(/\s+/)[0]?.toLowerCase() !== authservId.toLowerCase()) return false;
   return clauses.some((raw) => {
@@ -187,13 +224,32 @@ export function unwrapForward(text: string): { sender?: { name?: string; address
 }
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>"'`]*/gi; // no \b: "foohttps://…" must not survive
-const DEFANGED = /hxxps?:\/\/\S+|\S+\[\.\]\S+/gi;
+// These run on a public webhook before the sender check, so each must stay linear on a hostile run: every repeat
+// before a literal is bounded, "://" and "[.]" are found per word, and addresses are found from each "@" outward.
 const WWW_IN_TEXT = /www\.[^\s<>"'`]+/gi;
-const HOST_PATH = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*/gi; // bit.ly/abc, evil.example/a
+const HOST_PATH = /\b[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,8}\.[a-z]{2,63}\/\S*/gi; // bit.ly/abc, evil.example/a
 const MAILTO = /\bmailto:[^\s<>"'`]*/gi;
-const ANY_SCHEME = /\S*:\/\/\S*/g; // ftp://, file://, javascript://: radar.received refuses any "://" left in stored text
-const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-const TRAILING = /[.,;:!?)\]}>'"]+$/;
+const TOKEN = /\S+/g; // any word holding "://" (ftp://, hxxps://) or "[.]" (evil[.]com) becomes [link]: radar.received refuses "://"
+const EMAIL_DOMAIN = /[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}/y;
+const EMAIL_LOCAL = /[\w.+-]/;
+const TRAILING = /[.,;:!?)\]}>'"]{1,64}$/;
+
+/** Each local@domain (local at most 64 characters, read back from the "@") becomes [email], in one linear pass. */
+function replaceEmails(text: string): string {
+  let out = "";
+  let from = 0;
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+    let start = at;
+    while (start > from && at - start < 64 && EMAIL_LOCAL.test(text[start - 1]!)) start--;
+    EMAIL_DOMAIN.lastIndex = at + 1;
+    const domain = start < at ? EMAIL_DOMAIN.exec(text) : null;
+    if (!domain) continue;
+    out += `${text.slice(from, start)}[email]`;
+    from = at + 1 + domain[0].length;
+    at = from - 1;
+  }
+  return out + text.slice(from);
+}
 
 function httpLink(raw: string): string | null {
   try {
@@ -218,16 +274,13 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
   };
   const asLink = (m: string) => "[link]" + m.slice(m.replace(TRAILING, "").length);
   // NFKC first, so fullwidth and small-form look-alikes (ｈttps, ：, ＠, ﹫) become the ASCII the patterns catch.
-  const stripped = text
+  const linked = text
     .normalize("NFKC")
     .replace(MAILTO, "[email]")
     .replace(URL_IN_TEXT, toLink)
-    .replace(DEFANGED, asLink)
-    .replace(ANY_SCHEME, asLink)
-    .replace(WWW_IN_TEXT, asLink)
-    .replace(EMAIL, "[email]")
-    .replace(HOST_PATH, asLink)
-    .replace(/@/g, "(at)");
+    .replace(TOKEN, (t) => (t.includes("://") || t.includes("[.]") ? asLink(t) : t))
+    .replace(WWW_IN_TEXT, asLink);
+  const stripped = replaceEmails(linked).replace(HOST_PATH, asLink).replace(/@/g, "(at)");
   const links = [...new Set([...found, ...hrefs].map(httpLink).filter((l): l is string => l !== null))]
     .filter((l) => l.length <= MAX_LINK_CHARS)
     .slice(0, MAX_LINKS);
@@ -237,14 +290,22 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
   return { text: stripped, links, bandcampPages, hosts };
 }
 
+/** At most `max` characters, cut at the last whitespace so a link is never cut in half (and then collected). */
+function cutOnSpace(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"), cut.lastIndexOf("\t"));
+  return space > 0 ? cut.slice(0, space) : cut;
+}
+
 /** The console's one call: unwrap the forward, strip links and addresses from body and subject, cap the body. */
 export function cleanMail(mail: InboundMail, decision: Extract<SenderDecision, { ok: true }>): CleanMail {
   const forward = unwrapForward(mail.text);
-  const subject = stripLinks(mail.subject);
-  const body = stripLinks(forward.body, [...mail.hrefs, ...subject.links]);
+  const subject = stripLinks(mail.subject.slice(0, MAX_SUBJECT_CHARS));
+  const body = stripLinks(cutOnSpace(forward.body, MAX_STORED_CHARS + BODY_MARGIN), [...mail.hrefs, ...subject.links]);
   const from = forward.sender ?? parseFrom(mail.from);
   const sender = {
-    ...(from.name ? { name: stripLinks(from.name).text } : {}),
+    ...(from.name ? { name: stripLinks(from.name.slice(0, MAX_NAME_CHARS)).text.slice(0, MAX_NAME_CHARS) } : {}),
     ...(from.address ? { address: from.address } : {}),
   };
   return {

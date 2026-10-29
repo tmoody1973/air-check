@@ -90,6 +90,7 @@ export function findEmbargo(text: string, receivedAt: number): { until: string |
 
 const unquote = (s: string | undefined) => (s ?? "").trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, "").trim();
 // ponytail: written against SYNTHETIC fixtures (fixtures/email/bandcamp-*.json). Re-fit to real Bandcamp mail in Task 7.
+const MAX_TEMPLATE_LINE = 500;
 const BANDCAMP_LINE = /^\s*(.+?)\s+just\s+(?:released|announced)\s+(.+?)(?:\s+by\s+(.+?))?(?:,?\s+available for pre-?order)?\s*[.!]?\s*$/i;
 
 /**
@@ -99,6 +100,7 @@ const BANDCAMP_LINE = /^\s*(.+?)\s+just\s+(?:released|announced)\s+(.+?)(?:\s+by
 export function parseBandcampEmail(_subject: string, text: string): ReleaseFields | null {
   const lines = text.split("\n");
   for (const line of lines) {
+    if (line.length > MAX_TEMPLATE_LINE) continue; // the lazy groups are polynomial on a long line; the template's line is short
     const m = line.match(BANDCAMP_LINE);
     if (!m) continue;
     const [actor, title, by] = [unquote(m[1]), unquote(m[2]), unquote(m[3])];

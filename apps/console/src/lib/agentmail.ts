@@ -26,7 +26,7 @@ export async function getMessage(messageId: string): Promise<unknown> {
 
   let res = await get();
   if (res.status === 429) {
-    const seconds = Number(res.headers.get("retry-after"));
+    const seconds = Number(res.headers.get("retry-after") ?? NaN); // missing → NaN → the 1 s default, not 0
     await new Promise((r) => setTimeout(r, Number.isFinite(seconds) ? Math.min(seconds * 1000, MAX_RETRY_WAIT_MS) : 1000));
     res = await get();
   }

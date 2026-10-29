@@ -42,6 +42,22 @@ describe("agentmail client", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("a 429 with no Retry-After waits 1 s before the retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const { getMessage } = await import("./agentmail");
+      fetchSpy.mockResolvedValueOnce(json({}, 429)).mockResolvedValueOnce(json({ ok: 1 }));
+      const got = getMessage("m1");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await got).toEqual({ ok: 1 });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a second 429 throws AgentMailError(429); no third try", async () => {
     const { getMessage, AgentMailError } = await import("./agentmail");
     fetchSpy.mockResolvedValue(json({}, 429, { "retry-after": "0" }));

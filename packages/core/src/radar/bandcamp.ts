@@ -33,7 +33,7 @@ const PLAYER_META = new Set(["og:video", "og:video:secure_url", "twitter:player"
 // ponytail: regex over <meta> tags, fine for one meta tag on a Bandcamp page. Swap to a parser if a real page breaks it.
 /** The album or track id from the page's own player URL. Nothing else from the page is kept. */
 export function readBandcampEmbed(html: string): BandcampEmbed | null {
-  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+  for (const tag of html.match(/<meta\b[^<>]*>/gi) ?? []) {
     const attrs: Record<string, string> = {};
     for (const a of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[a[1]!.toLowerCase()] = a[2] ?? a[3] ?? "";
     const key = (attrs.property ?? attrs.name ?? "").toLowerCase();

@@ -53,7 +53,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const event = (message: unknown, event_type = "message.received") => JSON.stringify({ event_type, message });
+const INBOX = "rhythmlab@agentmail.to";
+// Every delivery names its inbox; the fixtures are messages only, so the radar's inbox is added unless a test sets one.
+const event = (message: Record<string, unknown>, event_type = "message.received") =>
+  JSON.stringify({ event_type, message: { inbox_id: INBOX, ...message } });
 
 function signed(body: string, opts: { at?: Date; id?: string; secret?: string } = {}) {
   const id = opts.id ?? "msg_test_1";
@@ -120,6 +123,31 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     expect(convex.calls).toHaveLength(0);
   });
 
+  it("a malformed secret → 503 (not set up), not 400", async () => {
+    vi.stubEnv("AGENTMAIL_WEBHOOK_SECRET", "whsec_!!!*");
+    const res = await post(event(fixture("cosign-forwarded.json")));
+    expect(res.status).toBe(503);
+    expect(convex.calls).toHaveLength(0);
+  });
+
+  it("a chunked body over 1.5 MB with no Content-Length → 413, read no further than the limit", async () => {
+    const chunk = new Uint8Array(256 * 1024).fill(97);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        sent += 1;
+        if (sent > 40) return c.close(); // 10 MB if the route kept reading
+        c.enqueue(chunk);
+      },
+    });
+    const { POST } = await import("./route");
+    const req = new Request("http://internal:3000/api/agentmail/inbound", { method: "POST", body: stream, duplex: "half" } as RequestInit);
+    expect(req.headers.get("content-length")).toBeNull();
+    expect((await POST(req)).status).toBe(413);
+    expect(sent).toBeLessThanOrEqual(8);
+    expect(convex.calls).toHaveLength(0);
+  });
+
   it("a body over 1.5 MB → 413, nothing stored", async () => {
     const body = event({ ...fixture("cosign-forwarded.json"), text: "a".repeat(1_600_000) });
     expect((await post(body)).status).toBe(413);
@@ -170,6 +198,16 @@ describe("delivery (Review Focus 4)", () => {
     const res = await post(event(fixture("cosign-forwarded.json"), "message.sent"));
     expect(res.status).toBe(200);
     expect(convex.calls).toHaveLength(0);
+  });
+
+  it("a delivery for another inbox → 200, nothing stored and nothing fetched", async () => {
+    for (const inbox_id of ["someone-else@agentmail.to", undefined]) {
+      const { text: _t, html: _h, ...bare } = fixture("cosign-forwarded.json"); // body missing: would otherwise fetch
+      const res = await post(event({ ...bare, inbox_id }));
+      expect(res.status, String(inbox_id)).toBe(200);
+    }
+    expect(convex.calls).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("a signed body that is not JSON → 400, no Convex call", async () => {
