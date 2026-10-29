@@ -85,11 +85,9 @@ function audioOf(date: string, folders: BoxFolder[] | undefined, q: Question[], 
     ...(a.hour1 && { hour1: file(a.hour1) }), ...(a.hour2 && { hour2: file(a.hour2) }), ...(a.pattern && { pattern: a.pattern }),
   };
   const mismatch = a.status === "ask" && a.flags.includes("date mismatch");
-  if (c?.folderDate) {
-    // The folder's date stands; the stamp still feeds the rerun hint.
-    if (mismatch) return { audio: { ...audio, status: "ready", flags: a.flags.filter((f) => f !== "date mismatch") }, ...stamp };
-    stale();
-  }
+  // The folder's date stands; the stamp still feeds the rerun hint. M4: once the stamps agree there is nothing to
+  // settle, so the fix is ignored silently (not stale): the audio is as assembled.
+  if (c?.folderDate && mismatch) return { audio: { ...audio, status: "ready", flags: a.flags.filter((f) => f !== "date mismatch") }, ...stamp };
   if (a.status === "ask") {
     if (mismatch) {
       const q0 = ask("date", `The Box folder for ${date} holds hour files stamped ${a.stampDate ?? "with another date"}. Which date is this show?`);

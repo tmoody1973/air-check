@@ -209,6 +209,14 @@ describe("corrections (Plan 6b)", () => {
       expect(e!.audio).toMatchObject({ status: "ready", folderId: "f1", hour1: { id: "a" }, hour2: { id: "b" } });
       expect(e!.questions.map((q) => [q.kind, q.rerunOf])).toEqual([["rerun", "2026-01-30"]]);
     });
+
+    test("M4: { folderDate } once the stamps are fixed (no mismatch) is ignored silently: not stale, audio as assembled", () => {
+      const ok = found({ box: new Map([[D, [folder("f1", "2-6-26", [wav("a", "9125.wav"), wav("b", "9126.wav")])]]]) });
+      const [e] = fixed(ok, { folderDate: true });
+      const [plain] = one(ok);
+      expect(e!.audio).toEqual(plain!.audio);
+      expect(e!.correctionStale).toBeUndefined();
+    });
   });
 
   describe("stale corrections (Review Focus 1)", () => {
