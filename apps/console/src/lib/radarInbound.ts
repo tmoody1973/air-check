@@ -36,7 +36,7 @@ export interface InboundDeps {
 export type InboundResult =
   | { status: "skipped" } // no message id or sender: nothing to key a row on
   | { status: "unreadable" } // AgentMail could not be read: nothing written, try again later
-  | { status: "unstored" } // Convex refused or failed: nothing written, try again later
+  | { status: "unstored"; code?: string } // Convex refused or failed: nothing written, try again later. code: ConvexError's, if any
   | { status: "stored"; fresh: boolean; kept: true }
   | { status: "stored"; fresh: boolean; kept: false; reason: string };
 
@@ -54,6 +54,8 @@ export async function handleInbound(message: unknown, deps: InboundDeps, receive
     } catch {
       return { status: "unreadable" };
     }
+    // No verdict at all is AgentMail not ready (or changed), not a refusal: write nothing, so the delivery is retried.
+    if (!verdict.auth) return { status: "unreadable" };
   }
 
   const decision = senderDecision(mail, deps.allowlist, verdict);
@@ -70,8 +72,10 @@ export async function handleInbound(message: unknown, deps: InboundDeps, receive
   let fresh: boolean;
   try {
     ({ fresh } = await deps.received(args));
-  } catch {
-    return { status: "unstored" };
+  } catch (e) {
+    const code = (e as { data?: { code?: unknown } } | null)?.data?.code;
+    // Only a plain code word (UNAUTHORIZED, BAD_INPUT): never the error's message, which can quote what was sent.
+    return typeof code === "string" && /^[A-Z_]{1,32}$/.test(code) ? { status: "unstored", code } : { status: "unstored" };
   }
   return decision.ok ? { status: "stored", fresh, kept: true } : { status: "stored", fresh, kept: false, reason: decision.reason };
 }

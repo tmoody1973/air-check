@@ -144,6 +144,8 @@ describe("senderDecision (R12: AgentMail's own verdict, read from its API)", () 
       seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["received", "unauthenticated"]),
       seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["spam"]),
       seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["blocked"]),
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["Unauthenticated"]), // labels compared case-insensitively
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["SPAM"]),
       seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, null), // labels unknown: cannot rule out "unauthenticated"
       seen(null),
       null,

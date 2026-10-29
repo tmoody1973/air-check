@@ -204,7 +204,7 @@ export function senderDecision(mail: Pick<InboundMail, "from" | "text">, allowli
   const auth = verdict?.auth;
   const labels = verdict?.labels;
   const confirmed =
-    auth?.dmarc === "pass" && auth.dmarc_domain !== undefined && aligned(auth.dmarc_domain, domain) && labels != null && !labels.some((l) => BAD_LABELS.includes(l));
+    auth?.dmarc === "pass" && auth.dmarc_domain !== undefined && aligned(auth.dmarc_domain, domain) && labels != null && !labels.some((l) => BAD_LABELS.includes(l.toLowerCase()));
   if (!confirmed) return { ok: false, reason: NOT_CONFIRMED };
   const original = unwrapForward(mail.text).sender?.address;
   const bandcamp = domain === BANDCAMP_DOMAIN || original?.endsWith(`@${BANDCAMP_DOMAIN}`);

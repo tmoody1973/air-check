@@ -38,7 +38,7 @@ const line = (n: number, r: InboundResult, dryRun: boolean): string => {
     case "unreadable":
       return `#${n} failed (AgentMail)`;
     case "unstored":
-      return `#${n} failed (Convex)`;
+      return `#${n} failed (Convex${r.code ? ` ${r.code}` : ""})`;
     case "stored":
       return `#${n} ${r.kept ? "kept" : `ignored ${r.reason}`}${!dryRun && !r.fresh ? " (already stored)" : ""}`;
   }

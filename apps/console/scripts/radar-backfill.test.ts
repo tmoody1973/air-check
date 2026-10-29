@@ -3,7 +3,7 @@ import { getFunctionName, type FunctionReference } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The R12 catch-up script, with AgentMail played by a fetch spy and Convex by a fake client. Nothing leaves the machine.
-const convex = vi.hoisted(() => ({ urls: [] as string[], calls: [] as { fn: unknown; args: Record<string, unknown> }[] }));
+const convex = vi.hoisted(() => ({ urls: [] as string[], calls: [] as { fn: unknown; args: Record<string, unknown> }[], fail: [] as unknown[] }));
 vi.mock("convex/browser", () => ({
   ConvexHttpClient: class {
     constructor(url: string) {
@@ -11,6 +11,7 @@ vi.mock("convex/browser", () => ({
     }
     async mutation(fn: unknown, args: Record<string, unknown>) {
       convex.calls.push({ fn, args });
+      if (convex.fail.length) throw convex.fail.shift();
       return { fresh: true };
     }
   },
@@ -54,6 +55,7 @@ beforeEach(() => {
   out.length = 0;
   convex.urls.length = 0;
   convex.calls.length = 0;
+  convex.fail.length = 0;
   fetchSpy.mockClear();
   vi.stubGlobal("fetch", fetchSpy);
   vi.stubEnv("AGENTMAIL_API_KEY", SECRETS.AGENTMAIL_API_KEY);
@@ -121,6 +123,26 @@ describe("radar-backfill", () => {
     } finally {
       FULL.set(bandcamp.message_id, bandcamp);
     }
+  });
+
+  it("a Convex failure prints its error code only (never the message, subject, sender, id or a secret)", async () => {
+    const { ConvexError } = await import("convex/values");
+    convex.fail.push(
+      new ConvexError({ code: "UNAUTHORIZED" }),
+      new ConvexError({ code: "BAD_INPUT", message: "detail tarik@radiomilwaukee.org" }),
+      new Error(`boom ${SECRETS.INBOX_TOKEN}`),
+      new ConvexError({ code: "not a code <x@evil.example>" }),
+    );
+    const { backfill } = await import("./radar-backfill");
+    expect(await backfill({ since: SINCE, dryRun: false }, print)).toBe(1);
+    expect(out).toEqual([
+      "#1 failed (Convex UNAUTHORIZED)",
+      "#2 failed (Convex BAD_INPUT)",
+      "#3 failed (Convex)",
+      "#4 failed (Convex)",
+      "4 messages: 0 kept, 0 ignored, 0 skipped, 4 failed",
+    ]);
+    expectNothingPrivate(out);
   });
 
   it("refuses to run without a sender list, or (for a real run) without the Convex URL and token", async () => {

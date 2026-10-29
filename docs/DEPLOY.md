@@ -657,7 +657,8 @@ Webhook id: _(write it here after registering)_. To rotate the secret: delete th
 
 Each of these was built from documentation or a guess, not a live test. Check each once and record the result in `docs/SPIKES.md`.
 
-- **Verified live on 2026-10-29: the payload names the inbox, and the sender verdict.** Deliveries carry `inbox_id: rhythmlab@agentmail.to`. AgentMail's message has **no** `Authentication-Results` header (its `headers` hold only ARC-*, Delivered-To, Reply-To and X-* lines). Instead every message carries `authentication_results` (`spf`, `dkim`, `dmarc`, and `spf_domain`, `dkim_domain`, `dmarc_domain`) and `labels`. Seen: Bandcamp's auto-forwarded mail has `dkim: none` but `dmarc: pass` for `bandcamp.com`; mail from `tarik@radiomilwaukee.org` passes all three for `radiomilwaukee.org`. This is why the header check was replaced (ruling R12). If AgentMail's verdict ever goes missing, every listed sender shows "AgentMail could not confirm the sender".
+- **Verified live on 2026-10-29: the payload names the inbox, and the sender verdict.** Deliveries carry `inbox_id: rhythmlab@agentmail.to`. AgentMail's message has **no** `Authentication-Results` header (its `headers` hold only ARC-*, Delivered-To, Reply-To and X-* lines). Instead every message carries `authentication_results` (`spf`, `dkim`, `dmarc`, and `spf_domain`, `dkim_domain`, `dmarc_domain`) and `labels`. Seen: Bandcamp's auto-forwarded mail has `dkim: none` but `dmarc: pass` for `bandcamp.com`; mail from `tarik@radiomilwaukee.org` passes all three for `radiomilwaukee.org`. This is why the header check was replaced (ruling R12). If AgentMail's verdict ever goes missing, the console answers 503 and stores nothing for a listed sender, so AgentMail retries; `dc logs console` shows `radar step=get-message ok=false` and the catch-up script shows `failed (AgentMail)`. A verdict that is present but failing is stored as "AgentMail could not confirm the sender".
+- **Live spoof check.** Send a forged `From: noreply@bandcamp.com` from a non-Bandcamp server to `rhythmlab@agentmail.to`. Expect AgentMail to drop it, or Not added to show "AgentMail could not confirm the sender". It must never appear on the Bandcamp tab.
 - **Token Factory accepts the reader's settings.** The reader sends `chat_template_kwargs` (thinking off). Expect, in `journalctl -u aircheck-ingest`, co-signs saved with no 400 error; in the Token Factory usage page, answers with content and about zero reasoning tokens. On a 400 the reader retries once without it.
 - **Bandcamp answers our user-agent.** The first Bandcamp email's player should become ready within two passes. If every page fails, the ingest log names the code.
 - **The real Bandcamp email and page.** The email parser and the page reader (cover art from `og:image`, tags, about) were written against made-up samples. Compare one real email and one real page with what Air Check shows.
@@ -679,7 +680,7 @@ pnpm --filter console exec tsx scripts/radar-backfill.ts --since 2026-10-27     
 unset RADAR_SENDERS CONVEX_URL
 ```
 
-Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail|Convex)`; the last line is the counts. Exit code 1 means something failed: run it again. Kept emails then appear in the radar within a minute (the ingest worker reads them).
+Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail)` / `#n failed (Convex <code>)` (for example `UNAUTHORIZED`: the `INBOX_TOKEN` does not match Convex); the last line is the counts. Exit code 1 means something failed: run it again. Kept emails then appear in the radar within a minute (the ingest worker reads them).
 
 ## Certificates and renewal dates
 

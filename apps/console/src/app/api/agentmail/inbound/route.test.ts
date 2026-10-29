@@ -178,7 +178,7 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
       { authentication_results: { dmarc: "pass", dmarc_domain: "attacker.com" } },
       { authentication_results: { dmarc: "pass", dmarc_domain: "org" } },
       { labels: ["received", "unauthenticated"] },
-      { authentication_results: undefined },
+      { authentication_results: {} }, // present but holding no verdict
     ];
     for (const [i, over] of refusals.entries()) {
       const id = `<r12-${i}@test.invalid>`;
@@ -212,6 +212,17 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(convex.calls).toHaveLength(0);
     expect(logs).toEqual(["radar step=get-message ok=false"]);
+  });
+
+  it("R12: AgentMail's message has no authentication_results (missing or null) → 503, nothing written, so Svix retries", async () => {
+    const m = fixture("cosign-forwarded.json");
+    for (const [i, over] of [{ authentication_results: undefined }, { authentication_results: null }, { authentication_results: "pass" }].entries()) {
+      const id = `<no-verdict-${i}@test.invalid>`;
+      serve({ ...m, message_id: id }, over);
+      expect((await post(event({ ...m, message_id: id }))).status).toBe(503);
+    }
+    expect(convex.calls).toHaveLength(0);
+    expect(logs).toEqual(Array(3).fill("radar step=get-message ok=false"));
   });
 
   it("RADAR_SENDERS unset → every sender ignored as not on the list, and AgentMail is never asked", async () => {

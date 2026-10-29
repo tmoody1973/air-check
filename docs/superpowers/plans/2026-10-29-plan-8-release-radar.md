@@ -15,7 +15,7 @@
 **Architecture:**
 - **The console only receives.** AgentMail posts `message.received` to `https://aircheck.rhythmlabradio.com/api/agentmail/inbound` (ARCHITECTURE 3.7: the webhook enters the console). The route:
   - checks the Svix signature against the raw body;
-  - checks the sender against the allowlist and DKIM, so a stranger's text is never stored;
+  - checks the sender against the allowlist and DKIM, so a stranger's text is never stored; *(Superseded by R12 (AgentMail verdict).)*
   - unwraps the forward and strips every link and email address;
   - stores the cleaned email once per message id;
   - answers 200.
@@ -71,7 +71,7 @@
   - Design spec 6.2 ("Release radar … uses the same accept/edit/dismiss interaction as theme cards").
 - **Reference code:** TarikOS (`~/Projects/jarvis`, Tarik's own code, MIT): `src/app/api/agentmail/inbound/route.ts`, `src/lib/agentmail.ts` and `src/lib/agentmailLib.ts`. Ideas are reused and the code is rewritten. From it, keep:
   - `from_ ?? from` (TarikOS found `from_` on the wire);
-  - DKIM read from `Authentication-Results`;
+  - DKIM read from `Authentication-Results`; *(Superseded by R12 (AgentMail verdict).)*
   - an exact-match allowlist where unset means closed;
   - "never defaulted" secrets.
 
@@ -172,7 +172,7 @@
    - Missing or wrong signature → 400.
    - A correctly signed delivery replayed 10 minutes later → 400.
    - In all three, nothing reaches Convex.
-   - A validly signed delivery whose From is an allowlisted address but whose DKIM did not pass (or is absent) → an `inbox` row `ignored`, "Sender's signature (DKIM) did not pass", with no body stored. The ingest worker never sees it.
+   - A validly signed delivery whose From is an allowlisted address but whose DKIM did not pass (or is absent) → an `inbox` row `ignored`, "Sender's signature (DKIM) did not pass", with no body stored. The ingest worker never sees it. *(Superseded by R12 (AgentMail verdict).)*
    - **Owned by Task 3**, with the sender rules in Task 1.
 
 ---
@@ -254,9 +254,9 @@
     - No text and no html → `bodyMissing`.
     - Attachments are counted, never read: the fixture's attachment has a `content` field, and the result holds only the count.
   - **`senderDecision`.**
-    - An exact match with an aligned DKIM pass → ok.
+    - An exact match with an aligned DKIM pass → ok. *(Superseded by R12 (AgentMail verdict).)*
     - `tarik@radiomilwaukee.org.evil.com` and `nottarik@…` → "Sender not on the list".
-    - Allowlisted, with `dkim=fail`, no header, or `dkim=pass header.d=evil.example` → "Sender's signature (DKIM) did not pass".
+    - Allowlisted, with `dkim=fail`, no header, or `dkim=pass header.d=evil.example` → "Sender's signature (DKIM) did not pass". *(Superseded by R12 (AgentMail verdict): DMARC pass aligned with the From domain, from AgentMail's API; refusal "AgentMail could not confirm the sender".)*
     - An empty allowlist refuses everyone.
     - **Tabs.** An auto-forwarded Bandcamp fixture → `tab: "bandcamp"`. Tarik forwarding a Bandcamp email by hand → `bandcamp`. Tarik forwarding a label email → `cosign`.
   - **`unwrapForward`.** The Gmail and Apple fixtures give the original sender, and Tarik's note is gone.
@@ -462,7 +462,7 @@ The console receives and stores. It runs no model and fetches no link.
     - A wrong signature, a missing `svix-signature`, and a body changed by one byte after signing → 400.
     - A signature dated 10 minutes ago → 400.
     - In each case the fake Convex has zero calls.
-    - A valid signature with From `tarik@radiomilwaukee.org` and `dkim=fail` → one `radar.received` with `mail: null` and "Sender's signature (DKIM) did not pass".
+    - A valid signature with From `tarik@radiomilwaukee.org` and `dkim=fail` → one `radar.received` with `mail: null` and "Sender's signature (DKIM) did not pass". *(Superseded by R12 (AgentMail verdict): DMARC pass aligned with the From domain, from AgentMail's API; refusal "AgentMail could not confirm the sender".)*
   - **Delivery (Review Focus 4).**
     - The same signed delivery posted twice → `received` twice. Convex returns `fresh: false` the second time, and the fake shows one stored row.
     - A non-`message.received` event → 200, with no Convex call.
@@ -651,7 +651,7 @@ Run the Impeccable design skill against `PRODUCT.md` and `DESIGN.md` first. This
     - The undo is "Back to New" (R10, Task 6b cleanup: was "Move back to New").
   - **Not added** (real workspace only, below both tabs). Each row shows its time, sender and subject, and the plain reason:
     - "Sender not on the list. Add it to RADAR_SENDERS to accept their mail."
-    - "Sender's signature (DKIM) did not pass."
+    - "Sender's signature (DKIM) did not pass." *(Superseded by R12 (AgentMail verdict): DMARC pass aligned with the From domain, from AgentMail's API; refusal "AgentMail could not confirm the sender".)*
     - "Not a release email."
     - "Couldn't read it: The artist '…' is not in the email."
     - "Waiting to be read" (older than 10 minutes: the ingest worker may be down).
@@ -743,7 +743,7 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
      - the console only receives;
      - the ingest worker reads (code parsing, the extractor, the Bandcamp fetch);
      - link stripping;
-     - the DKIM-aligned allowlist (open question 6 answered, and PRD open question 4);
+     - the allowlist plus the R12 verdict rule: AgentMail's own `authentication_results` read from its API, DMARC pass aligned with the From domain, no `unauthenticated`/`spam`/`blocked` label (open question 6 answered, and PRD open question 4);
      - the two tabs and statuses;
      - the Bandcamp fetch as built: what it checks, that it keeps only the player id, and that the page goes to no model (stricter than 3.7's "passed to the same no-tools extractor");
      - the embargo enforcement points.
@@ -771,8 +771,8 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
 - **`text` on HTML-only mail.** The code falls back to `htmlToText`.
 - **Retries.** AgentMail's retry schedule, and whether repeated failures disable the endpoint. Svix's usual behaviour is assumed and not confirmed for AgentMail.
 - **Svix's 5-minute timestamp tolerance.** This is the library's default. The replay test pins it.
-- **`inbox_id` on the payload.** Whether every `message.received` delivery names its inbox. If not, every email is skipped, and the console logs `radar step=inbox ok=false`.
-- **Header order.** Whether AgentMail's header arrays keep the topmost header first (R4 trusts only the first `Authentication-Results`).
+- **`inbox_id` on the payload.** Verified live 2026-10-29: deliveries carry `inbox_id: rhythmlab@agentmail.to`.
+- **Live spoof check.** Send a forged `From: noreply@bandcamp.com` from a non-Bandcamp server. Expect AgentMail to drop it, or Not added to show "AgentMail could not confirm the sender".
 - **Token Factory and `chat_template_kwargs`** (R7). Content non-null, reasoning tokens about 0, no 400.
 - **Bandcamp and our user-agent.** Whether Bandcamp answers the ingest worker's requests.
 - **The real Bandcamp page markup.** Cover art (`og:image`), tags and about, as Task 6b reads them.
