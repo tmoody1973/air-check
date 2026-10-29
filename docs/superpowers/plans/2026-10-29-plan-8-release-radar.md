@@ -648,7 +648,7 @@ Run the Impeccable design skill against `PRODUCT.md` and `DESIGN.md` first. This
     - **Edit** opens label, genre, type and date fields, and an embargo control: "Set date", "Date not known", **Clear embargo** (which asks once: "This lets it reach Mixcloud.").
     - **Pass** takes an optional one-line reason.
     - **Played**.
-    - The undo is "Move back to New".
+    - The undo is "Back to New" (R10, Task 6b cleanup: was "Move back to New").
   - **Not added** (real workspace only, below both tabs). Each row shows its time, sender and subject, and the plain reason:
     - "Sender not on the list. Add it to RADAR_SENDERS to accept their mail."
     - "Sender's signature (DKIM) did not pass."

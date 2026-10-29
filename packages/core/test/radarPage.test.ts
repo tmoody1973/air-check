@@ -24,6 +24,9 @@ describe("bandcampArtUrl: only an https image on a *.bcbits.com host", () => {
     "https://f4.bcbits.com/img/../a1_5.jpg",
     "javascript:alert(1)",
     "",
+    "https://xbcbits.com/img/a_1.jpg",
+    "https://f4.xbcbits.com/img/a_1.jpg",
+    "https://f4.bcbits.com./img/a_1.jpg",
   ])("refused: %s", (u) => expect(bandcampArtUrl(u)).toBeNull());
 });
 
@@ -88,6 +91,12 @@ describe("readBandcampDetails", () => {
     expect(d.about!.length).toBeLessThanOrEqual(MAX_ABOUT_CHARS);
     expect(MAX_TAGS).toBe(12);
     expect(MAX_ABOUT_CHARS).toBe(2_000);
+  });
+
+  test("ordinary links never use up the tag scan: 300 plain links, then 3 tags", () => {
+    const plain = Array.from({ length: 300 }, (_, i) => `<a href="https://x.example/${i}">link ${i}</a>`).join("\n");
+    const tags = ["soul", "jazz", "house"].map((t) => `<a class="tag" href="https://bandcamp.com/discover/${t}">${t}</a>`).join("\n");
+    expect(readBandcampDetails(`${plain}\n${tags}`).tags).toEqual(["soul", "jazz", "house"]);
   });
 
   test("an about of only whitespace or tags is no about", () => {

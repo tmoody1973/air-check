@@ -10,7 +10,7 @@ export const MAX_TAG_CHARS = 40;
 export const MAX_ABOUT_CHARS = 2_000;
 const MAX_ART_CHARS = 500;
 const MAX_ABOUT_HTML = 20_000; // the about block is cut to this before it is read
-const MAX_TAG_LINKS = 200; // tag links looked at, at most
+const MAX_TAG_LINKS = 200; // tag-class links looked at, at most (the scan itself is linear)
 
 export type BandcampDetails = { art?: string; tags?: string[]; about?: string };
 
@@ -73,8 +73,9 @@ export function readBandcampDetails(html: string): BandcampDetails {
   const tags: string[] = [];
   let seen = 0;
   for (const m of html.matchAll(TAG_LINK)) {
-    if (tags.length >= MAX_TAGS || ++seen > MAX_TAG_LINKS) break;
-    if (!TAG_CLASS.test(m[1]!)) continue;
+    if (tags.length >= MAX_TAGS) break;
+    if (!TAG_CLASS.test(m[1]!)) continue; // ordinary links never count toward the cap
+    if (++seen > MAX_TAG_LINKS) break;
     const tag = bandcampTag(htmlToText(m[2]!).text);
     if (tag && !tags.includes(tag)) tags.push(tag);
   }

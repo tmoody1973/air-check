@@ -158,7 +158,7 @@ export function RadarView({
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div role="group" aria-label="Filters" className="flex flex-wrap gap-2">
-          <div role="group" aria-label="Status" className="contents">
+          <div role="group" aria-label="Status" className="flex flex-wrap gap-2">
             {FILTERS.map(({ f, label }) => {
               const on = f === filter;
               return (

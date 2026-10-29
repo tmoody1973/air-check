@@ -243,7 +243,7 @@ function Actions({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
             <button type="button" className={ACT} onClick={() => setOpen("pass")}>Pass</button>
           </>
         )}
-        {s !== "new" && <button type="button" className={ACT} disabled={busy} onClick={() => move("new", "moved back to New")}>Move back to New</button>}
+        {s !== "new" && <button type="button" className={ACT} disabled={busy} onClick={() => move("new", "moved back to New")}>Back to New</button>}
         <button type="button" className={ACT} onClick={() => setOpen("edit")}>Edit</button>
       </div>
       {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
@@ -313,13 +313,14 @@ function About({ text }: { text: string }) {
 
 /** Cover art: a lazy image with no referrer, only from Bandcamp's image host. The demo shows a placeholder (copyright). */
 function Art({ r, ctx, size }: { r: Release; ctx: ReleaseCtx; size: "sm" | "md" }) {
+  const px = size === "md" ? 64 : 56;
   const box = size === "md" ? "size-16" : "size-14";
   if (ctx.demo)
     return r.source === "cosign" ? null : (
       <span className={`${box} flex shrink-0 items-center justify-center rounded-control border border-dashed border-line-strong text-center font-mono text-[10.5px] leading-tight text-muted`}>[Cover art]</span>
     );
   if (!r.art || bandcampArtUrl(r.art) !== r.art) return null;
-  return <img src={r.art} alt={`Cover art for ${r.title} by ${r.artist}`} loading="lazy" referrerPolicy="no-referrer" width={64} height={64} className={`${box} shrink-0 rounded-control border border-line bg-chip object-cover`} />;
+  return <img src={r.art} alt={`Cover art for ${r.title} by ${r.artist}`} loading="lazy" referrerPolicy="no-referrer" width={px} height={px} className={`${box} shrink-0 rounded-control border border-line bg-chip object-cover`} />;
 }
 
 function StarIcon({ on }: { on: boolean }) {

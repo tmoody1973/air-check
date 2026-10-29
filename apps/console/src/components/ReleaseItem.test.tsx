@@ -131,12 +131,12 @@ describe("actions", () => {
     await waitFor(() => expect(status(actions)[2]).toEqual({ releaseId: "r1", status: "passed", reason: "Too slow" }));
   });
 
-  it("the undo is Move back to New", async () => {
+  it("the undo is Back to New (R10: short enough that the row fits a phone)", async () => {
     for (const s of ["considering", "played", "passed"] as const) {
       cleanup();
       const { actions } = setup(rel({ status: s }));
       expect(screen.queryByRole("button", { name: "Consider" })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Move back to New" }));
+      fireEvent.click(screen.getByRole("button", { name: "Back to New" }));
       await waitFor(() => expect(status(actions)).toEqual([{ releaseId: "r1", status: "new" }]));
     }
   });
@@ -270,6 +270,21 @@ describe("art, tags, about and favorite (Task 6b)", () => {
     expect(on).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(on);
     await waitFor(() => expect(again.actions.setFavorite).toHaveBeenCalledWith({ releaseId: "r1", favorite: false }));
+  });
+
+  it("R10: a Considering row's actions are Played, Pass, Back to New and Edit", () => {
+    setup(rel({ status: "considering" }));
+    const row = screen.getByRole("button", { name: "Played" }).parentElement!;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Played", "Pass", "Back to New", "Edit"]);
+  });
+
+  it("the cover image's width and height match its box: 56 in a row, 64 on a card", () => {
+    setup(rel(page), { layout: "row" });
+    expect(screen.getByRole("img")).toHaveAttribute("width", "56");
+    expect(screen.getByRole("img")).toHaveAttribute("height", "56");
+    cleanup();
+    setup(rel(page));
+    expect(screen.getByRole("img")).toHaveAttribute("width", "64");
   });
 
   it("phone: the action row still holds only Consider, Played, Pass and Edit", () => {
