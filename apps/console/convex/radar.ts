@@ -390,7 +390,10 @@ export const embedResult = mutation({
       const blocked = NOT_READ.has(result.failed);
       await ctx.db.insert("activity", { ...row, title: blocked ? "Bandcamp page not read" : "Read a Bandcamp page for its player", result: blocked ? "blocked" : "allowed", reason: result.failed });
     } else {
-      const details = pageDetails(result);
+      // A re-read (radar.reparse, B2: the release already has a player) only adds what the page gave; a detail it did not
+      // find this time is kept, never erased.
+      const read = pageDetails(result);
+      const details = rel.embed ? Object.fromEntries(Object.entries(read).filter(([, val]) => val !== undefined)) : read;
       // The page's release date fills an empty one only, never one Tarik set or cleared (as a merge fill). A bad date is
       // dropped, not thrown. Not part of searchText.
       const fillDate = result.releasedOn !== undefined && isShowDate(result.releasedOn) && rel.releasedOn === undefined && !(rel.editedFields ?? []).includes("releasedOn");
@@ -459,7 +462,8 @@ export const reparse = mutation({
     const changed = next.artist !== rel.artist || next.title !== rel.title || label !== rel.label || key !== rel.key;
     if (changed && !(await keyFree(ctx, key, rel._id))) return { result: "collision", requeued: false };
 
-    const requeue = tabOf(rel) === "bandcamp" && rel.bandcampPage !== undefined && rel.releasedOn === undefined && rel.embedState === "ready";
+    // Never for a date Tarik set or cleared: embedResult would not fill it anyway.
+    const requeue = tabOf(rel) === "bandcamp" && rel.bandcampPage !== undefined && rel.releasedOn === undefined && rel.embedState === "ready" && !edited.has("releasedOn");
     if (!dryRun) {
       const fix = { ...next, label, key };
       await ctx.db.patch(rel._id, {

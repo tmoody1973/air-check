@@ -300,13 +300,20 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
 }
 
 // Listening-queue brief C: an unsubscribe or preferences link (it can carry Tarik's address and a signature) is never kept.
-const UNWANTED_LINK = /unsub|opt-?out|preferences|email_settings/i;
-const TRACKING_PARAM = (k: string) => k.startsWith("utm_") || k === "from" || k === "ref";
+// "unsub" only as a word, so a page like /album/unsubtle-days stays.
+const UNWANTED_LINK = /unsubscribe|\bunsub\b|opt-?out|preferences|email_settings|settings\/notifications|\/track\/click/i;
+// A query that holds an address (or names one) is personal, whatever the link is.
+const ADDRESS_QUERY = /(?:^\?|&)email=|@|%40/i;
+const CLICK_TRACKER = /(?:^|\.)list-manage\.com$/i; // Mailchimp's redirect host: the real link is hidden behind it
+const TRACKING_PARAM = (k: string) => {
+  const key = k.toLowerCase();
+  return key.startsWith("utm_") || key === "from" || key === "ref";
+};
 
 /**
- * The links worth keeping for Tarik, in order: tracking (utm_*, from, ref) and the fragment stripped (the same rule as
- * bandcampPageUrl), unsubscribe and preference links dropped, a bare site root (path "/" and no query) dropped, then
- * duplicates removed. A value that is not a URL is left as is so the caller's own check still refuses it.
+ * The links worth keeping for Tarik, in order: tracking (utm_*, from, ref, any case) and the fragment stripped (the same
+ * rule as bandcampPageUrl); unsubscribe, preference and notification-settings links, a query holding an address,
+ * click-tracking redirects and a bare site root (path "/" and no query) dropped; then duplicates removed. A value that is not a URL is left as is so the caller's own check still refuses it.
  */
 export function tidyLinks(links: string[]): string[] {
   const out = links.flatMap((link) => {
@@ -318,7 +325,7 @@ export function tidyLinks(links: string[]): string[] {
     }
     for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM(k)) u.searchParams.delete(k);
     u.hash = "";
-    if (UNWANTED_LINK.test(u.pathname + u.search) || (u.pathname === "/" && !u.search)) return [];
+    if (UNWANTED_LINK.test(u.pathname + u.search) || ADDRESS_QUERY.test(u.search) || CLICK_TRACKER.test(u.hostname) || (u.pathname === "/" && !u.search)) return [];
     return [u.href];
   });
   return [...new Set(out)];

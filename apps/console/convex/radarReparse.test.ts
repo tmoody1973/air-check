@@ -165,6 +165,26 @@ describe("radar.reparse re-queues a ready Bandcamp page that has no release date
     expect(await get(t, id)).toMatchObject({ embedState: "ready", embed: { kind: "album", id: "222" }, releasedOn: "2026-10-24" });
   });
 
+  test("review fix 3: a re-read that finds fewer page details keeps the ones already stored", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    const ART = "https://f4.bcbits.com/img/a0000000001_5.jpg";
+    await t.mutation(api.radar.embedResult, { token: INGEST, releaseId: id, pageUrl: PAGE, result: { kind: "album", id: "111", art: ART, tags: ["jazz"], about: "Recorded in winter." } });
+    await reparse(t, "m1");
+    await t.mutation(api.radar.embedResult, { token: INGEST, releaseId: id, pageUrl: PAGE, result: { kind: "album", id: "111", releasedOn: "2026-10-24" } });
+    expect(await get(t, id)).toMatchObject({ art: ART, tags: ["jazz"], about: "Recorded in winter.", releasedOn: "2026-10-24", embedState: "ready" });
+    expect((await get(t, id)).searchText).toContain("jazz");
+  });
+
+  test("review fix 4: not re-queued when Tarik edited the release date (even cleared)", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await ready(t, id);
+    await t.withIdentity(human).mutation(api.radar.edit, { releaseId: id, fields: { releasedOn: "" } });
+    expect(await reparse(t, "m1")).toEqual({ result: "repaired", requeued: false });
+    expect((await get(t, id)).embedState).toBe("ready");
+  });
+
   test("a first fetch that fails still fails (no player to keep)", async () => {
     const t = convexTest(schema, modules);
     const id = await saved(t, "m1");

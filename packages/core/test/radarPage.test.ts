@@ -155,6 +155,13 @@ describe("readBandcampDetails: pageArtist from the JSON-LD byArtist name", () =>
     expect(artist(ld('{ "name" : "Chasm" }'))).toBe("Chasm");
   });
 
+  test("review fix 6: HTML entities are decoded; one still left (unknown) skips the name", () => {
+    expect(artist(ld('{"name":"Percy &amp; Penderhughes"}'))).toBe("Percy & Penderhughes");
+    expect(artist(ld('{"name":"&quot;Big&quot; Jo &#39;n&#39; &lt;Co&gt;"}'))).toBe("\"Big\" Jo 'n' <Co>");
+    expect(artist(ld('{"name":"Caf&eacute; Band"}'))).toBeUndefined();
+    expect(artist(ld('{"name":"A &#8211; B"}'))).toBeUndefined();
+  });
+
   test("absent, empty, escaped, too long or link-shaped: no pageArtist", () => {
     expect(artist("<html>nothing</html>")).toBeUndefined();
     expect(artist('{"name":"Not the artist"}')).toBeUndefined();

@@ -351,6 +351,27 @@ describe("tidyLinks and cleanMail's stored links (brief C)", () => {
     expect(tidyLinks(["https://press.example/a/b?pk=1&utm_source=x&ref=y#top", "https://press.example/a/b?pk=1"])).toEqual(["https://press.example/a/b?pk=1"]);
     expect(tidyLinks(["https://press.example/kit?from=x", "https://press.example/kit"])).toEqual(["https://press.example/kit"]);
   });
+  test("review fix 5: unsub only as a word or 'unsubscribe' (an /album/unsubtle-… page stays)", () => {
+    expect(tidyLinks(["https://artist.bandcamp.com/album/unsubtle-days"])).toEqual(["https://artist.bandcamp.com/album/unsubtle-days"]);
+    expect(tidyLinks(["https://x.example/unsub/123", "https://x.example/a?do=unsub", "https://x.example/Unsubscribe-now"])).toEqual([]);
+  });
+  test("review fix 5: a query holding an address (email=, @ or %40) is dropped", () => {
+    for (const l of ["https://x.example/a?email=someone", "https://x.example/a?u=tarik%40radiomilwaukee.org", "https://x.example/a?u=tarik@radiomilwaukee.org", "https://x.example/a?EMAIL=x"])
+      expect(tidyLinks([l])).toEqual([]);
+    expect(tidyLinks(["https://x.example/a?emailing=no"])).toEqual(["https://x.example/a?emailing=no"]);
+  });
+  test("review fix 5: tracking names are stripped in any case", () => {
+    expect(tidyLinks(["https://press.example/kit?UTM_Source=x&From=y&REF=z&pk=1"])).toEqual(["https://press.example/kit?pk=1"]);
+  });
+  test("review fix 5: click-tracking redirects and notification settings are dropped", () => {
+    for (const l of [
+      "https://label.us1.list-manage.com/track/click?u=abc&id=def",
+      "https://list-manage.com/x",
+      "https://mail.example/track/click/123",
+      "https://bandcamp.com/settings/notifications",
+    ])
+      expect(tidyLinks([l])).toEqual([]);
+  });
   test("a link that is not a URL is left as is, so Convex can still refuse it", () => {
     expect(tidyLinks(["not a url"])).toEqual(["not a url"]);
   });

@@ -686,7 +686,7 @@ Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail)` / `#n 
 
 Why: the first Bandcamp parser was written against made-up mail. On real mail it stored, for example, the artist as `Roots Records, check it out at:`. `--reparse` re-reads each kept Bandcamp email since the date with the fixed parser and asks `radar.reparse` (INBOX_TOKEN) to patch artist, title and label on the release that email made, never a field you edited. If the corrected name matches another release, both are left alone and the line says `collision`. A Bandcamp release whose player is ready but has no release date is also queued again, so the ingest worker re-reads its page for the date (3 per pass); if that read fails, the working player stays.
 
-Deploy order: Convex first (`radar.reparse`, and `embedResult` accepting `pageArtist`), then the ingest worker, then this script. Same environment as section 6; the dry run also needs `CONVEX_URL` and `INBOX_TOKEN`, because it asks Convex what it would change (and writes nothing).
+Deploy order, in full: **Convex → ingest worker → console → `--reparse --dry-run` → `--reparse`.** Convex goes first because the new ingest worker sends `releasedOn` **and** `pageArtist` to `radar.embedResult`; an older Convex refuses the unknown field, and the page stays queued and is fetched again every pass. Convex also adds `radar.reparse`. A release whose date you set or cleared is never re-queued. Same environment as section 6; the dry run also needs `CONVEX_URL` and `INBOX_TOKEN`, because it asks Convex what it would change (and writes nothing).
 
 ```sh
 export RADAR_SENDERS="$(ssh user@<the VM's static IP> "grep '^RADAR_SENDERS=' ~/.aircheck/console.env | cut -d= -f2-")"

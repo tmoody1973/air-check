@@ -84,8 +84,13 @@ function releaseDate(html: string): string | undefined {
 }
 
 /** The artist the page names in its JSON-LD, or undefined (missing, empty, over 200 characters or link-shaped). */
+const ENTITIES: Record<string, string> = { "&amp;": "&", "&quot;": '"', "&#39;": "'", "&lt;": "<", "&gt;": ">" };
+
 function pageArtistOf(html: string): string | undefined {
-  const name = ARTIST_NAME.exec(BY_ARTIST.exec(html)?.[1] ?? "")?.[1]?.trim();
+  const raw = ARTIST_NAME.exec(BY_ARTIST.exec(html)?.[1] ?? "")?.[1];
+  // The five common entities are decoded; a name still holding any other entity is skipped, not half-decoded.
+  if (!raw || /&(?!amp;|quot;|#39;|lt;|gt;)#?\w{1,10};/.test(raw)) return undefined;
+  const name = raw.replace(/&(?:amp|quot|#39|lt|gt);/g, (e) => ENTITIES[e]!).trim();
   return name && name.length <= MAX_ARTIST_CHARS && !LINKISH.test(name) ? name : undefined;
 }
 
