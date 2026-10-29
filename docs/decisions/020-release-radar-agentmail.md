@@ -34,7 +34,7 @@ Getting this wrong means a stranger's email steers the agent, or an embargoed re
 
 Calls Tarik made on Oct 29:
 - **The reader runs in the back room** (the ingest worker), not on the public website. The website holds no model key and makes no model call. If the public site were broken into, there would be no model key there to steal.
-- **Who may send.** Tarik's own forwarding addresses, starting with `tarik@radiomilwaukee.org`, and Bandcamp's new-release sender. Nobody else. A sender must also pass DKIM, a signature the sending mail server adds that proves the email really came from that domain; a "From" line alone can be faked. The exact Bandcamp address is confirmed on the first live email.
+- **Who may send.** Tarik's own forwarding addresses, starting with `tarik@radiomilwaukee.org`, and Bandcamp's new-release sender. Nobody else. A sender must also be confirmed by AgentMail's own check (DMARC, which ties the sending server's signature or address to the "From" domain), read back from AgentMail with our key; a "From" line alone can be faked. (Changed on Oct 29, ruling R12: the first plan read a raw email header that AgentMail turned out not to pass on, so every sender was refused.) The exact Bandcamp address is confirmed on the first live email.
 - **Two tabs.** Bandcamp and Co-signs, each with the statuses new, considering, played and passed.
 - **Bandcamp players.** Code in the ingest worker opens only public `*.bandcamp.com` album and track pages:
   - https, no cookies, nothing else in the address;

@@ -710,7 +710,7 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
      - Pipe `grep -hE '^(AGENTMAIL_API_KEY|INBOX_TOKEN)=' .env.local .env.production.local | ssh user@<the VM's static IP> 'cat >> ~/.aircheck/console.env'`.
      - Check no name is in the file twice (`cut -d= -f1 ~/.aircheck/console.env | sort | uniq -d` prints nothing).
      - Run `dc up -d --build`. The route answers 503 until the webhook secret exists, which is the safe state.
-     - `RADAR_SENDERS` and `RADAR_AUTHSERV_ID` are set in step 5, before the Gmail filter.
+     - `RADAR_SENDERS` is set in step 5, before the Gmail filter.
    - **Ingest (last):**
      - Pipe the key: `ssh user@<the VM's static IP> 'cat >> ~/.aircheck/ingest.env' < ~/.aircheck-local/ingest-radar.env`.
      - Then the ingest bundle (`pnpm --filter @aircheck/ingest build`), with a backup (`main.js.pre-radar`), a size check and a restart.
@@ -719,12 +719,12 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
    - POST `https://api.agentmail.to/v0/inboxes/rhythmlab%40agentmail.to/webhooks` with `{"url":"https://aircheck.rhythmlabradio.com/api/agentmail/inbound","event_types":["message.received"]}`.
    - Save the response to a mode-600 temp file. Print only `jq -r .webhook_id` (record it in DEPLOY.md). Append `jq -r '"AGENTMAIL_WEBHOOK_SECRET=" + .secret'` to `.env.production.local`, then delete the temp file.
    - Pipe that one line to the VM's `console.env` as in step 3, and run `dc up -d --force-recreate console`.
-5. **Sender check, then the Gmail filter (Tarik).** An email that arrives while `RADAR_AUTHSERV_ID` or `RADAR_SENDERS` is unset is stored "ignored" with no body and **cannot be retried**, so both are set before the filter is turned on.
+5. **Sender list, then the Gmail filter (Tarik).** An email that arrives while `RADAR_SENDERS` is unset is stored "ignored" with no body, so it is set before the filter is turned on. (The catch-up script, DEPLOY.md "Plan 8" section 6, can store such an email again.)
+   - **Hotfix R12 (2026-10-29):** the live check found AgentMail sends no `Authentication-Results` header, so the R4 header check (and its `RADAR_AUTHSERV_ID` bootstrap) could never pass and was removed. The console now trusts AgentMail's own `authentication_results` verdict and `labels`, read from AgentMail's API: DMARC pass, aligned with the From domain, no `unauthenticated`/`spam`/`blocked` label. Brief: `.superpowers/sdd/2026-10-29-plan-8-release-radar/hotfix-sender-check-brief.md`.
    - Add `rhythmlab@agentmail.to` as a forwarding address. If the Radio Milwaukee Workspace admin has turned off automatic forwarding, the option is greyed out; ask the admin.
-   - Gmail's confirmation email lands in AgentMail and shows under Not added as "Air Check's sender check is not set up". Tarik reads the code in AgentMail's own web console, not through Air Check.
-   - **`RADAR_AUTHSERV_ID` bootstrap:** in AgentMail's console, open that confirmation email's raw headers. The value is the token before the first `;` of the **topmost** `Authentication-Results` header (R4).
+   - Gmail's confirmation email lands in AgentMail and shows under Not added as "Sender not on the list". Tarik reads the code in AgentMail's own web console, not through Air Check.
    - **Bandcamp's From address:** from a Bandcamp new-release email already in Tarik's Gmail ("Show original"). Auto-forwarding keeps Bandcamp's From, so this exact address goes on the list.
-   - Set `RADAR_AUTHSERV_ID` and `RADAR_SENDERS=tarik@radiomilwaukee.org,<Bandcamp's address>` in `console.env`, then `dc up -d --force-recreate console`.
+   - Set `RADAR_SENDERS=tarik@radiomilwaukee.org,<Bandcamp's address>` in `console.env`, then `dc up -d --force-recreate console`.
    - Only then filter Bandcamp's new-release sender to forward.
 6. **Check the bridge tool** (re-wired in step 3) so Hermes has `radar_get`. One Chat message, "What's new on the radar?", must call `radar_get`, and its result must show no links and no player.
 7. **Live check (Tarik, with Claude reading Convex and the logs):**
@@ -753,8 +753,8 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
      - the webhook id;
      - how to rotate the webhook secret (delete and re-create, then pipe again);
      - the deploy order (Convex, bridge, console, ingest; Convex rolled back last);
-     - the `RADAR_AUTHSERV_ID` bootstrap and the "set before the filter" warning;
-     - the live checks below, including Google Workspace DKIM.
+     - the "set `RADAR_SENDERS` before the filter" warning (the `RADAR_AUTHSERV_ID` bootstrap was removed by hotfix R12);
+     - the live checks below, including Google Workspace DKIM, and the R12 catch-up script.
      (Written in the final-review fix round, before Task 7: DEPLOY.md "Plan 8: release radar". Task 7 fills in the webhook id and the results.)
    - **`docs/LEARNING-LOG.md`**, with "In my words" left blank.
    - **`docs/FRICTION_LOG.md`** for any AgentMail or Bandcamp surprises.
@@ -764,7 +764,7 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
 
 - **Bandcamp's sender address or addresses** (Tarik's answer marks this one UNVERIFIED), and their template. Also whether the emails carry genre at all.
 - **The `from_` vs `from` field name.** The docs say `from`, while TarikOS saw `from_` live. The code reads both.
-- **DKIM after Gmail's auto-forward.** Whether Bandcamp's DKIM still passes, aligned to `bandcamp.com`, after Gmail auto-forwards it. Also whether AgentMail includes `Authentication-Results` in `headers` for it. TarikOS confirmed the header exists for direct mail only.
+- **DKIM after Gmail's auto-forward.** Answered live 2026-10-29: AgentMail includes no `Authentication-Results` header at all; its own verdict shows Bandcamp's auto-forwarded mail with `dkim: none` but `dmarc: pass` for `bandcamp.com`. Hotfix R12 checks that verdict instead.
 - **Direct page links.** Whether Bandcamp emails link straight to `*.bandcamp.com/album|track` pages or through a tracking redirect on another host. Redirect hosts are never fetched, so the player depends on this.
 - **The player id on the page.** Whether Bandcamp pages expose the `EmbeddedPlayer` URL in `og:video` (or `twitter:player`).
 - **The player under the iframe's `sandbox` attributes.** Whether it plays with them set. If it does not, the live check narrows the attributes and records why.
@@ -776,7 +776,7 @@ Claude cannot write to the VM and never displays a secret. Each step below is ha
 - **Token Factory and `chat_template_kwargs`** (R7). Content non-null, reasoning tokens about 0, no 400.
 - **Bandcamp and our user-agent.** Whether Bandcamp answers the ingest worker's requests.
 - **The real Bandcamp page markup.** Cover art (`og:image`), tags and about, as Task 6b reads them.
-- **Google Workspace DKIM.** If radiomilwaukee.org has no custom DKIM key, Gmail signs Tarik's mail as `*.gappssmtp.com`. That does not align with the From domain, so every hand-forwarded co-sign is ignored. Fix: the Workspace admin adds custom DKIM in Google Admin ("Authenticate email"), or the limitation is noted.
+- **Google Workspace DKIM.** Answered live 2026-10-29: mail from `tarik@radiomilwaukee.org` passes SPF, DKIM and DMARC for `radiomilwaukee.org` in AgentMail's verdict, so hand-forwarded co-signs are kept.
 - **The model.** Whether Nemotron on Token Factory follows a JSON-only instruction reliably. Failures land as `refused` with Try again. Also whether a Nano model id exists there (the Super id is the verified one).
 
 ## Out of scope (named so nothing is silently dropped)

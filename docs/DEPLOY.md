@@ -534,16 +534,17 @@ Console (`~/.aircheck/console.env` on the VM; the names are in `deploy/console.e
 | Name | What it is | Secret? |
 |---|---|---|
 | `INBOX_TOKEN` | The console's key for storing email in Convex. The same value is set in Convex env. 64 hex characters, never shared with another service. | yes |
-| `AGENTMAIL_API_KEY` | Reads one message from AgentMail when the webhook leaves a body over 1 MB out. Sends nothing. | yes |
+| `AGENTMAIL_API_KEY` | Reads each listed sender's message back from AgentMail, for AgentMail's own sender verdict (and the body when the webhook left it out). Sends nothing. | yes |
 | `AGENTMAIL_WEBHOOK_SECRET` | The webhook's signing secret (`whsec_...`). Unset means the route answers 503 and stores nothing. | yes |
-| `RADAR_SENDERS` | Comma-separated addresses whose email is kept: `tarik@radiomilwaukee.org` and Bandcamp's sender address. | no |
-| `RADAR_AUTHSERV_ID` | The name AgentMail's mail server writes at the start of its `Authentication-Results` header. Unset means every sender is refused. | no |
+| `RADAR_SENDERS` | Comma-separated addresses whose email is kept: `tarik@radiomilwaukee.org` and Bandcamp's sender address. Unset means every sender is refused. | no |
 
 Ingest worker (`~/.aircheck/ingest.env`, names in `deploy/ingest/ingest.env.example`): `NEBIUS_API_KEY`, a Token Factory key named `aircheck-ingest-radar`, separate from the agent's so it can be revoked alone. Unset means co-signs are recorded as "Air Check's reader is not set up"; Bandcamp emails still parse.
 
 Convex (production env): `INBOX_TOKEN`, the same value as the console's.
 
-> **Set `RADAR_AUTHSERV_ID` and `RADAR_SENDERS` before turning on the Gmail forwarding filter.** An email that arrives while either is unset is stored as "ignored", with no body, and cannot be tried again. It is gone from Air Check (it is still in AgentMail and Gmail).
+> **Set `RADAR_SENDERS` before turning on the Gmail forwarding filter.** An email that arrives while it is unset is stored as "ignored", with no body. It is still in AgentMail and Gmail, and the catch-up script (section 6) can store it again once the list is right.
+
+**How the sender check works (ruling R12, 2026-10-29).** AgentMail does not pass on the raw `Authentication-Results` header. It checks SPF, DKIM and DMARC itself and gives its verdict as fields on the message. The console keeps an email only when the From address is on `RADAR_SENDERS` and AgentMail's verdict, read back from AgentMail's API with our key (never from the email), says DMARC passed for the From address's domain (or a parent domain), and the message is not labelled `unauthenticated`, `spam` or `blocked`. Otherwise Not added says "AgentMail could not confirm the sender". A stranger costs no AgentMail call.
 
 ### 1. Make the secrets on the Mac, without showing them
 
@@ -637,33 +638,48 @@ Then on the VM: `dc up -d --force-recreate console`. Why `--force-recreate`: the
 
 Webhook id: _(write it here after registering)_. To rotate the secret: delete the webhook in AgentMail, register again as above, remove the old `AGENTMAIL_WEBHOOK_SECRET` line from both files, pipe the new one, and recreate the console.
 
-### 4. Set the sender check (before the Gmail filter)
+### 4. Set the sender list (before the Gmail filter)
 
-1. **Add the forwarding address in Gmail.** Settings, "Forwarding and POP/IMAP", "Add a forwarding address", `rhythmlab@agentmail.to`. If the option is greyed out, the Radio Milwaukee Workspace admin has turned off automatic forwarding; ask them. Why: Gmail sends a confirmation email first, and that email is the one we read the server name from.
-2. **Read `RADAR_AUTHSERV_ID` from that confirmation email.** In AgentMail's own web console (not Air Check), open the message and show its raw headers. Find the **topmost** `Authentication-Results:` line. Its first word, before the first `;`, is the value (for example, in `Authentication-Results: mx.example.net; dkim=pass ...` it is `mx.example.net`). Why: only the header our receiver wrote is trusted; lower ones can be written by the sender. Click the confirmation link or copy the code from the same message to finish Gmail's step. In Air Check it shows under Not added as "Air Check's sender check is not set up", which is expected.
-3. **Find Bandcamp's sender address.** In Gmail, open a Bandcamp new-release email you already have, choose "Show original", and copy the address in its `From:` line. Why: auto-forwarded mail keeps Bandcamp's own From address, so that exact address must be on the list.
-4. **Set both on the VM**, then recreate the console:
+1. **Add the forwarding address in Gmail.** Settings, "Forwarding and POP/IMAP", "Add a forwarding address", `rhythmlab@agentmail.to`. If the option is greyed out, the Radio Milwaukee Workspace admin has turned off automatic forwarding; ask them. Gmail sends a confirmation email to the inbox: open it in AgentMail's own web console (not Air Check) and click the confirmation link or copy the code. In Air Check it shows under Not added as "Sender not on the list", which is expected.
+2. **Find Bandcamp's sender address.** In Gmail, open a Bandcamp new-release email you already have, choose "Show original", and copy the address in its `From:` line. Why: auto-forwarded mail keeps Bandcamp's own From address, so that exact address must be on the list.
+3. **Set the list on the VM**, then recreate the console:
 
    ```sh
    nano ~/.aircheck/console.env
-   # add or edit these two lines:
-   # RADAR_AUTHSERV_ID=<the first word from step 2>
-   # RADAR_SENDERS=tarik@radiomilwaukee.org,<Bandcamp's address from step 3>
+   # add or edit this line:
+   # RADAR_SENDERS=tarik@radiomilwaukee.org,<Bandcamp's address from step 2>
    dc up -d --force-recreate console
    ```
 
-5. **Only now, turn on the Gmail filter** that forwards Bandcamp's new-release email to `rhythmlab@agentmail.to`. Co-signs are forwarded by hand.
+4. **Only now, turn on the Gmail filter** that forwards Bandcamp's new-release email to `rhythmlab@agentmail.to`. Co-signs are forwarded by hand.
 
 ### 5. Live checks (UNVERIFIED until Task 7)
 
 Each of these was built from documentation or a guess, not a live test. Check each once and record the result in `docs/SPIKES.md`.
 
-- **The payload names the inbox.** Every delivery should carry `inbox_id: rhythmlab@agentmail.to`. If it does not, every email is skipped and `dc logs console` shows `radar step=inbox ok=false`.
-- **Header order.** AgentMail should list repeated headers top first, so the first `Authentication-Results` is our receiver's. Check one stored email is not wrongly refused as "Sender's signature (DKIM) did not pass".
+- **Verified live on 2026-10-29: the payload names the inbox, and the sender verdict.** Deliveries carry `inbox_id: rhythmlab@agentmail.to`. AgentMail's message has **no** `Authentication-Results` header (its `headers` hold only ARC-*, Delivered-To, Reply-To and X-* lines). Instead every message carries `authentication_results` (`spf`, `dkim`, `dmarc`, and `spf_domain`, `dkim_domain`, `dmarc_domain`) and `labels`. Seen: Bandcamp's auto-forwarded mail has `dkim: none` but `dmarc: pass` for `bandcamp.com`; mail from `tarik@radiomilwaukee.org` passes all three for `radiomilwaukee.org`. This is why the header check was replaced (ruling R12). If AgentMail's verdict ever goes missing, every listed sender shows "AgentMail could not confirm the sender".
 - **Token Factory accepts the reader's settings.** The reader sends `chat_template_kwargs` (thinking off). Expect, in `journalctl -u aircheck-ingest`, co-signs saved with no 400 error; in the Token Factory usage page, answers with content and about zero reasoning tokens. On a 400 the reader retries once without it.
 - **Bandcamp answers our user-agent.** The first Bandcamp email's player should become ready within two passes. If every page fails, the ingest log names the code.
 - **The real Bandcamp email and page.** The email parser and the page reader (cover art from `og:image`, tags, about) were written against made-up samples. Compare one real email and one real page with what Air Check shows.
-- **Google Workspace DKIM (co-signs).** A hand-forwarded co-sign is signed by Google for `tarik@radiomilwaukee.org`. If radiomilwaukee.org has no custom DKIM key, Gmail signs as `*.gappssmtp.com` instead, which does not match the From domain, so **every forwarded co-sign is ignored** as "Sender's signature (DKIM) did not pass". To check: in Gmail, open an email you sent, "Show original", and look at the DKIM line: `radiomilwaukee.org` is fine, `gappssmtp.com` is the problem. The fix is for the Workspace admin: Google Admin console, Apps, Google Workspace, Gmail, "Authenticate email", generate a key, add the TXT record it shows at GoDaddy, then "Start authentication". Until then, only Bandcamp's auto-forwarded email works, and this is a known limitation.
+- **Google Workspace (co-signs): checked 2026-10-29.** Mail sent from `tarik@radiomilwaukee.org` reaches AgentMail with DMARC passing for `radiomilwaukee.org`, so hand-forwarded co-signs are kept. If that ever changes (Not added shows "AgentMail could not confirm the sender" for Tarik's own forwards), check the DKIM key in the Google Admin console: Apps, Google Workspace, Gmail, "Authenticate email".
+
+### 6. Catch up mail the old sender check refused (one-off, ruling R12)
+
+Why: until the R12 fix, the console refused every email (it looked for a header AgentMail does not send), and the webhook was paused while the fix was made. The mail is still in AgentMail. This script lists it and runs each message through the same code as the webhook. An email stored as "ignored" before is stored again if it is now kept; one already kept is left alone, so running it twice is safe.
+
+Deploy order for the fix: Convex first (`radar.received` learns to replace an ignored row with a kept one), then the console, then resume the webhook, then this script.
+
+On the Mac, from the repo root. `RADAR_SENDERS` must be the VM's value; `CONVEX_URL` is production (the dev URL in `.env.local` is never used). The script reads `AGENTMAIL_API_KEY` from `apps/console/.env.local` and `INBOX_TOKEN` from `apps/console/.env.production.local`, and prints codes and counts only: never a subject, sender, body or key.
+
+```sh
+export RADAR_SENDERS="$(ssh user@<the VM's static IP> "grep '^RADAR_SENDERS=' ~/.aircheck/console.env | cut -d= -f2-")"
+export CONVEX_URL=https://clever-deer-759.convex.cloud
+pnpm --filter console exec tsx scripts/radar-backfill.ts --since 2026-10-27 --dry-run   # look first: one line per message
+pnpm --filter console exec tsx scripts/radar-backfill.ts --since 2026-10-27             # then store
+unset RADAR_SENDERS CONVEX_URL
+```
+
+Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail|Convex)`; the last line is the counts. Exit code 1 means something failed: run it again. Kept emails then appear in the radar within a minute (the ingest worker reads them).
 
 ## Certificates and renewal dates
 
