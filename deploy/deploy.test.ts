@@ -166,6 +166,7 @@ describe("deploy files", () => {
     expect(env.map((l) => l.slice(0, -1))).toEqual(expect.arrayContaining([
       "CONVEX_URL", "INGEST_TOKEN", "BOX_CLIENT_ID", "BOX_CLIENT_SECRET", "BOX_ENTERPRISE_ID", "BOX_FOLDER_ID",
       "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DROPBOX_APP_KEY", "DROPBOX_APP_SECRET", "INGEST_TOKEN_DIR", "INBOX_DIR", "PREPARED_DIR",
+      "NEBIUS_API_KEY",
     ]));
   });
 

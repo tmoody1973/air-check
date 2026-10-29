@@ -9,6 +9,8 @@ export interface IngestConfig {
   box: BoxCreds | null; google: AppCreds | null; dropbox: AppCreds | null;
   /** Dropbox folder holding the Paper docs ("" = the whole Dropbox; slow on a large account). */
   dropboxFolder: string;
+  /** Plan 8: the Token Factory key for the release radar's extractor. null: co-signs are recorded "not set up". */
+  nebiusKey: string | null;
 }
 
 const ms = (raw: string | undefined, min: number, fallback: number) => {
@@ -41,5 +43,6 @@ export function loadConfig(env: Record<string, string | undefined>): IngestConfi
     google: both(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     dropbox: both(env.DROPBOX_APP_KEY, env.DROPBOX_APP_SECRET),
     dropboxFolder,
+    nebiusKey: env.NEBIUS_API_KEY?.trim() || null,
   };
 }
