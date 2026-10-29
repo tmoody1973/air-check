@@ -3,7 +3,7 @@ export const BANDCAMP_DOMAIN = "bandcamp.com";
 const HOST = /^(?:[a-z0-9-]+\.)*bandcamp\.com$/;
 // Tracking-only queries (Bandcamp's own "from=", utm_*) are dropped; any other key, such as a private stream's, refuses the link.
 const TRACKING_PARAMS = new Set(["from", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref"]);
-const PAGE_PATH = /^\/(album|track)\/([a-z0-9-]{1,200})$/;
+const PAGE_PATH = /^\/(album|track)\/([a-z0-9-]{1,200})\/?$/; // one trailing slash allowed, never kept
 
 /**
  * The one kind of link anything may fetch (Hard Rule 5's exception, ARCHITECTURE 3.7): a public

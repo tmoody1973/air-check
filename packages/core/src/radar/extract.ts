@@ -111,7 +111,7 @@ export function parseBandcampEmail(_subject: string, text: string): ReleaseField
 
 export type Extraction = { ok: true; release: ReleaseFields; notes: string[] } | { ok: false; notRelease: true } | { ok: false; reasons: string[] };
 
-const LINKISH = /https?:|:\/\/|www\.|@|\[link\]|\[email\]/i;
+const LINKISH = /https?:|hxxp|:\/\/|www\.|@|\(at\)|\[\.\]|\[link\]|\[email\]|[a-z0-9-]\.[a-z]{2,}\//i;
 const TYPES = new Set(["album", "single", "ep"]);
 const field = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
 
@@ -127,8 +127,9 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
   if (c.notRelease === true) return { ok: false, notRelease: true };
 
   const haystack = ` ${foldText(emailText)} `;
+  // The whole value is grounded: normalize would cut a "feat." tail and let anything after it through.
   const inEmail = (v: string) => {
-    const n = normalize(v);
+    const n = foldText(v);
     return n.length > 0 && haystack.includes(` ${n} `);
   };
   const reasons: string[] = [];
@@ -191,10 +192,11 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
 }
 
 function embargoOf(model: unknown, code: { until: string | null } | null, dates: string[], notes: string[]): { until: string | null } | undefined {
-  const modelFound = model === true || (typeof model === "object" && model !== null);
+  // Any signal at all counts (fail safe); only undefined, null and false mean "none".
+  const modelFound = model !== undefined && model !== null && model !== false;
   if (!code && !modelFound) return undefined;
-  const claimed = modelFound && typeof model === "object" ? field((model as Record<string, unknown>).until) : "";
-  if (claimed && !dates.includes(claimed)) notes.push("The embargo date was left out: code did not find that date in the email. It stays embargoed until someone dates it.");
+  const claimed = typeof model === "string" ? field(model) : typeof model === "object" && model ? field((model as Record<string, unknown>).until) : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(claimed) && !dates.includes(claimed)) notes.push("The embargo date was left out: code did not find that date in the email. It stays embargoed until someone dates it.");
   const known = [code?.until, claimed && dates.includes(claimed) ? claimed : null].filter((d): d is string => Boolean(d));
   return { until: known.length ? known.sort().at(-1)! : null };
 }
