@@ -83,6 +83,12 @@ describe("Dropbox client", () => {
     expect(s.calls("POST /2/files/list_folder")[0]!.headers.authorization).toBe("Bearer dbx-access");
   });
 
+  test("lists only the configured folder (recursively) when one is set", async () => {
+    const s = await serve(routes({}));
+    await dropboxClient(testHttp(), APP, "dbx-refresh", { tokenUrl: `${s.base}/oauth2/token`, api: `${s.base}/2`, content: `${s.base}/2`, folder: "/Paper Docs" }).listFiles();
+    expect(JSON.parse(s.calls("POST /2/files/list_folder")[0]!.body)).toEqual({ path: "/Paper Docs", recursive: true, limit: 2000, include_non_downloadable_files: true });
+  });
+
   test("reads export_options from get_metadata and exports markdown only when offered (never assumed)", async () => {
     const s = await serve(routes({ export_info: { export_as: "html", export_options: ["html", "markdown"] } }));
     expect(await client(s.base).exportText("id:p1")).toEqual({ kind: "ok", text: "# Hour 1\n## 1. A – \"B\"" });

@@ -7,6 +7,8 @@ export interface IngestConfig {
   scanMs: number; pollMs: number;
   /** null: not configured; that source reports not_connected and is skipped. */
   box: BoxCreds | null; google: AppCreds | null; dropbox: AppCreds | null;
+  /** Dropbox folder holding the Paper docs ("" = the whole Dropbox; slow on a large account). */
+  dropboxFolder: string;
 }
 
 const ms = (raw: string | undefined, min: number, fallback: number) => {
@@ -26,6 +28,8 @@ export function loadConfig(env: Record<string, string | undefined>): IngestConfi
   if (folderId && !/^\d+$/.test(folderId)) throw new Error("BOX_FOLDER_ID must be a Box folder id (digits only)");
   const box = both(env.BOX_CLIENT_ID, env.BOX_CLIENT_SECRET);
   const enterpriseId = env.BOX_ENTERPRISE_ID?.trim();
+  const dropboxFolder = (env.DROPBOX_FOLDER?.trim() ?? "").replace(/\/+$/, "");
+  if (dropboxFolder && !dropboxFolder.startsWith("/")) throw new Error("DROPBOX_FOLDER must start with / (or be empty)");
   return {
     convexUrl, ingestToken,
     tokenDir: env.INGEST_TOKEN_DIR?.trim() || "/home/user/.aircheck/ingest-tokens",
@@ -36,5 +40,6 @@ export function loadConfig(env: Record<string, string | undefined>): IngestConfi
     box: box && enterpriseId && folderId ? { ...box, enterpriseId, folderId } : null,
     google: both(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     dropbox: both(env.DROPBOX_APP_KEY, env.DROPBOX_APP_SECRET),
+    dropboxFolder,
   };
 }

@@ -15,7 +15,7 @@ const TEXT_FORMATS = [/^markdown$/i, /^(?:plain_?text|text|txt)$/i];
 
 export type PaperExport = { kind: "ok"; text: string } | { kind: "unreadable" };
 export interface DropboxClient { listFiles(): Promise<DocRef[]>; exportText(id: string): Promise<PaperExport> }
-export interface DropboxOptions { tokenUrl?: string; api?: string; content?: string }
+export interface DropboxOptions { tokenUrl?: string; api?: string; content?: string; folder?: string }
 
 export function dropboxClient(http: Http, app: AppCreds, refreshToken: string, opts: DropboxOptions = {}): DropboxClient {
   const api = opts.api ?? DROPBOX_API;
@@ -32,7 +32,7 @@ export function dropboxClient(http: Http, app: AppCreds, refreshToken: string, o
   return {
     async listFiles() {
       const files: DocRef[] = [];
-      let j = await readJson(await rpc("/files/list_folder", { path: "", recursive: true, limit: 2000, include_non_downloadable_files: true }));
+      let j = await readJson(await rpc("/files/list_folder", { path: opts.folder ?? "", recursive: true, limit: 2000, include_non_downloadable_files: true }));
       for (;;) {
         for (const e of Array.isArray(j.entries) ? (j.entries as Record<string, unknown>[]) : [])
           if (e[".tag"] === "file" && typeof e.id === "string" && typeof e.name === "string") files.push({ id: e.id, name: e.name });

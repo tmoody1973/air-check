@@ -18,7 +18,7 @@ describe("config", () => {
     expect(loadConfig(base)).toEqual({
       ...{ convexUrl: base.CONVEX_URL, ingestToken: base.INGEST_TOKEN },
       tokenDir: "/home/user/.aircheck/ingest-tokens", inboxDir: "/home/user/aircheck-audio/inbox", preparedDir: "/home/user/aircheck-audio/prepared",
-      scanMs: 3_600_000, pollMs: 60_000, box: null, google: null, dropbox: null,
+      scanMs: 3_600_000, pollMs: 60_000, box: null, google: null, dropbox: null, dropboxFolder: "",
     });
   });
 
@@ -29,6 +29,13 @@ describe("config", () => {
     expect(() => loadConfig({ ...base, ...box, BOX_FOLDER_ID: "../0" })).toThrow(/digits/);
     const apps = loadConfig({ ...base, GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs", DROPBOX_APP_KEY: "d", DROPBOX_APP_SECRET: "ds", SCAN_MS: "120000", POLL_MS: "5" });
     expect([apps.google, apps.dropbox, apps.scanMs, apps.pollMs]).toEqual([{ clientId: "g", clientSecret: "gs" }, { clientId: "d", clientSecret: "ds" }, 120_000, 60_000]);
+  });
+
+  test("DROPBOX_FOLDER limits the Paper listing to one folder; empty means the whole Dropbox", () => {
+    expect(loadConfig({ ...base, DROPBOX_FOLDER: " /Paper Docs/ " }).dropboxFolder).toBe("/Paper Docs");
+    expect(loadConfig({ ...base, DROPBOX_FOLDER: "" }).dropboxFolder).toBe("");
+    expect(loadConfig({ ...base, DROPBOX_FOLDER: "/" }).dropboxFolder).toBe("");
+    expect(() => loadConfig({ ...base, DROPBOX_FOLDER: "Paper Docs" })).toThrow(/DROPBOX_FOLDER must start with \//);
   });
 });
 
