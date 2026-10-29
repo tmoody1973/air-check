@@ -24,22 +24,26 @@ PROBES=(
   # One probe per sandbox so an alert names which agent lost its tools. Any JSON spacing.
   "Agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes airc mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
   "Demo agent tools|for s in aircheck crate; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes aircdemo mcp status \"\$s\" --json 2>/dev/null | grep -q '\"registered\": *true' || exit 1; done"
-  "Agent skills|for s in airc aircdemo; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes \"\$s\" skill list 2>/dev/null | grep -q rlr-description-safety || exit 1; done"
+  # One skill listing per sandbox per run, saved for the agent-made skill check below (no second call: gateway
+  # load is what made the forwards drop). COLUMNS=200 so the table does not cut names short with "…".
+  "Agent skills|bad=0; for s in airc aircdemo; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/openshell sandbox exec -n \"\$s\" -- bash -lc 'COLUMNS=200 hermes skills list --source local' > ${HOME}/.aircheck/skills-list.\$s 2>/dev/null; grep -q rlr-description-safety ${HOME}/.aircheck/skills-list.\$s || bad=1; done; exit \$bad"
+  "Hermes forward|systemctl is-active --quiet aircheck-hermes-forward"
+  "Demo Hermes forward|systemctl is-active --quiet aircheck-hermes-demo-forward"
 )
 
 # The host forward to a sandbox sometimes stops listening while the sandbox and its gateway keep running
-# (Oct 29, twice). Each forward has its own unit that systemd restarts in 3 s; if a probe still fails,
+# (Oct 29, twice). Each forward has its own unit that systemd restarts in 1 s; if a probe still fails,
 # restart that unit (narrow sudoers rule from install-forward.sh), and only if Hermes is still unreachable
 # run `recover` once before calling it down. Prints nothing but the probe name and time (Hard Rule 8).
 # Usage: heal <sandbox> <forward unit> <probe command>
 heal() {
   local box="$1" unit="$2" probe="$3"
   if (( DRY_RUN )); then
-    echo "would run: sudo systemctl restart ${unit} (skipped in dry run)"
+    echo "would run: sudo systemctl restart --no-block ${unit} (skipped in dry run)"
     echo "would run: nemohermes ${box} recover (skipped in dry run)"
     return 1
   fi
-  if sudo -n /usr/bin/systemctl restart "${unit}" >/dev/null 2>&1; then
+  if sudo -n /usr/bin/systemctl restart --no-block "${unit}" >/dev/null 2>&1; then
     sleep "${HEAL_WAIT:-10}"
     bash -c "${probe}" >/dev/null 2>&1 && return 0
   fi
@@ -81,11 +85,17 @@ fi
 REPO_SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags)
 SKILLS_SEEN="${HOME}/.aircheck/watchdog.skills-seen"
 for sb in airc aircdemo; do
-  # A sandbox that is down is the Agent skills probe's job, not this check's.
-  list="$(XDG_RUNTIME_DIR=/run/user/1001 timeout 60 "${HOME}/.local/bin/nemohermes" "${sb}" skill list 2>/dev/null)" || continue
-  # Rows look like "│ <name> │ local │ enabled │"; the "53 builtin, 2 local" summary line has no column bars.
-  for skill in $(printf '%s\n' "${list}" | grep -E '[│|] *local *[│|]' | sed -E 's/^[│| ]*([A-Za-z0-9_.-]+).*/\1/'); do
+  # Reads what the Agent skills probe saved this run. Rows look like
+  # "│ rlr-mixcloud-title-and-tags │ │ local │ local │ enabled │" (5 columns, name first).
+  # The "53 builtin, 2 local" summary line has no column bars.
+  list="${HOME}/.aircheck/skills-list.${sb}"
+  [[ -s "${list}" ]] || continue
+  for skill in $(grep -E '[│|] *local *[│|]' "${list}" | sed -E 's/^[│| ]*([A-Za-z0-9_.-]+(…)?).*/\1/'); do
     [[ " ${REPO_SKILLS[*]} " == *" ${skill} "* ]] && continue
+    # A name the table still cut short ("rlr-mixcloud-title-and…") counts as a repo skill if one starts with it.
+    if [[ "${skill}" == *… ]]; then
+      for r in "${REPO_SKILLS[@]}"; do [[ "${r}" == "${skill%…}"* ]] && continue 2; done
+    fi
     grep -qxF "${sb}:${skill}" "${SKILLS_SEEN}" 2>/dev/null && continue
     msg="Air Check: the agent made itself a new skill, ${skill}, in ${sb}. Check it before the next draft."
     if (( DRY_RUN )); then

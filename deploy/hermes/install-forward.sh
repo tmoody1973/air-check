@@ -5,6 +5,7 @@
 #   bash deploy/hermes/install-forward.sh --test   the same, then kill each forward once and watch it come back
 # Safe to re-run. It stops a running forward only when its full argv is exactly the unit's ExecStart
 # (forward-adopt.sh); anything else on 8642/8643 stops the script before it changes anything.
+# Run it when no draft is in progress: handing a port over drops open connections for about a second.
 # docs/DEPLOY.md, "The Hermes sandbox", has the background.
 set -euo pipefail
 if [[ "$(id -un)" != "user" ]]; then
@@ -25,6 +26,8 @@ health() { curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:$1/heal
 prop() { systemctl show -p "$1" --value "$2"; }
 
 echo "== 1. Preflight (changes nothing)"
+busy="$(ss -tnH state established '( sport = :8642 )' 2>/dev/null | wc -l | tr -d ' ')"
+(( busy > 0 )) && echo "WARNING: $busy open connection(s) on 8642 (a draft may be running). Ctrl-C now to wait; continuing in 10 s." && sleep 10
 for u in "${UNITS[@]}"; do
   port="$(port_of "$u")"
   pid="$(listener "$port")"
@@ -59,15 +62,20 @@ sudo systemctl daemon-reload
 
 echo "== 3. Hand each port to its unit"
 for u in "${UNITS[@]}"; do
-  "$HOME/.aircheck/forward-adopt.sh" "/etc/systemd/system/$u"
   sudo systemctl enable --quiet "$u"
+  port="$(port_of "$u")"
+  if [[ "$(prop ActiveState "$u")" == active && -n "$(listener "$port")" && "$(listener "$port")" == "$(prop MainPID "$u")" ]]; then
+    echo "$u already owns $port; not restarted"
+    continue
+  fi
+  "$HOME/.aircheck/forward-adopt.sh" "/etc/systemd/system/$u"
   sudo systemctl restart "$u"
 done
 
 echo "== 4. Watchdog script (dry run follows)"
 bash "$HERE/install-watchdog.sh"
 
-echo "== 5. Agent config and skills"
+echo "== 5. Agent config (airc re-confirmed; demo agent: skill writing turned off). Skills are not reinstalled."
 bash "$HERE/apply-agent-config.sh" "$REPO"
 
 echo "== 6. Checks"
@@ -89,7 +97,7 @@ for u in "${UNITS[@]}"; do
     fail=1
   fi
 done
-sudo -n -l /usr/bin/systemctl restart aircheck-hermes-forward.service >/dev/null || { echo "FAIL: sudoers rule not active" >&2; fail=1; }
+sudo -n -l /usr/bin/systemctl restart --no-block aircheck-hermes-forward.service >/dev/null || { echo "FAIL: sudoers rule not active" >&2; fail=1; }
 systemctl show -p KillMode aircheck-watchdog.service | grep -qx 'KillMode=process' || { echo "FAIL: watchdog KillMode" >&2; fail=1; }
 
 if (( TEST && ! fail )); then
@@ -116,4 +124,4 @@ if (( TEST && ! fail )); then
 fi
 
 (( fail )) && { echo "Some checks failed. Stop here and keep the output above." >&2; exit 1; }
-echo "All checks passed."
+echo "All checks passed. Now watch for per-connection noise for a minute: journalctl -u aircheck-hermes-forward -f"

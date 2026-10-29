@@ -1,8 +1,8 @@
 # Same as aircheck-hermes-forward.service, for the judges' demo sandbox: keeps 127.0.0.1:8643 ->
 # aircdemo's Hermes API alive. Its NemoClaw forward is just as unsupervised (it only survived Oct 29
 # because it sat in aircheck-hermes-demo.service's never-cleaned cgroup and carried little traffic).
-# UNVERIFIED argv: copied from the airc forward with aircdemo and 8643. install-forward.sh compares it
-# with the live 8643 listener and stops before changing anything if they differ.
+# Its argv was checked byte for byte against the live 8643 forward (pid 8937, Oct 29). install-forward.sh
+# compares it again with the live listener and stops before changing anything if they differ.
 # Install: bash deploy/hermes/install-forward.sh (docs/DEPLOY.md, "The Hermes sandbox").
 [Unit]
 Description=Air Check: supervised host forward 127.0.0.1:8643 -> aircdemo Hermes API
@@ -17,7 +17,7 @@ Environment=XDG_RUNTIME_DIR=/run/user/1001
 ExecStartPre=/home/user/.aircheck/forward-adopt.sh /etc/systemd/system/aircheck-hermes-demo-forward.service
 ExecStart=/home/user/.local/bin/openshell --gateway nemoclaw --gateway-endpoint https://127.0.0.1:8080 --workspace default forward service aircdemo --target-port 8643 --target-host 127.0.0.1 --local 127.0.0.1:8643
 Restart=always
-RestartSec=3
+RestartSec=1
 
 [Install]
 WantedBy=multi-user.target

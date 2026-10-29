@@ -188,10 +188,13 @@ describe("deploy files", () => {
   // `status` per sandbox. Returns each named probe's verdict.
   const runProbes = (names: string[], status: Record<"airc" | "aircdemo", string>) => {
     const home = mkdtempSync(join(tmpdir(), "watchdog-"));
-    mkdirSync(join(home, ".local/bin"), { recursive: true });
-    const stub = join(home, ".local/bin/nemohermes");
-    writeFileSync(stub, `#!/bin/sh\ncase "$1" in aircdemo) cat <<'J'\n${status.aircdemo}\nJ\n;; *) cat <<'J'\n${status.airc}\nJ\n;; esac\n`);
-    chmodSync(stub, 0o755);
+    for (const d of [".local/bin", ".aircheck"]) mkdirSync(join(home, d), { recursive: true });
+    // nemohermes takes the sandbox first; openshell takes `sandbox exec -n <sandbox>`.
+    for (const bin of ["nemohermes", "openshell"]) {
+      const stub = join(home, ".local/bin", bin);
+      writeFileSync(stub, `#!/bin/sh\ncase "$*" in *aircdemo*) cat <<'J'\n${status.aircdemo}\nJ\n;; *) cat <<'J'\n${status.airc}\nJ\n;; esac\n`);
+      chmodSync(stub, 0o755);
+    }
     const probes = read("hermes/watchdog.sh").match(/^PROBES=\([\s\S]*?^\)$/m)![0];
     const script = `set -u\n${probes}\nfor n in ${names.map((n) => `"${n}"`).join(" ")}; do for p in "\${PROBES[@]}"; do [[ "\${p%%|*}" == "$n" ]] || continue; bash -c "\${p#*|}" >/dev/null 2>&1 && echo UP || echo DOWN; done; done`;
     return execFileSync("bash", ["-c", script], { env: { ...process.env, HOME: home }, encoding: "utf8" }).trim().split("\n");
@@ -220,8 +223,17 @@ describe("deploy files", () => {
       `  "aircdemo skill list") cat <<'J'\n${lists.aircdemo}\nJ\n;;`,
       "esac",
     ].join("\n"));
+    stub(join(home, ".local/bin/openshell"), [
+      'echo "$@" >> "' + home + '/openshell.log"',
+      'case "$*" in',
+      `  *aircdemo*) cat <<'J'\n${lists.aircdemo}\nJ\n;;`,
+      `  *) cat <<'J'\n${lists.airc}\nJ\n;;`,
+      "esac",
+    ].join("\n"));
     stub(join(home, "bin/curl"), `case "$*" in *8642*) ${opts.healthy ? "exit 0" : `[ -f "${home}/fixed" ]`};; *) echo "$*" >> "${home}/telegram.log"; exit 0;; esac`);
-    const body = read("hermes/watchdog.sh").replace(/^PROBES=\([\s\S]*?^\)$/m, 'PROBES=(\n  "Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8642/health"\n)');
+    const real = read("hermes/watchdog.sh");
+    const skillsProbe = opts.skills ? `\n  ${real.split("\n").find((l) => l.startsWith('  "Agent skills|'))!.trim()}` : "";
+    const body = real.replace(/^PROBES=\([\s\S]*?^\)$/m, `PROBES=(\n  "Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8642/health"${skillsProbe}\n)`);
     const file = join(home, "watchdog.sh");
     writeFileSync(file, body);
     const out = execFileSync("bash", [file, ...(opts.dry ? ["--dry-run"] : [])], {
@@ -229,7 +241,7 @@ describe("deploy files", () => {
     });
     const log = (f: string) => (existsSync(join(home, f)) ? readFileSync(join(home, f), "utf8") : "");
     const state = existsSync(join(home, ".aircheck/watchdog.state")) ? readFileSync(join(home, ".aircheck/watchdog.state"), "utf8").trim() : "";
-    return { home, out, recovers: log("recover.log"), restarts: log("sudo.log"), telegram: log("telegram.log"), state };
+    return { home, out, recovers: log("recover.log"), restarts: log("sudo.log"), telegram: log("telegram.log"), openshell: log("openshell.log"), state };
   };
 
   it("a failing Hermes probe runs `airc recover` once and sends only the reconnected line when it heals", () => {
@@ -268,7 +280,7 @@ describe("deploy files", () => {
   });
 
   it("the Agent skills probe goes DOWN when either sandbox lacks rlr-description-safety (Plan 5c Task 5)", () => {
-    const listed = "│ rlr-description-safety  │ local │ enabled │";
+    const listed = "│ rlr-description-safety      │          │ local  │ local   │ enabled │";
     expect(runProbes(["Agent skills"], { airc: listed, aircdemo: listed })).toEqual(["UP"]);
     expect(runProbes(["Agent skills"], { airc: listed, aircdemo: "│ claude-code │ builtin │" })).toEqual(["DOWN"]);
     expect(runProbes(["Agent skills"], { airc: "", aircdemo: listed })).toEqual(["DOWN"]);
@@ -285,7 +297,7 @@ describe("deploy files", () => {
 
   it("a failing Hermes probe restarts the forward unit first, and skips recover when that fixes it", () => {
     const r = runHeal({ restartFixes: true });
-    expect(r.restarts.trim().split("\n")).toEqual(["-n /usr/bin/systemctl restart aircheck-hermes-forward.service"]);
+    expect(r.restarts.trim().split("\n")).toEqual(["-n /usr/bin/systemctl restart --no-block aircheck-hermes-forward.service"]);
     expect(r.recovers).toBe("");
     expect(r.state).toBe("");
     expect(r.telegram.trim().split("\n")).toHaveLength(1);
@@ -294,10 +306,10 @@ describe("deploy files", () => {
   it("the watchdog's sudo command is exactly what the sudoers rule allows, and the rule allows nothing else", () => {
     const rules = read("hermes/aircheck-forward.sudoers").split("\n").filter((l) => l && !l.startsWith("#"));
     expect(rules).toEqual([
-      "user ALL=(root) NOPASSWD: /usr/bin/systemctl restart aircheck-hermes-forward.service, /usr/bin/systemctl restart aircheck-hermes-demo-forward.service",
+      "user ALL=(root) NOPASSWD: /usr/bin/systemctl restart --no-block aircheck-hermes-forward.service, /usr/bin/systemctl restart --no-block aircheck-hermes-demo-forward.service",
     ]);
     const w = read("hermes/watchdog.sh");
-    expect(w).toContain('sudo -n /usr/bin/systemctl restart "${unit}"');
+    expect(w).toContain('sudo -n /usr/bin/systemctl restart --no-block "${unit}"');
     expect(w).toContain('unit="aircheck-hermes-forward.service"');
     expect(w).toContain('unit="aircheck-hermes-demo-forward.service"');
   });
@@ -315,7 +327,7 @@ describe("deploy files", () => {
     for (const [file, box, port, bootUnit] of forwards) {
       const lines = read(file).split("\n");
       expect(lines.filter((l) => l.startsWith("ExecStart=")), file).toEqual([`ExecStart=${forwardArgv(box, port)}`]);
-      for (const l of ["Restart=always", "RestartSec=3", "StartLimitIntervalSec=0", "WantedBy=multi-user.target", ...hermesEnv])
+      for (const l of ["Restart=always", "RestartSec=1", "StartLimitIntervalSec=0", "WantedBy=multi-user.target", ...hermesEnv])
         expect(lines, `${file}: ${l}`).toContain(l);
       expect(lines, file).toContain(`After=${bootUnit} user@1001.service`);
       expect(lines, file).toContain(`Wants=${bootUnit}`);
@@ -332,7 +344,7 @@ describe("deploy files", () => {
 
   // forward-adopt.sh with a stub `ss` (a listener while ALIVE exists), a fake /proc and `kill` overridden by an
   // exported shell function, so no real process is touched.
-  const runAdopt = (argv: string, opts: { listening?: boolean } = {}) => {
+  const runAdopt = (argv: string, opts: { listening?: boolean; age?: number } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), "adopt-"));
     for (const d of ["bin", "proc/4242"]) mkdirSync(join(dir, d), { recursive: true });
     const alive = join(dir, "ALIVE");
@@ -340,6 +352,8 @@ describe("deploy files", () => {
     writeFileSync(join(dir, "proc/4242/cmdline"), argv.split(" ").join("\0") + "\0");
     writeFileSync(join(dir, "bin/ss"), `#!/bin/sh\n[ -f "${alive}" ] && echo 'LISTEN 0 4096 127.0.0.1:8642 0.0.0.0:* users:(("openshell",pid=4242,fd=10))'\nexit 0\n`);
     chmodSync(join(dir, "bin/ss"), 0o755);
+    writeFileSync(join(dir, "bin/ps"), `#!/bin/sh\necho "   ${opts.age ?? 3600}"\n`);
+    chmodSync(join(dir, "bin/ps"), 0o755);
     const unit = join(dir, "aircheck-hermes-forward.service");
     writeFileSync(unit, read("hermes/aircheck-hermes-forward.service"));
     const script = `kill() { echo "$@" >> "${dir}/killed"; rm -f "${alive}"; }; export -f kill; bash "${resolve(__dirname, "hermes/forward-adopt.sh")}" "${unit}"`;
@@ -358,6 +372,11 @@ describe("deploy files", () => {
     expect(runAdopt(forwardArgv("airc", 8642), { listening: false })).toEqual({ code: 0, killed: "" });
   });
 
+  it("forward-adopt leaves a matching forward younger than 30 s alone (NemoClaw may have just started it)", () => {
+    expect(runAdopt(forwardArgv("airc", 8642), { age: 29 })).toEqual({ code: 1, killed: "" });
+    expect(runAdopt(forwardArgv("airc", 8642), { age: 30 })).toEqual({ code: 0, killed: "4242" });
+  });
+
   it("install-forward.sh never kills broadly: its one kill is the unit's MainPID in --test; strays go through forward-adopt", () => {
     const sh = read("hermes/install-forward.sh");
     const code = sh.replace(/^\s*#.*$/gm, "");
@@ -370,29 +389,41 @@ describe("deploy files", () => {
     expect(code.indexOf('/proc/$pid/cmdline')).toBeLessThan(code.indexOf("sudo install"));
     expect(code).toContain("bash \"$HERE/install-watchdog.sh\"");
     expect(code).toContain("bash \"$HERE/apply-agent-config.sh\" \"$REPO\"");
+    // Live prod: config only, never a skills reinstall (that leaves a window without rlr-description-safety).
+    expect(code).not.toMatch(/install-skills|--with-skills/);
+    // A unit that already owns its port is not restarted.
+    expect(code).toMatch(/already owns \$port; not restarted"\n\s*continue/);
   });
 
-  it("apply-agent-config sets and reads back the skill-creation lock in both sandboxes, then reinstalls skills", () => {
+  it("apply-agent-config sets and reads back the skill-writing lock in both sandboxes; skills only with --with-skills", () => {
     const dir = mkdtempSync(join(tmpdir(), "agent-config-"));
     for (const d of ["home/.local/bin", "repo/deploy/hermes"]) mkdirSync(join(dir, d), { recursive: true });
     const stub = (path: string, body: string) => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); };
-    const yaml = (nudge: string) => `model: x\nskills:\n  creation_nudge_interval: ${nudge}\n  write_approval: true\nmemory:\n  write_approval: true\n`;
-    const run = (nudge: string) => {
-      stub(join(dir, "home/.local/bin/openshell"), `echo "$@" >> "${dir}/openshell.log"\ncase "$*" in *config.yaml*) cat <<'Y'\n${yaml(nudge)}\nY\n;; esac`);
-      stub(join(dir, "repo/deploy/hermes/install-skills.sh"), `echo "$@" > "${dir}/skills.log"`);
+    stub(join(dir, "repo/deploy/hermes/install-skills.sh"), `echo "$@" > "${dir}/skills.log"`);
+    const run = (readBack: string, ...args: string[]) => {
+      rmSync(join(dir, "openshell.log"), { force: true });
+      rmSync(join(dir, "skills.log"), { force: true });
+      stub(join(dir, "home/.local/bin/openshell"), `echo "$@" >> "${dir}/openshell.log"\nprintf '${readBack}'`);
       try {
-        execFileSync("bash", [resolve(__dirname, "hermes/apply-agent-config.sh"), join(dir, "repo")], { env: { ...process.env, HOME: join(dir, "home") }, stdio: "pipe" });
-        return 0;
-      } catch (e: any) { return e.status as number; }
+        const out = execFileSync("bash", [resolve(__dirname, "hermes/apply-agent-config.sh"), ...args, join(dir, "repo")], { env: { ...process.env, HOME: join(dir, "home") }, encoding: "utf8", stdio: "pipe" });
+        return { code: 0, out };
+      } catch (e: any) { return { code: e.status as number, out: String(e.stdout) }; }
     };
-    expect(run("0")).toBe(0);
+    const ok = run("0\\ntrue\\n");
+    expect(ok.code).toBe(0);
+    expect(ok.out).toContain("aircdemo (demo agent): skill writing turned off");
     const calls = readFileSync(join(dir, "openshell.log"), "utf8").trim().split("\n");
+    expect(calls).toHaveLength(2); // one call per sandbox
     for (const sb of ["airc", "aircdemo"])
-      expect(calls).toContain(`sandbox exec -n ${sb} -- bash -lc hermes config set skills.creation_nudge_interval 0 && hermes config set skills.write_approval true`);
+      expect(calls).toContain(`sandbox exec -n ${sb} -- bash -lc hermes config set skills.creation_nudge_interval 0 >/dev/null && hermes config set skills.write_approval true >/dev/null && hermes config get skills.creation_nudge_interval && hermes config get skills.write_approval`);
+    expect(existsSync(join(dir, "skills.log"))).toBe(false); // no skills reinstall by default
+    expect(run("skills.creation_nudge_interval = 0\\nskills.write_approval = True\\n").code).toBe(0);
+    expect(run("0\\ntrue\\n", "--with-skills").code).toBe(0);
     expect(readFileSync(join(dir, "skills.log"), "utf8").trim()).toBe(join(dir, "repo"));
-    rmSync(join(dir, "skills.log"));
-    expect(run("5")).toBe(1); // a value that did not stick stops it before the skills step
+    // The live demo values on Oct 29, or anything that did not stick, stop it before the skills step.
+    expect(run("15\\nfalse\\n", "--with-skills").code).toBe(1);
     expect(existsSync(join(dir, "skills.log"))).toBe(false);
+    expect(run("", "--with-skills").code).toBe(1);
   });
 
   it("the watchdog's skill allowlist is exactly what install-skills.sh installs", () => {
@@ -400,19 +431,33 @@ describe("deploy files", () => {
     expect(arr(read("hermes/watchdog.sh"), "REPO_SKILLS")).toEqual(arr(read("hermes/install-skills.sh"), "SKILLS"));
   });
 
-  it("an agent-made local skill alerts once per sandbox and name; repo and builtin skills never alert", () => {
-    const table = (...rows: string[]) => ["│ Name │ Source │ Status │", ...rows, "0 hub-installed, 53 builtin, 3 local"].join("\n");
+  it("an agent-made local skill alerts once per sandbox and name; repo, truncated repo and builtin skills never alert", () => {
+    // Hermes's real 5-column table. The first airc row is the truncated form `nemohermes skill list` printed on the VM.
+    const row = (name: string, source = "local") => `│ ${name.padEnd(28)} │          │ ${source.padEnd(6)} │ ${source.padEnd(7)} │ enabled │`;
+    const table = (...rows: string[]) => ["┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┓", "┃ Name ┃ Category ┃ Source ┃ Trust ┃ Status ┃", ...rows, "0 hub-installed, 53 builtin, 3 local"].join("\n");
     const skills = {
-      airc: table("│ rlr-description-safety │ local │ enabled │", "│ rlr-mixcloud-title-and-tags │ local │ enabled │", "│ claude-code │ builtin │ enabled │", "│ mixcloud-package-submission │ local │ enabled │"),
-      aircdemo: table("│ rlr-description-safety │ local │ enabled │"),
+      airc: table(row("rlr-mixcloud-title-and…"), row("rlr-description-safety"), row("rlr-mixcloud-title-and-tags"), row("claude-code", "builtin"), row("mixcloud-package-submission")),
+      aircdemo: table(row("rlr-description-safety")),
     };
     const first = runHeal({ healthy: true, skills });
+    expect(first.state).toBe(""); // the Agent skills probe itself is UP
     expect(first.telegram).toContain("mixcloud-package-submission");
     expect(first.telegram).toContain("in airc");
     expect(first.telegram).not.toMatch(/rlr-|claude-code|aircdemo/);
     expect(first.out).toContain("watchdog: new local skill in airc: mixcloud-package-submission");
+    // One listing per sandbox per run, untruncated, local only.
+    expect(first.openshell.trim().split("\n")).toEqual([
+      "sandbox exec -n airc -- bash -lc COLUMNS=200 hermes skills list --source local",
+      "sandbox exec -n aircdemo -- bash -lc COLUMNS=200 hermes skills list --source local",
+    ]);
     const again = runHeal({ healthy: true, skills, home: first.home });
     expect(again.telegram).toBe(first.telegram); // nothing new sent
     expect(runHeal({ healthy: true, skills, dry: true }).out).toContain("mixcloud-package-submission");
+  });
+
+  it("the watchdog probes both forward units, so a stopped unit alerts once like any other probe", () => {
+    const w = read("hermes/watchdog.sh");
+    expect(w).toContain('"Hermes forward|systemctl is-active --quiet aircheck-hermes-forward"');
+    expect(w).toContain('"Demo Hermes forward|systemctl is-active --quiet aircheck-hermes-demo-forward"');
   });
 });
