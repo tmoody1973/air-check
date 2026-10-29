@@ -94,7 +94,7 @@ export function RunProgressCard({
   status: RunRowStatus;
   source: "live" | "scripted";
   runId?: string;
-  kind?: "chat" | "draft-package";
+  kind?: "chat" | "draft-package" | "research";
   packageId?: string;
   /** False until Convex has the Clerk token; taking over before then fails with UNAUTHENTICATED. */
   authReady?: boolean;

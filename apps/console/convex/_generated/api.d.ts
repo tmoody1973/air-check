@@ -28,6 +28,7 @@ import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
 import type * as publisher from "../publisher.js";
 import type * as radar from "../radar.js";
+import type * as research from "../research.js";
 import type * as relay from "../relay.js";
 import type * as runDefaults from "../runDefaults.js";
 import type * as runs from "../runs.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   packages: typeof packages;
   publisher: typeof publisher;
   radar: typeof radar;
+  research: typeof research;
   relay: typeof relay;
   runDefaults: typeof runDefaults;
   runs: typeof runs;

@@ -2,7 +2,7 @@ import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { MIN_TOKEN_LENGTH, pickInput, pickRevision, privateTerms, readCapped, workspaceForToken } from "./agentSubmit";
+import { MIN_TOKEN_LENGTH, pickInput, pickResearch, pickRevision, pickSearchUsage, privateTerms, readCapped, workspaceForToken } from "./agentSubmit";
 
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -110,10 +110,36 @@ const radarView = httpAction(async (ctx, req) => {
   return json(200, { releases });
 });
 
+// Plan 7 (Hard Rule 1, decision 011): the agent saves one research block, in its token's workspace only. It can write
+// research rows and nothing else; every refusal is a plain sentence the bridge hands back (R8: they name only the key
+// and the agent's own words). The only function this route may call is internal.research.submitEntry.
+const submitResearch = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const picked = pickResearch(got.body);
+  if ("problems" in picked) return json(400, { problems: picked.problems });
+  const r = await ctx.runMutation(internal.research.submitEntry, { workspace: got.workspace, input: picked.input });
+  if (r.ok) return json(200, { saved: r.saved, claims: r.claims, verify: r.verify, dropped: r.dropped });
+  if (r.status === 404) return json(404, { error: "NOT_FOUND" });
+  return r.status === 400 ? json(400, { problems: r.problems }) : json(409, { error: r.problems[0] });
+});
+
+// Plan 7: the bridge asks before each source_search. A query naming an active embargo is refused uncounted (R2); else
+// one is added to today's count when under the cap. The only function this route may call is internal.research.countSearch.
+const searchUsage = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const picked = pickSearchUsage(got.body);
+  if (!picked) return json(400, { problems: ["body must be query, with optional source web or apple_music"] });
+  return json(200, await ctx.runMutation(internal.research.countSearch, { workspace: got.workspace, ...picked }));
+});
+
 const http = httpRouter();
 http.route({ path: "/agent/packages", method: "POST", handler: submitPackage });
 http.route({ path: "/agent/packages/revise", method: "POST", handler: revisePackage });
 http.route({ path: "/agent/packages/get", method: "POST", handler: getPackage });
 http.route({ path: "/agent/episodes/rerun", method: "POST", handler: markRerun });
 http.route({ path: "/agent/radar", method: "POST", handler: radarView });
+http.route({ path: "/agent/research", method: "POST", handler: submitResearch });
+http.route({ path: "/agent/search-usage", method: "POST", handler: searchUsage });
 export default http;

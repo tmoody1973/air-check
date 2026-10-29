@@ -96,6 +96,27 @@ describe("relay.pending / started / finished", () => {
     expect(await run(t)).toMatchObject({ status: "failed" });
     expect((await run(t)).state.status).toBe("failed");
   });
+
+  // Plan 7 (D11a): a research run's hook is scheduled, never run inline, so nothing it does can roll back the terminal status.
+  test("a research run starts without a conversation; finished sets it terminal and schedules research.onRunFinished", async () => {
+    const t = convexTest(schema, modules);
+    const tracklistText = ["HOUR 1", "Alfa Mist – Organic Rust", "Kokoroko – Abusey Junction", "HOUR 2", "Moses Boyd – Stranger Than Fiction"].join("\n");
+    const { runId } = await t.withIdentity(human).mutation(api.research.startShowNotes, { showDate: "2026-10-30", tracklistText, angles: true });
+    const [pending] = await t.query(api.relay.pending, { token: RELAY });
+    expect(pending).toMatchObject({ runId, kind: "research", instructions: RUN_INSTRUCTIONS });
+    expect(pending!.conversationId).toBeUndefined();
+    await t.mutation(api.relay.started, { token: RELAY, runId, hermesRunId: "h1" });
+    await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
+    expect(await run(t)).toMatchObject({ status: "completed" });
+    const scheduled = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect());
+    expect(scheduled.map((s) => [s.name, s.args[0]])).toEqual([["research:onRunFinished", { runId }]]);
+  });
+
+  test("a chat run schedules nothing when it finishes", async () => {
+    const { t, runId } = await started();
+    await t.mutation(api.relay.finished, { token: RELAY, runId, status: "completed" });
+    expect(await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect())).toEqual([]);
+  });
 });
 
 describe("relay.events", () => {

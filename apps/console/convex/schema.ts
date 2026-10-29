@@ -78,6 +78,30 @@ export const scannedEpisodeFields = {
 };
 export const sourceStateV = v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected"));
 
+// Plan 7: sourced research. Shapes mirror core's research types; claims are judged by code (core judgeClaim) before they
+// are stored, and a source's matching text is never kept. Embargoes are not stored here: every read checks Plan 8's
+// activeEmbargoes(), so a later, cleared or date-less embargo is always current.
+export const researchKindV = v.union(v.literal("show-notes"), v.literal("verify"), v.literal("deep-dive"));
+export const researchStatusV = v.union(
+  v.literal("queued"), v.literal("running"), v.literal("taken-over"), v.literal("done"), v.literal("stopped"), v.literal("failed"),
+);
+export const researchTrackV = v.object({
+  key: v.string(), hour: v.union(v.literal(1), v.literal(2)), position: v.number(), artist: v.string(), title: v.string(), feat: v.optional(v.string()), closing: v.boolean(),
+});
+export const noteLineV = v.object({ id: v.string(), text: v.string(), trackKey: v.optional(v.string()), closing: v.boolean() });
+export const claimKindV = v.union(
+  v.literal("release"), v.literal("release-date"), v.literal("label"), v.literal("credit"), v.literal("track-number"), v.literal("length"),
+  v.literal("bio"), v.literal("detail"), v.literal("thread"), v.literal("connection"),
+);
+export const judgedClaimV = v.object({
+  kind: claimKindV,
+  text: v.string(),
+  value: v.optional(v.string()),
+  status: v.union(v.literal("confirmed"), v.literal("sourced"), v.literal("conflict"), v.literal("could-not-verify")),
+  sources: v.array(v.object({ url: v.string(), host: v.string(), title: v.string(), via: v.string(), says: v.optional(v.string()), primary: v.boolean(), matched: v.boolean() })),
+  check: v.optional(v.string()),
+});
+
 export default defineSchema({
   episodes: defineTable({
     ...scannedEpisodeFields,
@@ -259,7 +283,7 @@ export default defineSchema({
     upcoming: v.optional(v.array(v.object({ label: v.string(), text: v.string(), status: v.union(v.literal("next"), v.literal("skipped")) }))),
     updatedAt: v.number(),
     // Plan 4b fields are optional so Plan-3-era rows still satisfy the schema (see runDefaults.ts).
-    kind: v.optional(v.union(v.literal("chat"), v.literal("draft-package"))),
+    kind: v.optional(v.union(v.literal("chat"), v.literal("draft-package"), v.literal("research"))),
     source: v.optional(v.union(v.literal("live"), v.literal("scripted"))),
     status: v.optional(runStatusV),
     input: v.optional(v.string()), // the Hermes instruction, built at queue time
@@ -272,12 +296,62 @@ export default defineSchema({
     form: v.optional(v.object({ showDate: v.string(), tracklistText: v.string(), notes: v.string() })),
     lastSeq: v.optional(v.number()), // highest relay event seq applied
     createdAt: v.optional(v.number()),
+    jobId: v.optional(v.string()), // Plan 7: the research job a `research` run works on
   })
     .index("by_runId", ["runId"])
     .index("by_status", ["status"])
     .index("by_session_created", ["sessionKey", "createdAt"])
     .index("by_workspace_source_created", ["workspace", "source", "createdAt"])
     .index("by_kind_showDate", ["kind", "form.showDate"]),
+  // Plan 7: one row per research job. `sessionKey`: the demo visitor's rate-limit key, so a continuation (queued with no
+  // signed-in caller) counts against the same visitor (D11b) and one visitor's job never blocks another's.
+  research: defineTable({
+    workspace: workspaceV,
+    jobId: v.string(),
+    kind: researchKindV,
+    showDate: v.optional(v.string()),
+    subject: v.optional(v.object({ type: v.union(v.literal("artist"), v.literal("label"), v.literal("release")), name: v.string(), fromKey: v.optional(v.string()) })),
+    tracks: v.optional(v.array(researchTrackV)),
+    lines: v.optional(v.array(noteLineV)),
+    notesSource: v.optional(v.union(v.literal("air-check"), v.literal("paper"), v.literal("pasted"))),
+    angles: v.boolean(),
+    status: researchStatusV,
+    runIds: v.array(v.string()),
+    continuations: v.number(),
+    lastProblems: v.optional(v.array(v.string())),
+    playContext: v.optional(v.array(v.object({ artist: v.string(), station: v.union(v.literal("88nine"), v.literal("hyfin")), lastPlayed: v.optional(v.string()) }))),
+    sessionKey: v.optional(v.string()),
+    scope: v.optional(v.array(v.string())), // Regenerate: the one key this request covers, so it queues no continuation
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_jobId", ["jobId"])
+    .index("by_workspace_created", ["workspace", "createdAt"])
+    .index("by_workspace_kind_showDate", ["workspace", "kind", "showDate"]),
+  // Plan 7: one row per block. `savedAt`: when the agent last saved it (absent on a row only Tarik has touched).
+  // `suppliedNote`, a `private` mark by Tarik and `edited` are his and survive every agent save.
+  researchEntries: defineTable({
+    workspace: workspaceV,
+    jobId: v.string(),
+    key: v.string(),
+    block: v.union(v.literal("track"), v.literal("intro"), v.literal("threads"), v.literal("line"), v.literal("brief")),
+    claims: v.array(judgedClaimV),
+    intro: v.optional(v.string()),
+    angle: v.optional(v.string()),
+    note: v.optional(v.string()),
+    replacement: v.optional(v.string()),
+    private: v.optional(v.object({ by: v.union(v.literal("agent"), v.literal("tarik")), reason: v.optional(v.string()) })),
+    suppliedNote: v.optional(v.string()),
+    edited: v.optional(v.object({ text: v.string(), at: v.number() })),
+    stale: v.optional(v.literal(true)),
+    savedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_jobId_key", ["jobId", "key"]),
+  // Plan 7: source_search calls per workspace per America/Chicago day (`day` = chicagoDayKey). `source` absent = web
+  // (Tavily); "apple_music" is counted apart. Kept here so a bridge restart never resets it.
+  searchUsage: defineTable({ workspace: workspaceV, day: v.string(), source: v.optional(v.literal("apple_music")), count: v.number() })
+    .index("by_workspace_day", ["workspace", "day"]),
   conversations: defineTable({
     workspace: workspaceV,
     title: v.string(),

@@ -1,5 +1,6 @@
 import { type RunState } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
@@ -97,6 +98,8 @@ export const finished = mutation({
     const state = run.state as RunState;
     const settled = state.status === "running" || state.status === "stopping";
     await ctx.db.patch(run._id, { status, state: settled ? { ...state, status } : state, updatedAt: Date.now() });
+    // Plan 7 (D11a): scheduled, never inline, so nothing the research hook does can roll back this terminal status.
+    if (run.kind === "research") await ctx.scheduler.runAfter(0, internal.research.onRunFinished, { runId });
   },
 });
 

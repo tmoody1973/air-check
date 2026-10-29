@@ -18,7 +18,7 @@ export function requireIngest(token: string): void {
   if (shared || !sameToken(token, INGEST_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
-const MAX_NOTES_BYTES = 65_536;
+export const MAX_NOTES_BYTES = 65_536;
 const MAX_TRACKS = 100;
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
