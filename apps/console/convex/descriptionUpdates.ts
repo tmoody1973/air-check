@@ -1,10 +1,11 @@
-import { checkDescriptionChange, updateFingerprint, type PackageDraft } from "@aircheck/core";
+import { checkDescriptionChange, chicagoDayKey, embargoHits, updateFingerprint, type PackageDraft } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { privateTerms } from "./agentSubmit";
 import { actorOf, workspaceOf } from "./gate";
 import { requirePublisher } from "./publisher";
+import { activeEmbargoes, descriptionEmbargoes } from "./radar";
 
 // Plan 5c Task 4: a new description for a show already on Mixcloud. Hard Rule 1: the agent or a human proposes; only a
 // signed-in real human approves the exact text (its fingerprint); the publisher claims only `approved` updates. The
@@ -45,7 +46,7 @@ export async function proposeUpdate(
   // Hard Rule 9: demo packages never publish, so they never get an update either.
   if (pkg.workspace !== "real" || draft.workspace !== "real") return { ok: false, code: "NOT_READY", message: "demo packages are never published, so they cannot be updated" };
   if (pkg.status !== "succeeded") return { ok: false, code: "NOT_READY", message: "only a show already on Mixcloud can have its description updated" };
-  const problems = checkDescriptionChange(draft, description, sources, privateTerms());
+  const problems = [...checkDescriptionChange(draft, description, sources, privateTerms()), ...(await descriptionEmbargoes(ctx, "real", description))];
   if (problems.length) return { ok: false, code: "BAD_INPUT", message: problems.join("; ") };
   const updates = await updatesOf(ctx, pkg.packageId);
   const live = liveOf(pkg, updates);
@@ -147,7 +148,10 @@ export const claim = mutation({
   handler: async (ctx, { token }) => {
     requirePublisher(token);
     await requeueStuckUpdates(ctx);
-    const u = await ctx.db.query("descriptionUpdates").withIndex("by_status", (q) => q.eq("status", "approved")).first();
+    // Plan 8: an update approved before an embargo arrived waits, approved, until the embargo ends or is cleared.
+    const active = await activeEmbargoes(ctx, "real", chicagoDayKey(Date.now()));
+    const approved = await ctx.db.query("descriptionUpdates").withIndex("by_status", (q) => q.eq("status", "approved")).collect();
+    const u = approved.find((x) => !embargoHits({ description: x.description }, active).blocking.length);
     if (!u) return null;
     const pkg = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", u.packageId)).unique();
     // Hard Rule 9 again, and the show must really be on Mixcloud: its receipt is the only source of the edit URL.

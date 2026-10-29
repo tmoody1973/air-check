@@ -218,6 +218,16 @@ describe("publishPass: a lost claim reply", () => {
     expect(s.fake.calls.filter((c) => c[0] === "unclaim")).toEqual([]);
     expect(s.srv.uploadRequests()).toBe(0);
   });
+
+  test("Plan 8: an embargo hold (NOT_READY as ConvexError data, with the reason): it waits, nothing to undo, no upload", async () => {
+    const s = await setup();
+    s.fake.convex.claim = async (id) => {
+      throw Object.assign(new Error("[Request ID: x] Server Error"), { data: { code: "NOT_READY", message: `package ${id} is held: 'T' by A is embargoed until 2026-11-07` } });
+    };
+    await publishPass(await s.deps());
+    expect(s.fake.calls.filter((c) => c[0] === "unclaim" || c[0] === "result")).toEqual([]);
+    expect(s.srv.uploadRequests()).toBe(0);
+  });
 });
 
 describe("publishPass: Mixcloud's answers (R23)", () => {

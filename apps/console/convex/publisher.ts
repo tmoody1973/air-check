@@ -1,10 +1,11 @@
-import { chicagoDayKey, type PackageDraft } from "@aircheck/core";
+import { chicagoDayKey, embargoHits, type PackageDraft } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
 import { requeueStuckUpdates } from "./descriptionUpdates";
 import { gateFor, viaGate } from "./gate";
 import { writeMixcloudStatus } from "./mixcloud";
+import { activeEmbargoes, embargoProblems, markPlayed } from "./radar";
 import { mixcloudStatusFields } from "./schema";
 
 // The publisher service on the VM is the only caller. Every function checks PUBLISHER_TOKEN first, in constant
@@ -19,24 +20,32 @@ export function requirePublisher(token: string): void {
 /**
  * Approved real packages (demo ones never) with the cover the upload will use, and how many went up today
  * (America/Chicago day key `today`, e.g. "2026-10-28") for the 3-per-day pace. Shared by `queue` and the package page's `packages.publishState`.
+ * Plan 8: an approved package that an embargo now holds (set after approval) is left out and listed in `held` with why.
  */
 export async function publishQueue(ctx: QueryCtx, today: string) {
   const real = (status: "approved" | "succeeded" | "outcome_unknown") =>
     ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect();
   const standard = process.env.STANDARD_COVER_STORAGE_ID;
-  const packages = (await real("approved")).map((d) => {
+  const active = await activeEmbargoes(ctx, "real", today);
+  const held: { packageId: string; reasons: string[] }[] = [];
+  const packages = (await real("approved")).flatMap((d) => {
     const draft = d.draft as PackageDraft;
+    const { blocking } = embargoHits({ description: draft.description, tracks: draft.tracks }, active);
+    if (blocking.length) {
+      held.push({ packageId: d.packageId, reasons: blocking });
+      return [];
+    }
     const coverStorageId = draft.coverStorageId ?? standard;
-    return {
+    return [{
       packageId: d.packageId, showDate: draft.showDate, decidedAt: d.decidedAt, draft, fingerprint: d.fingerprint,
       ...(coverStorageId ? { coverStorageId } : {}),
-    };
+    }];
   });
   // R10: an unknown outcome may be a real post, so it counts too (pacing errs conservative).
   // ponytail: scans every such result ever (a few a week); add a by-day index if this grows large.
   const results = [...(await real("succeeded")), ...(await real("outcome_unknown"))];
   const publishedToday = results.filter((d) => d.result?.at && chicagoDayKey(Date.parse(d.result.at)) === today).length;
-  return { packages, publishedToday };
+  return { packages, publishedToday, held };
 }
 
 export const queue = query({
@@ -52,6 +61,13 @@ export const claim = mutation({
   args: { token: v.string(), packageId: v.string() },
   handler: async (ctx, { token, packageId }) => {
     requirePublisher(token);
+    // Plan 8: an embargo that arrived after approval holds the package; the publisher waits on NOT_READY.
+    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+    if (doc?.workspace === "real" && doc.status === "approved") {
+      const draft = doc.draft as PackageDraft;
+      const { blocking } = await embargoProblems(ctx, "real", { description: draft.description, tracks: draft.tracks });
+      if (blocking.length) throw new ConvexError({ code: "NOT_READY", message: `package ${packageId} is held: ${blocking.join("; ")}` });
+    }
     const rec = await viaGate(() => gateFor(ctx).claimForPublish(packageId));
     if (!rec) throw new ConvexError({ code: "NOT_READY", message: `package ${packageId} is not approved` });
     return rec;
@@ -68,7 +84,10 @@ export const result = mutation({
   args: { token: v.string(), packageId: v.string(), result: resultV },
   handler: async (ctx, { token, packageId, result }) => {
     requirePublisher(token);
-    return viaGate(() => gateFor(ctx).recordResult(packageId, result));
+    const rec = await viaGate(() => gateFor(ctx).recordResult(packageId, result));
+    // Plan 8: a show that went up played its tracks; matching radar records say so (never a passed one).
+    if (rec.status === "succeeded" && rec.draft.workspace === "real") await markPlayed(ctx, rec.draft.tracks);
+    return rec;
   },
 });
 

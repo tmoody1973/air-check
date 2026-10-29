@@ -2,6 +2,8 @@ import {
   type ActiveEmbargo,
   bandcampPageUrl,
   chicagoDayKey,
+  describeEmbargo,
+  embargoHits,
   isEmbargoActive,
   isShowDate,
   MAX_STORED_CHARS,
@@ -447,10 +449,50 @@ export const notAdded = query({
 });
 
 // ponytail: scans the workspace's releases (hundreds at radio scale). Add an index on embargo if it grows.
+const embargoedRows = async (ctx: QueryCtx, workspace: Workspace, today: string) =>
+  (await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", workspace)).collect()).filter((r) => isEmbargoActive(r.embargo, today));
+const asActive = (r: Doc<"releases">): ActiveEmbargo => ({ artist: r.artist, title: r.title, until: r.embargo!.until });
+
 /** Active embargoes in a workspace on `today` (a Chicago day key). Plan 8 Task 5 and Plan 7 check text against these. */
 export async function activeEmbargoes(ctx: QueryCtx, workspace: Workspace, today: string): Promise<ActiveEmbargo[]> {
-  const rows = await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", workspace)).collect();
-  return rows.filter((r) => isEmbargoActive(r.embargo, today)).map((r) => ({ artist: r.artist, title: r.title, until: r.embargo!.until }));
+  return (await embargoedRows(ctx, workspace, today)).map(asActive);
+}
+
+type EmbargoInput = { description?: string; tracks?: { artist: string; title: string }[] };
+
+/**
+ * What a package's public text and tracks would break today, in the package's own workspace only (Hard Rule 9).
+ * `blocking` refuses public text and holds Approve and the publisher; `sameArtist` is a review note.
+ */
+export async function embargoProblems(ctx: QueryCtx, workspace: Workspace, input: EmbargoInput): Promise<{ blocking: string[]; sameArtist: string[] }> {
+  return embargoHits(input, await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now())));
+}
+
+/** The refusal line a public description gets for each blocking embargo. */
+export async function descriptionEmbargoes(ctx: QueryCtx, workspace: Workspace, description: unknown): Promise<string[]> {
+  if (typeof description !== "string") return [];
+  return (await embargoProblems(ctx, workspace, { description })).blocking.map((b) => `${b}. Leave it out.`);
+}
+
+/** The package page's view: each blocking line with its release, for the "Clear embargo" button. A private view. */
+export async function embargoView(ctx: QueryCtx, workspace: Workspace, input: EmbargoInput) {
+  const rows = await embargoedRows(ctx, workspace, chicagoDayKey(Date.now()));
+  const { blocking, sameArtist } = embargoHits(input, rows.map(asActive));
+  const idOf = new Map(rows.map((r) => [describeEmbargo(asActive(r)), r._id]));
+  return { blocking: blocking.map((text) => ({ releaseId: idOf.get(text)!, text })), sameArtist };
+}
+
+/**
+ * A published show's tracks were played: a matching real release goes to `played` from new or considering, never
+ * from passed (Tarik's call stands). Called by publisher.result on success.
+ */
+export async function markPlayed(ctx: MutationCtx, tracks: { artist: string; title: string }[]): Promise<void> {
+  const keys = new Set(tracks.map((t) => releaseKey(t.artist, t.title)));
+  for (const key of keys) {
+    const r = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
+    const s = r && statusOf(r);
+    if (s === "new" || s === "considering") await ctx.db.patch(r!._id, { status: "played", statusAt: Date.now() });
+  }
 }
 
 export type AgentRelease = {

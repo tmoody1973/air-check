@@ -177,7 +177,8 @@ test("descriptionUpdates: proposals are only ever inserted as proposed; only app
   // The publisher's functions check its token first, and claim takes only approved rows.
   for (const name of ["claim", "record"]) expect(fnBody(text, `export const ${name} = mutation(`)).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requirePublisher\(token\);/);
   const claim = fnBody(text, "export const claim = mutation(");
-  expect(claim).toMatch(/withIndex\("by_status", \(q\) => q\.eq\("status", "approved"\)\)\.first\(\)/);
+  // Plan 8: approved rows only; one an embargo now holds is skipped, never handed out.
+  expect(claim).toMatch(/withIndex\("by_status", \(q\) => q\.eq\("status", "approved"\)\)\.collect\(\)/);
   expect([...claim.matchAll(/status: "(\w+)"/g)].map((m) => m[1]).sort()).toEqual(["failed", "pushing"]);
   // The update path never touches the package row (R10) or the gate.
   for (const banned of ["gateFor", "ApprovalGate", "convexPackageStore", "compareAndSwap", `patch(pkg`, `"packages", `]) expect(text, banned).not.toContain(banned);

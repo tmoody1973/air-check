@@ -9,15 +9,16 @@ import { CoverPicker, type CoverChangeFn } from "./CoverPicker";
 import { DescriptionEditor, type DescriptionSaveFn } from "./DescriptionEditor";
 import { TracklistBox, type TracklistSaveFn } from "./TracklistBox";
 import { DescriptionUpdate, type UpdateFns, type UpdateView } from "./DescriptionUpdate";
+import { EmbargoHold, type ClearEmbargoFn, type EmbargoView } from "./EmbargoHold";
 import { PlayerBar } from "./PlayerBar";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl, PublishStatus, type PublishState, type SettleFns, type SettleResult } from "./PublishStatus";
 import { SampleTag } from "./SampleTag";
 import type { Workspace } from "./Shell";
 
-export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode; message: string };
+export type DecideResult = { ok: true } | { ok: false; code: GateErrorCode | "EMBARGOED"; message: string };
 export type DecideFn = (decision: "approve" | "skip", fingerprint: string) => Promise<DecideResult>;
-export type { CoverChangeFn, DescriptionSaveFn, PublishState, SettleFns, TracklistSaveFn, UpdateFns, UpdateView };
+export type { ClearEmbargoFn, CoverChangeFn, DescriptionSaveFn, EmbargoView, PublishState, SettleFns, TracklistSaveFn, UpdateFns, UpdateView };
 
 const BTN = "grid min-h-12 w-full place-items-center rounded-control border px-4 text-[15px] font-semibold whitespace-nowrap disabled:opacity-60";
 
@@ -56,6 +57,8 @@ export function PackageDecision({
   editDescription,
   editTracklist,
   descriptionUpdate,
+  embargo,
+  clearEmbargo,
 }: {
   record: PackageRecord | null;
   workspace: Workspace;
@@ -76,9 +79,12 @@ export function PackageDecision({
   editTracklist?: TracklistSaveFn;
   /** Real workspace, a show on Mixcloud: its live description and the update flow (Plan 5c Task 4). */
   descriptionUpdate?: { view: UpdateView | null | undefined; fns: UpdateFns };
+  /** Plan 8: the live embargo view (packages.get). A blocking line holds Approve; the server refuses it too. */
+  embargo?: EmbargoView;
+  clearEmbargo?: ClearEmbargoFn;
 }) {
   const [pending, setPending] = useState<"approve" | "skip" | null>(null);
-  const [notice, setNotice] = useState<{ code: GateErrorCode | null; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ code: GateErrorCode | "EMBARGOED" | null; text: string } | null>(null);
   const [open, setOpen] = useState(false);
   // While deciding, pin what the host reviews: the first record seen stays on screen until they
   // choose to reload. A package that is already decided shows the live record, so it never freezes.
@@ -100,7 +106,8 @@ export function PackageDecision({
   const closing = draft.tracks.filter((t) => t.closing).length;
   const deciding = isDeciding(record);
   const ready = record.status === "awaiting_review" && !!record.fingerprint;
-  const canApprove = ready && !changed;
+  const held = (embargo?.blocking.length ?? 0) > 0;
+  const canApprove = ready && !changed && !held;
   const busy = pending !== null || decided;
   const track = trackFor(workspace, record);
   // The cover can change only on the version the host is looking at; a stale page reloads first.
@@ -245,6 +252,8 @@ export function PackageDecision({
       ) : (
         deciding && <p className="text-[12.5px] text-ink-soft">This will be public on Mixcloud</p>
       )}
+
+      {embargo && (deciding || record.status === "approved") && <EmbargoHold embargo={embargo} clear={clearEmbargo} />}
 
       {deciding && (
         <>

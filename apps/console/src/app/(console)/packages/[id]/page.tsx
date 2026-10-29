@@ -29,6 +29,7 @@ export default function PackagePage() {
   const updateView = useQuery(api.descriptionUpdates.forPackage, { packageId: id });
   const proposeMutation = useMutation(api.descriptionUpdates.propose);
   const approveUpdateMutation = useMutation(api.descriptionUpdates.approve);
+  const setEmbargoMutation = useMutation(api.radar.setEmbargo);
 
   // The fingerprint is the one the host reviewed (pinned in PackageDecision), not the live one.
   const decide: DecideFn = async (decision, fingerprint) => {
@@ -75,6 +76,8 @@ export default function PackagePage() {
           editDescription={workspace === "real" ? editDescription : undefined}
           editTracklist={workspace === "real" ? editTracklist : undefined}
           descriptionUpdate={workspace === "real" ? { view: updateView, fns: updateFns } : undefined}
+          embargo={record?.embargo}
+          clearEmbargo={(releaseId) => setEmbargoMutation({ releaseId: releaseId as Id<"releases">, embargo: null })}
         />
       )}
     </Shell>

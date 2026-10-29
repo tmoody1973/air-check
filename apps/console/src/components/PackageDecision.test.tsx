@@ -615,3 +615,41 @@ describe("PackageDecision: the live description", () => {
     expect(screen.queryByRole("heading", { name: "Description on Mixcloud" })).toBeNull();
   });
 });
+
+describe("PackageDecision: embargoes (Plan 8)", () => {
+  const embargo = {
+    blocking: [{ releaseId: "r1", text: "'Song 1' by Artist 1 is embargoed until 2026-11-07" }],
+    sameArtist: ["'Other' by Artist 3 is embargoed (date not known)"],
+  };
+  const renderWith = (props: Partial<Parameters<typeof PackageDecision>[0]>, rec = record()) =>
+    render(<PlayerProvider><PackageDecision record={rec} workspace="real" decide={ok} {...props} /></PlayerProvider>);
+
+  it("shows each blocking line in the problem colour, holds Approve, and lists same-artist matches as review notes", () => {
+    renderWith({ embargo, clearEmbargo: vi.fn() });
+    const line = screen.getByText("'Song 1' by Artist 1 is embargoed until 2026-11-07. Approve after that date, or clear the embargo.");
+    expect(line.closest("li")).toHaveClass("bg-problem-bg", "text-problem-text");
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeEnabled();
+    expect(screen.getByRole("list", { name: "Review notes" })).toHaveTextContent("'Other' by Artist 3 is embargoed (date not known)");
+  });
+
+  it("Clear embargo asks once, then clears that release; Cancel leaves it", async () => {
+    const clear = vi.fn(async () => null);
+    renderWith({ embargo, clearEmbargo: clear });
+    fireEvent.click(screen.getByRole("button", { name: "Clear embargo" }));
+    expect(screen.getByText("Clearing it lets this release reach Mixcloud.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(clear).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear embargo" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Clear it" })));
+    expect(clear).toHaveBeenCalledWith("r1");
+  });
+
+  it("no embargo: Approve works as before, and the server's EMBARGOED refusal is shown as given", async () => {
+    const decide = vi.fn<DecideFn>(async () => ({ ok: false, code: "EMBARGOED", message: "'Song 1' by Artist 1 is embargoed until 2026-11-07. Approve after that date, or clear the embargo." }));
+    renderWith({ embargo: { blocking: [], sameArtist: [] }, decide });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("Approve after that date, or clear the embargo.");
+    expect(screen.queryByRole("button", { name: "Clear embargo" })).toBeNull();
+  });
+});
