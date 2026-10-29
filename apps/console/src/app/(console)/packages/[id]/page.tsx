@@ -12,12 +12,13 @@ import { useChicagoDayKey } from "@/lib/date";
 export default function PackagePage() {
   const { id } = useParams<{ id: string }>();
   const workspace = useWorkspace();
-  const record = useQuery(api.packages.get, { packageId: id });
+  // Plan 8: the day is an argument (as for publishState) so an embargo's date passes at Chicago midnight.
+  const today = useChicagoDayKey();
+  const record = useQuery(api.packages.get, { packageId: id, today });
   const decideMutation = useMutation(api.packages.decide);
   // These are null (or []) for demo and non-staff callers, so the real-only parts never show in the demo.
   const mixcloud = useQuery(api.mixcloud.get, {});
   // The day is an argument so the queue count follows Chicago midnight; the label uses the same key.
-  const today = useChicagoDayKey();
   const publish = useQuery(api.packages.publishState, { packageId: id, today });
   const coverUrl = useQuery(api.packages.coverPreview, { packageId: id });
   const coverUploadUrl = useMutation(api.packages.coverUploadUrl);
@@ -26,7 +27,7 @@ export default function PackagePage() {
   const confirmMutation = useMutation(api.packages.confirmPosted);
   const editDescriptionMutation = useMutation(api.packages.editDescription);
   const editTracklistMutation = useMutation(api.packages.editTracklist);
-  const updateView = useQuery(api.descriptionUpdates.forPackage, { packageId: id });
+  const updateView = useQuery(api.descriptionUpdates.forPackage, { packageId: id, today });
   const proposeMutation = useMutation(api.descriptionUpdates.propose);
   const approveUpdateMutation = useMutation(api.descriptionUpdates.approve);
   const setEmbargoMutation = useMutation(api.radar.setEmbargo);

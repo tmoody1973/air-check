@@ -245,7 +245,7 @@ export function PackageDecision({
 
       {workspace === "real" && !deciding && <PublishStatus record={record} publish={publish} mixcloudAccount={mixcloudAccount} settle={settleHere} />}
 
-      {update && <DescriptionUpdate view={update.view} trackTitles={draft.tracks.map((t) => t.title)} fns={update.fns} />}
+      {update && <DescriptionUpdate view={update.view} trackTitles={draft.tracks.map((t) => t.title)} fns={update.fns} clearEmbargo={clearEmbargo} />}
 
       {workspace === "demo" ? (
         <p className="text-[12.5px] text-ink-soft">Demo workspace · Sample data. Publishing to Mixcloud is switched off.</p>

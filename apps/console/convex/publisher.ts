@@ -56,18 +56,24 @@ export const queue = query({
   },
 });
 
+/**
+ * Plan 8: an embargo that arrived after approval holds an approved real package. Every claim path calls this first
+ * (publisher.claim and the internal packages.claimForPublish); the publisher waits on NOT_READY.
+ */
+export async function requireNotHeld(ctx: QueryCtx, packageId: string): Promise<void> {
+  const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
+  if (doc?.workspace !== "real" || doc.status !== "approved") return;
+  const draft = doc.draft as PackageDraft;
+  const { blocking } = await embargoProblems(ctx, "real", { description: draft.description, tracks: draft.tracks });
+  if (blocking.length) throw new ConvexError({ code: "NOT_READY", message: `package ${packageId} is held: ${blocking.join("; ")}` });
+}
+
 /** approved -> publishing, at most once. Anything else (never approved, already claimed) is NOT_READY. */
 export const claim = mutation({
   args: { token: v.string(), packageId: v.string() },
   handler: async (ctx, { token, packageId }) => {
     requirePublisher(token);
-    // Plan 8: an embargo that arrived after approval holds the package; the publisher waits on NOT_READY.
-    const doc = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).unique();
-    if (doc?.workspace === "real" && doc.status === "approved") {
-      const draft = doc.draft as PackageDraft;
-      const { blocking } = await embargoProblems(ctx, "real", { description: draft.description, tracks: draft.tracks });
-      if (blocking.length) throw new ConvexError({ code: "NOT_READY", message: `package ${packageId} is held: ${blocking.join("; ")}` });
-    }
+    await requireNotHeld(ctx, packageId);
     const rec = await viaGate(() => gateFor(ctx).claimForPublish(packageId));
     if (!rec) throw new ConvexError({ code: "NOT_READY", message: `package ${packageId} is not approved` });
     return rec;

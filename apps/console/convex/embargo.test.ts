@@ -22,6 +22,9 @@ type T = ReturnType<typeof convexTest>;
 const OCT_30 = new Date("2026-10-30T17:00:00Z");
 const NOV_7 = new Date("2026-11-07T17:00:00Z");
 const DATED = "'Moonlit Avenue' by Nova Reyes is embargoed until 2026-11-07";
+// R8 (Hard Rule 10): what the agent is told quotes its own words, never the release's artist or title.
+const AGENT_DATED = 'The title "Moonlit Avenue" in your description is embargoed until 2026-11-07. Leave it out.';
+const AGENT_UNDATED = 'The title "Hidden Room" in your description is embargoed (no date known). Leave it out.';
 const UNDATED = "'Hidden Room' by Nova Reyes is embargoed (date not known)";
 
 // A track of the golden package whose title the golden description never names, so only its tracklist entry matches.
@@ -82,7 +85,7 @@ const decide = async (t: T, id: string, decision: "approve" | "skip", who: objec
 describe("description checks", () => {
   const named = `${goldenDescription()} Moonlit Avenue. Hidden Room.`;
 
-  test("agent submit is refused with the exact sentences", async () => {
+  test("agent submit is refused in the agent's own words, never naming the release's artist", async () => {
     const t = convexTest(schema, modules);
     await proseEmbargoes(t);
     const draft = goldenDraft();
@@ -90,18 +93,23 @@ describe("description checks", () => {
     const input = { showDate: draft.showDate, leads: leadsOf(draft.title), tags: draft.tags, description: named, hour1Id: "h1", hour2Id: "h2" };
     const err = await errorData(t.mutation(internal.packages.submit, { agent: { input, workspace: "real" } }));
     expect(err.code).toBe("BAD_INPUT");
-    expect(err.problems).toEqual(expect.arrayContaining([`${DATED}. Leave it out.`, `${UNDATED}. Leave it out.`]));
+    expect(err.problems).toEqual(expect.arrayContaining([AGENT_DATED, AGENT_UNDATED]));
+    expect(JSON.stringify(err)).not.toContain("Nova Reyes");
     expect(await pkg(t, draft.id)).toBeNull();
   });
 
   test("a prebuilt submit, agent revise and Tarik's edit are refused the same way", async () => {
     const t = convexTest(schema, modules);
     await proseEmbargoes(t);
-    expect(await errorData(t.mutation(internal.packages.submit, { draft: goldenDraft({ description: named }) }))).toMatchObject({ code: "BAD_INPUT" });
+    const pre = await errorData(t.mutation(internal.packages.submit, { draft: goldenDraft({ description: named }) }));
+    expect(pre).toMatchObject({ code: "BAD_INPUT" });
+    expect(JSON.stringify(pre)).not.toContain("Nova Reyes");
     const id = await reviewable(t);
     const r = await t.mutation(internal.packages.revise, { workspace: "real", packageId: id, description: named });
     expect(r).toMatchObject({ ok: false, code: "BAD_INPUT" });
-    expect(r.ok === false && "problems" in r && r.problems).toEqual(expect.arrayContaining([`${DATED}. Leave it out.`, `${UNDATED}. Leave it out.`]));
+    expect(r.ok === false && "problems" in r && r.problems).toEqual(expect.arrayContaining([AGENT_DATED, AGENT_UNDATED]));
+    expect(JSON.stringify(r)).not.toContain("Nova Reyes");
+    // Tarik's own edit is a private view: he reads the release in full.
     const e = await t.withIdentity(human).mutation(api.packages.editDescription, { packageId: id, description: named });
     expect(e).toMatchObject({ ok: false, code: "BAD_INPUT" });
     expect(!e.ok && e.message).toContain(`${DATED}. Leave it out.`);
@@ -237,22 +245,104 @@ describe("the publisher", () => {
 });
 
 describe("what the package page and the agent see", () => {
-  test("packages.get carries the release ids; agentGet carries text only, never an id or a player", async () => {
+  // A word of the golden description, so a release titled with it blocks through the prose alone.
+  const proseWord = goldenDescription().match(/\b[A-Z][a-z]{5,}\b/)![0];
+
+  test("packages.get carries the release ids; agentGet carries the package's own words only (R8)", async () => {
     const t = convexTest(schema, modules);
     const blocker = await release(t, { ...at(trackA!), embargo: { until: "2026-11-07" }, embed: { kind: "album", id: "4242424242" }, bandcampPage: "https://x.bandcamp.com/album/a" });
     await release(t, { artist: trackB!.artist, title: "Another Record", embargo: { until: null } });
-    const id = await reviewable(t);
-    const rec = await t.withIdentity(human).query(api.packages.get, { packageId: id });
+    const id = await reviewable(t); // before the prose embargo, which would refuse the submit itself
+    const secret = await release(t, { artist: "Secret Artist", title: proseWord.toLowerCase(), embargo: { until: null } });
+    const rec = await t.withIdentity(human).query(api.packages.get, { packageId: id, today: "2026-10-30" });
     expect(rec!.embargo).toEqual({
-      blocking: [{ releaseId: blocker, text: trackLine(trackA!, "2026-11-07") }],
+      blocking: [
+        { releaseId: blocker, text: trackLine(trackA!, "2026-11-07") },
+        { releaseId: secret, text: trackLine({ artist: "Secret Artist", title: proseWord.toLowerCase() }, null) },
+      ],
       sameArtist: [trackLine({ artist: trackB!.artist, title: "Another Record" }, null)],
     });
     const view = await t.query(internal.packages.agentGet, { workspace: "real", packageId: id });
-    expect(view!.embargo).toEqual({ blocking: [trackLine(trackA!, "2026-11-07")], sameArtist: [trackLine({ artist: trackB!.artist, title: "Another Record" }, null)] });
+    expect(view!.embargo).toEqual({
+      blocking: [
+        `The track "${trackA!.title}" in your tracklist is embargoed until 2026-11-07.`,
+        `The title "${proseWord}" in your description is embargoed (no date known).`,
+      ],
+    });
     const json = JSON.stringify(view);
-    for (const banned of [blocker, "4242424242", "embed", "bandcamp", "releaseId"]) expect(json).not.toContain(banned);
+    for (const banned of [blocker, secret, "4242424242", "embed", "bandcamp", "releaseId", "sameArtist", "Another Record", "Secret Artist"]) expect(json).not.toContain(banned);
     // The demo login sees no real embargo on its own package.
     const demoId = await reviewable(t, { workspace: "demo", id: "demo-10-2-26" });
-    expect((await t.withIdentity(demoUser).query(api.packages.get, { packageId: demoId }))!.embargo).toEqual({ blocking: [], sameArtist: [] });
+    expect((await t.withIdentity(demoUser).query(api.packages.get, { packageId: demoId, today: "2026-10-30" }))!.embargo).toEqual({ blocking: [], sameArtist: [] });
+  });
+
+  test("packages.get counts the day the browser sends, and leaves the embargo out when it sends none", async () => {
+    const t = convexTest(schema, modules);
+    await release(t, { ...at(trackA!), embargo: { until: "2026-11-07" } });
+    const id = await reviewable(t);
+    const as = t.withIdentity(human);
+    expect((await as.query(api.packages.get, { packageId: id, today: "2026-10-30" }))!.embargo!.blocking).toHaveLength(1);
+    expect((await as.query(api.packages.get, { packageId: id, today: "2026-11-07" }))!.embargo).toEqual({ blocking: [], sameArtist: [] });
+    expect(await as.query(api.packages.get, { packageId: id })).not.toHaveProperty("embargo");
+    expect(await errorData(as.query(api.packages.get, { packageId: id, today: "soon" }))).toMatchObject({ code: "BAD_INPUT" });
+  });
+});
+
+describe("fix round 1: every other path to Mixcloud", () => {
+  const live = async (t: T) => {
+    const id = await reviewable(t);
+    await decide(t, id, "approve");
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: id, result: { status: "succeeded", url: URL_ } });
+    return id;
+  };
+  const text = `${goldenDescription()} Moonlit Avenue.`;
+
+  test("Approve update is refused (EMBARGOED) when an embargo arrived after the proposal", async () => {
+    const t = convexTest(schema, modules);
+    const id = await live(t);
+    const p = await t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId: id, description: text });
+    const u = (await t.run((ctx) => ctx.db.get(p.ok ? p.id : (null as never))))!;
+    await release(t, { artist: "Nova Reyes", title: "Moonlit Avenue", embargo: { until: "2026-11-07" } });
+    const r = await t.withIdentity(human).mutation(api.descriptionUpdates.approve, { id: u._id, fingerprint: u.fingerprint });
+    expect(r).toEqual({ ok: false, code: "EMBARGOED", message: `${DATED}. Approve after that date, or clear the embargo.` });
+    expect((await t.run((ctx) => ctx.db.get(u._id)))!.status).toBe("proposed");
+  });
+
+  test("an approved update an embargo holds: forPackage names it with the release, and a new proposal is told why", async () => {
+    const t = convexTest(schema, modules);
+    const id = await live(t);
+    const p = await t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId: id, description: text });
+    const u = (await t.run((ctx) => ctx.db.get(p.ok ? p.id : (null as never))))!;
+    await t.withIdentity(human).mutation(api.descriptionUpdates.approve, { id: u._id, fingerprint: u.fingerprint });
+    const rel = await release(t, { artist: "Nova Reyes", title: "Moonlit Avenue", embargo: { until: "2026-11-07" } });
+    const view = await t.withIdentity(human).query(api.descriptionUpdates.forPackage, { packageId: id, today: "2026-10-30" });
+    expect(view!.latest).toMatchObject({ status: "approved", held: [{ releaseId: rel, text: DATED }] });
+    const again = await t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId: id, description: `${goldenDescription()} Again.` });
+    expect(again).toMatchObject({ ok: false, code: "NOT_READY", message: expect.stringContaining("An approved update is waiting on an embargo") });
+    expect((await t.withIdentity(human).query(api.descriptionUpdates.forPackage, { packageId: id, today: "2026-11-07" }))!.latest).not.toHaveProperty("held");
+  });
+
+  test("the internal claimForPublish is held too", async () => {
+    const t = convexTest(schema, modules);
+    const id = await reviewable(t);
+    await decide(t, id, "approve");
+    await release(t, { ...at(trackA!), embargo: { until: null } });
+    expect(await errorData(t.mutation(internal.packages.claimForPublish, { packageId: id }))).toMatchObject({ code: "NOT_READY" });
+    expect((await pkg(t, id))!.status).toBe("approved");
+  });
+
+  test("confirmPosted (an uncertain upload that is on Mixcloud) marks matching releases played", async () => {
+    const t = convexTest(schema, modules);
+    const considering = await release(t, { ...at(trackA!), status: "considering" });
+    const passed = await release(t, { ...at(trackB!), status: "passed" });
+    const id = await reviewable(t);
+    await decide(t, id, "approve");
+    await t.mutation(api.publisher.claim, { token: PUB, packageId: id });
+    await t.mutation(api.publisher.result, { token: PUB, packageId: id, result: { status: "outcome_unknown" } });
+    expect((await t.run((ctx) => ctx.db.get(considering)))!.status).toBe("considering");
+    expect(await t.withIdentity(human).mutation(api.packages.confirmPosted, { packageId: id, url: URL_ })).toMatchObject({ ok: true });
+    expect((await t.run((ctx) => ctx.db.get(considering)))!.status).toBe("played");
+    expect((await t.run((ctx) => ctx.db.get(passed)))!.status).toBe("passed");
   });
 });

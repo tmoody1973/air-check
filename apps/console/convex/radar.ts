@@ -2,8 +2,10 @@ import {
   type ActiveEmbargo,
   bandcampPageUrl,
   chicagoDayKey,
+  agentEmbargoLines,
   describeEmbargo,
   embargoHits,
+  embargoMatches,
   isEmbargoActive,
   isShowDate,
   MAX_STORED_CHARS,
@@ -468,18 +470,25 @@ export async function embargoProblems(ctx: QueryCtx, workspace: Workspace, input
   return embargoHits(input, await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now())));
 }
 
-/** The refusal line a public description gets for each blocking embargo. */
-export async function descriptionEmbargoes(ctx: QueryCtx, workspace: Workspace, description: unknown): Promise<string[]> {
+/**
+ * The refusal lines a public description gets, one per blocking match. A person reads the release named in full; the
+ * agent reads only its own words (Hard Rule 10: an embargoed release's artist or title never reaches the agent).
+ */
+export async function descriptionEmbargoes(ctx: QueryCtx, workspace: Workspace, description: unknown, reader: "agent" | "human"): Promise<string[]> {
   if (typeof description !== "string") return [];
-  return (await embargoProblems(ctx, workspace, { description })).blocking.map((b) => `${b}. Leave it out.`);
+  const active = await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()));
+  if (reader === "agent") return agentEmbargoLines({ description }, active).map((l) => `${l} Leave it out.`);
+  return embargoHits({ description }, active).blocking.map((b) => `${b}. Leave it out.`);
 }
 
-/** The package page's view: each blocking line with its release, for the "Clear embargo" button. A private view. */
-export async function embargoView(ctx: QueryCtx, workspace: Workspace, input: EmbargoInput) {
-  const rows = await embargoedRows(ctx, workspace, chicagoDayKey(Date.now()));
-  const { blocking, sameArtist } = embargoHits(input, rows.map(asActive));
-  const idOf = new Map(rows.map((r) => [describeEmbargo(asActive(r)), r._id]));
-  return { blocking: blocking.map((text) => ({ releaseId: idOf.get(text)!, text })), sameArtist };
+/**
+ * The package page's view: each blocking line with its release, for the "Clear embargo" button. A private view.
+ * `today` is the browser's Chicago day: a subscribed query never re-runs because time passed (like publishState).
+ */
+export async function embargoView(ctx: QueryCtx, workspace: Workspace, input: EmbargoInput, today: string) {
+  const rows = (await embargoedRows(ctx, workspace, today)).map((r) => ({ ...asActive(r), releaseId: r._id }));
+  const { blocking, sameArtist } = embargoMatches(input, rows);
+  return { blocking: blocking.map(({ embargo }) => ({ releaseId: embargo.releaseId, text: describeEmbargo(embargo) })), sameArtist: sameArtist.map(describeEmbargo) };
 }
 
 /**

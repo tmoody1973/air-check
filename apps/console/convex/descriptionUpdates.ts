@@ -5,7 +5,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { privateTerms } from "./agentSubmit";
 import { actorOf, workspaceOf } from "./gate";
 import { requirePublisher } from "./publisher";
-import { activeEmbargoes, descriptionEmbargoes } from "./radar";
+import { activeEmbargoes, descriptionEmbargoes, embargoProblems, embargoView } from "./radar";
 
 // Plan 5c Task 4: a new description for a show already on Mixcloud. Hard Rule 1: the agent or a human proposes; only a
 // signed-in real human approves the exact text (its fingerprint); the publisher claims only `approved` updates. The
@@ -18,7 +18,7 @@ const OPEN = ["proposed", "approved", "pushing"] as const;
 
 export type UpdateResult =
   | { ok: true; id: Id<"descriptionUpdates">; replaced: boolean }
-  | { ok: false; code: "FORBIDDEN" | "NOT_FOUND" | "NOT_READY" | "BAD_INPUT" | "PACKAGE_CHANGED"; message: string };
+  | { ok: false; code: "FORBIDDEN" | "NOT_FOUND" | "NOT_READY" | "BAD_INPUT" | "PACKAGE_CHANGED" | "EMBARGOED"; message: string };
 
 export const updatesOf = (ctx: QueryCtx, packageId: string) =>
   ctx.db.query("descriptionUpdates").withIndex("by_packageId", (q) => q.eq("packageId", packageId)).collect(); // oldest first
@@ -46,14 +46,21 @@ export async function proposeUpdate(
   // Hard Rule 9: demo packages never publish, so they never get an update either.
   if (pkg.workspace !== "real" || draft.workspace !== "real") return { ok: false, code: "NOT_READY", message: "demo packages are never published, so they cannot be updated" };
   if (pkg.status !== "succeeded") return { ok: false, code: "NOT_READY", message: "only a show already on Mixcloud can have its description updated" };
-  const problems = [...checkDescriptionChange(draft, description, sources, privateTerms()), ...(await descriptionEmbargoes(ctx, "real", description))];
+  const problems = [...checkDescriptionChange(draft, description, sources, privateTerms()), ...(await descriptionEmbargoes(ctx, "real", description, proposedBy))];
   if (problems.length) return { ok: false, code: "BAD_INPUT", message: problems.join("; ") };
   const updates = await updatesOf(ctx, pkg.packageId);
   const live = liveOf(pkg, updates);
   if (description === live.description) return { ok: false, code: "BAD_INPUT", message: "That is already the description on Mixcloud." };
   const open = updates.filter(isOpen);
-  if (open.some((u) => u.status !== "proposed"))
-    return { ok: false, code: "NOT_READY", message: "an approved update is being sent to Mixcloud; propose again once it finishes" };
+  const sending = open.find((u) => u.status !== "proposed");
+  if (sending) {
+    // Plan 8: an approved update an embargo now holds is not being sent; say what it waits on.
+    const held = sending.status === "approved" && (await embargoProblems(ctx, "real", { description: sending.description })).blocking.length > 0;
+    return {
+      ok: false, code: "NOT_READY",
+      message: held ? "An approved update is waiting on an embargo. Clear the embargo or wait for its date, then propose again." : "an approved update is being sent to Mixcloud; propose again once it finishes",
+    };
+  }
   const replacing = open.at(-1);
   const given = sources === undefined ? (replacing?.descriptionSources ?? live.descriptionSources) : (sources as Sources).map((s) => ({ claim: s.claim, source: s.source }));
   const kept = given?.length ? given : undefined;
@@ -98,19 +105,27 @@ export const approve = mutation({
     if (!pkg || pkg.workspace !== "real") return FORBIDDEN;
     if (u.status !== "proposed") return { ok: false, code: "NOT_READY", message: "this update is no longer waiting for approval" };
     if (u.fingerprint !== fingerprint) return { ok: false, code: "PACKAGE_CHANGED", message: "This proposal changed. Review the latest version." };
+    // Plan 8: an embargo that arrived after the proposal holds Approve update, as it holds a package's Approve.
+    const { blocking } = await embargoProblems(ctx, "real", { description: u.description });
+    if (blocking.length) return { ok: false, code: "EMBARGOED", message: `${blocking.join(". ")}. Approve after that date, or clear the embargo.` };
     await ctx.db.patch(id, { status: "approved", approvedBy: actor.email, approvedAt: new Date().toISOString() });
     return { ok: true };
   },
 });
 
-/** The package page: what Mixcloud shows now and the latest update. Signed-in real humans only; null otherwise. */
+/**
+ * The package page: what Mixcloud shows now and the latest update. Signed-in real humans only; null otherwise.
+ * Plan 8: with `today` (the browser's Chicago day), an approved update an embargo holds carries `held`, with each
+ * release for Clear embargo.
+ */
 export const forPackage = query({
-  args: { packageId: v.string() },
-  handler: async (ctx, { packageId }) => {
+  args: { packageId: v.string(), today: v.optional(v.string()) },
+  handler: async (ctx, { packageId, today }) => {
     const pkg = await staffPackage(ctx, packageId);
     if (!pkg || pkg.workspace !== "real") return null;
     const updates = await updatesOf(ctx, packageId);
     const u = updates.at(-1);
+    const held = u?.status === "approved" && today ? (await embargoView(ctx, "real", { description: u.description }, today)).blocking : [];
     return {
       live: liveOf(pkg, updates),
       latest: u
@@ -118,6 +133,7 @@ export const forPackage = query({
             id: u._id, status: u.status, description: u.description, proposedBy: u.proposedBy, fingerprint: u.fingerprint,
             ...(u.descriptionSources && { descriptionSources: u.descriptionSources }),
             ...(u.error && { error: u.error }), ...(u.pushedAt && { pushedAt: u.pushedAt }), ...(u.approvedAt && { approvedAt: u.approvedAt }),
+            ...(held.length && { held }),
           }
         : null,
     };

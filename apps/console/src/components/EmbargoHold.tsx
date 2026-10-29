@@ -11,7 +11,7 @@ export type ClearEmbargoFn = (releaseId: string) => Promise<unknown>;
  * Plan 8: an embargoed release in this package holds Approve until its date. Each line shows in the problem colour with
  * "Clear embargo", which asks once before it lets the release reach Mixcloud. Same-artist matches are review notes.
  */
-export function EmbargoHold({ embargo, clear }: { embargo: EmbargoView; clear?: ClearEmbargoFn }) {
+export function EmbargoHold({ embargo, clear, after = "Approve after that date, or clear the embargo." }: { embargo: EmbargoView; clear?: ClearEmbargoFn; after?: string }) {
   const [asking, setAsking] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const BTN = "min-h-11 rounded-control border border-problem-text px-4 font-medium";
@@ -32,7 +32,7 @@ export function EmbargoHold({ embargo, clear }: { embargo: EmbargoView; clear?: 
         <ul aria-label="Embargoes" className="flex flex-col gap-2">
           {embargo.blocking.map((b) => (
             <li key={b.releaseId} className="flex flex-col gap-2 rounded-control bg-problem-bg px-4 py-3 text-sm text-problem-text">
-              <span className="[overflow-wrap:anywhere]">{b.text}. Approve after that date, or clear the embargo.</span>
+              <span className="[overflow-wrap:anywhere]">{b.text}. {after}</span>
               {clear &&
                 (asking === b.releaseId ? (
                   <div className="flex flex-wrap items-center gap-2">

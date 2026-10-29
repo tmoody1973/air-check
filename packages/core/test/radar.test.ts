@@ -8,6 +8,7 @@ import {
   bandcampPageUrl,
   checkExtraction,
   cleanMail,
+  agentEmbargoLines,
   describeEmbargo,
   embargoHits,
   findDates,
@@ -538,6 +539,80 @@ describe("embargo helpers", () => {
   test("the same artist with a different title is sameArtist only", () => {
     expect(embargoHits({ tracks: [{ artist: "Ferro Lane", title: "Night Rooms" }] }, [dated])).toEqual({ blocking: [], sameArtist: [describeEmbargo(dated)] });
   });
+});
+
+// Task 5 review, fix round 1: credits and version suffixes fold away before matching; the agent sees only its own text.
+describe("embargo matching: credits, versions and the agent's own words", () => {
+  const moon = { artist: "Nova Reyes", title: "Moonlit Avenue", until: "2026-11-07" };
+  const home = { artist: "Ama Ferrell", title: "Home", until: null };
+  const blocks = (artist: string, title: string, e: { artist: string; title: string; until: string | null } = moon) => embargoHits({ tracks: [{ artist, title }] }, [e]).blocking;
+  test.each([
+    "Moonlit Avenue (feat. X)",
+    "Moonlit Avenue [ft. X]",
+    "Moonlit Avenue featuring X",
+    "Moonlit Avenue (Radio Edit)",
+    "Moonlit Avenue (Club Mix)",
+    "Moonlit Avenue (X Remix)",
+    "Moonlit Avenue - Remix",
+    "Moonlit Avenue – X Edit",
+    "Moonlit Avenue - Extended Version",
+    "Moonlit Avenue (Remastered 2020)",
+    "Moonlit Avenue (Radio Edit) [feat. X]",
+    "MOONLIT AVÉNUE",
+  ])("track title %s blocks", (title) => {
+    expect(blocks("Nova Reyes", title)).toEqual([describeEmbargo(moon)]);
+  });
+  test.each(["Nova Reyes & X", "Nova Reyes, X", "X and Nova Reyes", "X with Nova Reyes", "X x Nova Reyes", "Nova Reyes feat. X", "NOVÁ REYES"])(
+    "track artist %s blocks, and is sameArtist on another title",
+    (artist) => {
+      expect(blocks(artist, "Moonlit Avenue")).toEqual([describeEmbargo(moon)]);
+      expect(embargoHits({ tracks: [{ artist, title: "Night Rooms" }] }, [moon]).sameArtist).toEqual([describeEmbargo(moon)]);
+    },
+  );
+  test("a release credited to two artists matches a track by either", () => {
+    expect(blocks("X", "Moonlit Avenue", { ...moon, artist: "Nova Reyes & X" })).toHaveLength(1);
+  });
+  test("a version word inside the title, or an unrelated parenthesis, is kept", () => {
+    expect(blocks("Nova Reyes", "Moonlit Avenue (Live)")).toEqual([]);
+    expect(blocks("Nova Reyes", "Moonlit Avenue Remixed")).toEqual([]);
+    expect(blocks("Nova Reyes", "Moonlit")).toEqual([]);
+    expect(blocks("Nova Reyes Band", "Moonlit Avenue")).toEqual([]);
+  });
+  test("Home is not Homecoming, in tracks or prose", () => {
+    expect(blocks("Ama Ferrell", "Homecoming", home)).toEqual([]);
+    expect(embargoHits({ description: "A homecoming party." }, [home]).blocking).toEqual([]);
+    expect(embargoHits({ description: "Back home again." }, [home]).blocking).toEqual([describeEmbargo(home)]);
+  });
+  test("a release title with a suffix is found in prose without it", () => {
+    expect(embargoHits({ description: "Then Moonlit Avenue." }, [{ ...moon, title: "Moonlit Avenue (Radio Edit)" }]).blocking).toHaveLength(1);
+  });
+  test("agentEmbargoLines quote the package's own words, never the release's artist or title", () => {
+    const secret = { artist: "Secret Artist", title: "moonlit avenue", until: "2026-11-07" };
+    const lines = agentEmbargoLines(
+      { description: "We loved MOONLIT  Avénue, honestly.", tracks: [{ artist: "Secret Artist & X", title: "Moonlit Avenue (Radio Edit)" }] },
+      [secret, { ...home, artist: "Nova Reyes" }, { artist: "Ferro Lane", title: "Night Rooms", until: null }],
+    );
+    expect(lines).toEqual([
+      'The track "Moonlit Avenue (Radio Edit)" in your tracklist is embargoed until 2026-11-07.',
+      'The title "MOONLIT  Avénue" in your description is embargoed until 2026-11-07.',
+    ]);
+    expect(agentEmbargoLines({ description: "Back home." }, [home])).toEqual(['The title "home" in your description is embargoed (no date known).']);
+    expect(agentEmbargoLines({ tracks: [{ artist: "Ama Ferrell", title: "Elsewhere" }] }, [home])).toEqual([]); // same artist: never told
+  });
+  const fast = (label: string, run: () => unknown) =>
+    test(`${label} finishes under 200 ms`, () => {
+      const times = [0, 1, 2].map(() => {
+        const t = performance.now();
+        run();
+        return performance.now() - t;
+      });
+      expect(Math.min(...times)).toBeLessThan(200);
+    });
+  const hostile = [" ".repeat(100_000) + "x", "(".repeat(100_000), " - ".repeat(50_000), " & ".repeat(50_000), "a ".repeat(100_000) + ")", "feat. ".repeat(30_000)];
+  for (const [i, h] of hostile.entries()) {
+    fast(`embargoHits on hostile text ${i}`, () => embargoHits({ description: h, tracks: [{ artist: h, title: h }] }, [moon, { artist: h.slice(0, 200), title: h.slice(0, 200), until: null }]));
+    fast(`agentEmbargoLines on hostile text ${i}`, () => agentEmbargoLines({ description: h, tracks: [{ artist: h, title: h }] }, [moon]));
+  }
 });
 
 // Task 3 review, fix round 1: these run on a public webhook before the sender check, so every pattern must be linear.
