@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { assembleEpisode, showDateFromTitle } from "@aircheck/core";
 import type { BoxClient } from "./box.js";
 import { buildEpisodes, type BoxFolder, type DriveDoc, type PaperDoc } from "./build.js";
-import type { IngestConvex, Placement, SourceReport, Unplaced } from "./convex.js";
+import { inBacklog, type IngestConvex, type Placement, type SourceReport, type Unplaced } from "./convex.js";
 import { onDisk } from "./disk.js";
 import { RATE_LIMITED, type DriveClient } from "./drive.js";
 import type { DropboxClient } from "./dropbox.js";
@@ -45,12 +45,12 @@ export interface ScanDeps {
 }
 
 /** One scan's placements and added 2025 dates in, and the names it could not date out. */
-export interface Names { placements: Placement[]; unplaced: Unplaced[]; extraDates?: ReadonlySet<string> }
+export interface Names { placements: Placement[]; unplaced: Unplaced[]; extraDates?: readonly string[] }
 const MAX_UNPLACED = 50;
 const NO_DATE = "No date found in the title.";
 
 /** R3: 2026 dates, plus the 2025 Fridays Tarik added on Episodes (so nothing already posted is drafted again). */
-const inScope = (date: string, names: Names) => date.startsWith("2026-") || !!names.extraDates?.has(date);
+const inScope = (date: string, names: Names) => inBacklog(date, names.extraDates);
 /**
  * A doc's or folder's show date: Tarik's placement first, then its name. A name with something date-like the rules
  * refuse is listed in `names.unplaced` (at most 50); one with no date at all (old one-offs) or an older year is not.
@@ -224,6 +224,8 @@ async function scanOnce(deps: ScanDeps): Promise<void> {
       return r;
     }
     failed.push(name);
+    // ponytail: this cached Map was dated under the extraDates of its scan, so a 2025 date removed since can be re-upserted
+    // once; drafting is paused meanwhile (R14), it is out of the draft/fetch candidates, and the next complete scan prunes it.
     const prev = mem[key] as Map<string, T[]> | undefined;
     if (!prev) uncached = true;
     return prev ?? new Map();
@@ -231,7 +233,7 @@ async function scanOnce(deps: ScanDeps): Promise<void> {
   // Read first: Tarik's placements date names while the sources are read; his corrections shape the episodes.
   const { episodes: stored, corrections, placements, rescanAfter, extraDates = [] } = await deps.convex.list();
   deps.memory.seenRescanAfter = rescanAfter;
-  const names: Names = { placements, unplaced: [], extraDates: new Set(extraDates) };
+  const names: Names = { placements, unplaced: [], extraDates };
   const box = use("box", "box", await readBox(deps, names));
   const drive = use("google", "drive", await readDrive(deps, names));
   const paper = use("dropbox", "paper", await readPaper(deps, names));

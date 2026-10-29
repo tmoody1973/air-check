@@ -68,6 +68,9 @@ export interface IngestRow {
   corrected?: { stale: boolean };
 }
 
+/** In the backlog: a 2026 date, or a 2025 Friday Tarik added (ingest.list's extraDates). */
+export const inBacklog = (date: string, extraDates: readonly string[] = []) => date.startsWith("2026-") || extraDates.includes(date);
+
 export type DraftOutcome = { queued: true; runId: string } | { queued: false; reason: string };
 export interface SourceReport { source: "box" | "google" | "dropbox"; state: "connected" | "needs_reconnect" | "not_connected"; account?: string; lastError?: string }
 

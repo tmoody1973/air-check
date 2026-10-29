@@ -579,8 +579,8 @@ describe("2025 shows Tarik added (extraDates): in scope only when added", () => 
   test("a placement on a 2025 date counts only when the date is added", () => {
     const placed = [{ source: "drive" as const, id: "x", date: D25 }];
     expect(dated("drive", "Rhythm Lab Radio 12-26-225", "x", { placements: placed, unplaced: [] })).toBeNull();
-    expect(dated("drive", "Rhythm Lab Radio 12-26-225", "x", { placements: placed, unplaced: [], extraDates: new Set([D25]) })).toBe(D25);
-    expect(dated("drive", "Rhythm Lab Radio 12-26-25", "y", { placements: [], unplaced: [], extraDates: new Set([D25]) })).toBe(D25);
-    expect(dated("drive", "Rhythm Lab Radio 12-19-25", "z", { placements: [], unplaced: [], extraDates: new Set([D25]) })).toBeNull();
+    expect(dated("drive", "Rhythm Lab Radio 12-26-225", "x", { placements: placed, unplaced: [], extraDates: [D25] })).toBe(D25);
+    expect(dated("drive", "Rhythm Lab Radio 12-26-25", "y", { placements: [], unplaced: [], extraDates: [D25] })).toBe(D25);
+    expect(dated("drive", "Rhythm Lab Radio 12-19-25", "z", { placements: [], unplaced: [], extraDates: [D25] })).toBeNull();
   });
 });
