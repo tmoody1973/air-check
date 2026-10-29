@@ -15,7 +15,7 @@ Three sources describe the same episode. They disagree in predictable ways.
 
 ## Rules
 1. **Order comes from Drive.** The Drive list is the broadcast order.
-2. **Spelling and diacritics come from Paper.** Prefer Paper when it has the accented or full form (Lý Qua Dub, Quiñones, Gutiérrez, Adigéry, Cóndor).
+2. **Paper only restores accents and dropped letters.** Use Paper's form only when it is Drive's own spelling with accents put back or at most 2 dropped characters restored (Lý Qua Dub, Quiñones, Gutiérrez, Adigéry, Cóndor). Never take Paper's capitals, punctuation style or extra words: the notes write "ROY AYERS", "LEIKELI47", "Funk Factory (Michał Urbaniak)" (4-17-26, 1-9-26).
 3. **Closing-track rule (confirmed by Tarik, Oct 19, 2026).** The last song of each hour is never talked about on air, so it normally has no entry in the Paper notes. Drive will therefore have exactly one more track at the end of each hour than Paper (seen on 10-2-26: "Channell & 2bfrank - Just Move" closing hour 1, "SW2 vs EL-B - Nightmare On Bascombe Street" closing hour 2). Treat these as aired and include them in the tracklist, marked `closing-track` (not an error). Do not ask about them and do not research or write about them.
    - **Drive decides (Tarik, Oct 28, 2026).** Notes are written about the artists, not as a track list, so a difference between the notes and Drive is never a question. Keep every Drive track; a track the notes don't match is `unverified-in-notes`, which is a label, not an error.
 4. **Match by normalized title.** Lowercase, strip accents and punctuation, ignore `feat.` credits when matching, then compare.

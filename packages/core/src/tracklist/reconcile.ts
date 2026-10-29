@@ -27,7 +27,24 @@ function findMatch(t: Track, candidates: PaperTrack[], used: Set<PaperTrack>): P
   );
 }
 
-/** Order and count come from Drive; spelling comes from Paper. Nothing is dropped or added. */
+const stripAccents = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "");
+
+/** True when `short` is `long` with at most `max` characters removed (case-sensitive). */
+function droppedAtMost(short: string, long: string, max: number): boolean {
+  if (long.length < short.length || long.length - short.length > max) return false;
+  let i = 0;
+  for (const c of long) if (i < short.length && c === short[i]) i++;
+  return i === short.length;
+}
+
+/** Paper's form wins only when it is Drive's own spelling with accents restored or at most 2 dropped characters put back
+ * ("Ly Qua Dub" → "Lý Qua Dub", "Cndor" → "Cóndor"). Case, punctuation style and added words keep Drive's spelling:
+ * Tarik's notes write "ROY AYERS", "LEIKELI47", "Funk Factory (Michał Urbaniak)" (4-17-26, 1-9-26). */
+function spelling(drive: string, paper: string): string {
+  return paper !== drive && droppedAtMost(drive, stripAccents(paper), 2) ? paper : drive;
+}
+
+/** Order and count come from Drive; Paper only restores accents and dropped characters. Nothing is dropped or added. */
 export function reconcile(drive: ParsedTracklist, paper: PaperTrack[]): Reconciled {
   const used = new Set<PaperTrack>();
   const questions: string[] = [];
@@ -40,8 +57,10 @@ export function reconcile(drive: ParsedTracklist, paper: PaperTrack[]): Reconcil
     );
     if (match) {
       used.add(match);
-      const same = match.artist === t.artist && match.title === t.title;
-      return { ...t, artist: match.artist, title: match.title, status: same ? "confirmed" : "spelling-fixed" };
+      const artist = spelling(t.artist, match.artist);
+      const title = spelling(t.title, match.title);
+      const same = artist === t.artist && title === t.title;
+      return { ...t, artist, title, status: same ? "confirmed" : "spelling-fixed" };
     }
     if (t.closing) return { ...t, status: "closing-track" };
     questions.push(
