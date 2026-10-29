@@ -52,6 +52,7 @@ const NOT_READ = new Set(["redirect_off_host", "not_allowed"]);
 const LINK_OR_ADDRESS = /:\/\/|@/;
 /** Release fields reach the agent, so they hold no link, address or www. host either. */
 const LINKISH = /:\/\/|@|\bwww\./i;
+const HTTP_LINK = /^https?:\/\//;
 const FILLABLE = ["label", "type", "releasedOn", "genre"] as const;
 
 const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
@@ -101,6 +102,8 @@ type CleanMailArg = Infer<typeof cleanMailV>;
 type Embargo = Infer<typeof embargoV>;
 
 const tooLong = (s: string | undefined, max: number) => (s?.length ?? 0) > max;
+/** An embargo's date is null (undated, still active) or a real date. "" would read as no embargo: refused. */
+const embargoDateOk = (e: Embargo | null | undefined) => !e || e.until === null || isShowDate(e.until);
 
 function mailProblem(m: CleanMailArg): string | null {
   if (LINK_OR_ADDRESS.test(m.body) || LINK_OR_ADDRESS.test(m.subject)) return "the stored text must hold no link or address";
@@ -108,6 +111,7 @@ function mailProblem(m: CleanMailArg): string | null {
   if (tooLong(m.sender?.name, MAX_FIELD) || tooLong(m.sender?.address, MAX_ADDRESS) || LINK_OR_ADDRESS.test(m.sender?.name ?? "")) return "the sender is not a plain name and address";
   if (m.links.length > MAX_LINKS || m.links.some((l) => l.length > MAX_LINK)) return `at most ${MAX_LINKS} links of ${MAX_LINK} characters`;
   if (m.bandcampPages.length > MAX_PAGES || m.bandcampPages.some((l) => l.length > MAX_LINK)) return `at most ${MAX_PAGES} Bandcamp pages`;
+  if ([...m.links, ...m.bandcampPages].some((l) => !HTTP_LINK.test(l))) return "stored links must be http or https";
   if (m.hosts.length > MAX_HOSTS || m.hosts.some((h) => h.length > 253 || !HOST.test(h))) return "hosts must be host names only";
   return null;
 }
@@ -115,12 +119,12 @@ function mailProblem(m: CleanMailArg): string | null {
 function releaseProblem(f: ReleaseFields): string | null {
   for (const [k, val] of Object.entries(f)) {
     if (typeof val !== "string") continue;
-    if (tooLong(val, MAX_FIELD)) return `${k} is over ${MAX_FIELD} characters`;
-    if (LINKISH.test(val)) return `${k} must not hold a link or address`;
+    if (tooLong(val, MAX_FIELD)) return `The ${k} is over ${MAX_FIELD} characters`;
+    if (LINKISH.test(val)) return `The ${k} must not hold a link or address`;
   }
-  if (!f.artist.trim() || !f.title.trim()) return "artist and title are required";
-  if (f.releasedOn !== undefined && !isShowDate(f.releasedOn)) return "releasedOn must be a date, yyyy-mm-dd";
-  if (f.embargo?.until && !isShowDate(f.embargo.until)) return "the embargo date must be a date, yyyy-mm-dd";
+  if (!f.artist.trim() || !f.title.trim()) return "Artist and title are required";
+  if (f.releasedOn !== undefined && !isShowDate(f.releasedOn)) return "The release date must be a date, yyyy-mm-dd";
+  if (!embargoDateOk(f.embargo)) return "The embargo date must be a date, yyyy-mm-dd";
   return null;
 }
 
@@ -218,8 +222,13 @@ export const record = mutation({
       await ctx.db.patch(row._id, { state: outcome.kind, reasons: outcome.reasons, ...(outcome.kind === "not-a-release" && { body: undefined }) });
       return {};
     }
+    // A release that breaks a rule is refused with the plain reason (body kept for Try again), never thrown: a throw
+    // would leave the row at the head of pending for ever.
     const problem = releaseProblem(outcome.release);
-    if (problem) throw badInput(problem);
+    if (problem) {
+      await ctx.db.patch(row._id, { state: "refused", reasons: [problem] });
+      return {};
+    }
     const { releaseId, merged } = await saveRelease(ctx, row, outcome.release);
     await ctx.db.patch(row._id, { state: merged ? "merged" : "saved", releaseId, body: undefined, reasons: undefined });
     return { releaseId, merged };
@@ -258,10 +267,13 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
   }
   const edited = new Set(cur.editedFields ?? []);
   const fill = Object.fromEntries(FILLABLE.filter((k) => f[k] !== undefined && cur[k] === undefined && !edited.has(k)).map((k) => [k, f[k]]));
-  const embargo = stricter(cur.embargo, f.embargo);
+  // R5: Tarik's own embargo (cleared or dated by hand) always wins; a later email only leaves a notice for him.
+  const tarikSet = edited.has("embargo");
+  const embargo = tarikSet ? undefined : stricter(cur.embargo, f.embargo);
   await ctx.db.patch(cur._id, {
     ...fill,
     ...(embargo && { embargo }),
+    ...(tarikSet && f.embargo && { laterEmbargoNotice: { at: row.receivedAt, until: f.embargo.until } }),
     senders: [...(cur.senders ?? []), sender].slice(0, MAX_SENDERS),
     links: [...new Set([...(cur.links ?? []), ...(row.links ?? [])])].slice(0, MAX_LINKS),
     ...(!cur.bandcampPage && queue),
@@ -353,13 +365,20 @@ export const edit = mutation({
   },
 });
 
-/** `embargo: null` is "Clear embargo". A dated or undated embargo is set as given. */
+/**
+ * `embargo: null` is "Clear embargo". A dated or undated embargo is set as given. R5: either way the embargo is Tarik's
+ * from now on (marked edited), so no later email re-embargoes it; his choice also settles any open notice.
+ */
 export const setEmbargo = mutation({
   args: { releaseId: v.id("releases"), embargo: v.union(v.null(), embargoV) },
   handler: async (ctx, { releaseId, embargo }) => {
-    await ownRelease(ctx, releaseId);
-    if (embargo?.until && !isShowDate(embargo.until)) throw badInput("the embargo date must be a date, yyyy-mm-dd");
-    await ctx.db.patch(releaseId, { embargo: embargo ?? undefined });
+    const doc = await ownRelease(ctx, releaseId);
+    if (!embargoDateOk(embargo)) throw badInput("the embargo date must be a date, yyyy-mm-dd");
+    await ctx.db.patch(releaseId, {
+      embargo: embargo ?? undefined,
+      laterEmbargoNotice: undefined,
+      editedFields: [...new Set([...(doc.editedFields ?? []), "embargo"])],
+    });
   },
 });
 

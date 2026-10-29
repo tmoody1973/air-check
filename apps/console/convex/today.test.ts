@@ -67,6 +67,9 @@ describe("today.summary", () => {
     expect(rel).toMatchObject({ count: 4, embargoed: 2, byTab: { bandcamp: 2, cosign: 2 }, labels: ["Open Label"] });
     expect(rel.items.map((i) => i.title).sort()).toEqual(["Fresh", "Missing status reads as new"]);
     expect(JSON.stringify(rel)).not.toMatch(/Secret|Dated/);
+    // Only what the card shows: never senders, links, players or edit marks.
+    for (const item of rel.items) expect(Object.keys(item).sort()).toEqual(["artist", "label", "tab", "title"]);
+    expect(rel.items.find((i) => i.title === "Missing status reads as new")).toEqual({ artist: "A", title: "Missing status reads as new", label: "Open Label", tab: "cosign" });
   });
 
   test("blockedSince counts blocked rows since 18:00 America/Chicago yesterday", async () => {

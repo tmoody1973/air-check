@@ -51,7 +51,14 @@ export const summary = query({
     return {
       awaiting,
       openClaims,
-      releases: { count: fresh.length, labels, items: shown.slice(0, 2), embargoed: fresh.length - shown.length, byTab },
+      releases: {
+        count: fresh.length,
+        labels,
+        // Only what the card shows: never senders, links, players or edit marks.
+        items: shown.slice(0, 2).map((r) => ({ artist: r.artist, title: r.title, ...(r.label && { label: r.label }), ...(r.type && { type: r.type }), tab: r.source ?? ("bandcamp" as const) })),
+        embargoed: fresh.length - shown.length,
+        byTab,
+      },
       blockedSince: blocked.length,
       blockedLatest: latest ? { title: latest.title, destination: latest.destination } : undefined,
     };

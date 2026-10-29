@@ -125,14 +125,13 @@ export default function TodayPage() {
                 ) : (
                   <ul className="divide-y divide-line">
                     {s.releases.items.map((r) => (
-                      <li key={r._id} className="flex items-start justify-between gap-3 py-2.5 text-sm first:pt-0">
+                      <li key={`${r.artist}|${r.title}`} className="flex items-start justify-between gap-3 py-2.5 text-sm first:pt-0">
                         <div>
                           <p className="font-medium">
                             {r.artist} · {r.title}
                           </p>
-                          <p className="text-muted">{[r.label, r.type, r.releasedOn].filter(Boolean).join(" · ")}</p>
+                          <p className="text-muted">{[r.label, r.type].filter(Boolean).join(" · ")}</p>
                         </div>
-                        {r.playedNote && <span className="text-right text-muted">{r.playedNote}</span>}
                       </li>
                     ))}
                   </ul>

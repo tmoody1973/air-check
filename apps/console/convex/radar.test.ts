@@ -94,6 +94,25 @@ describe("tokens", () => {
     for (const c of calls(INGEST)) expect(await errorCode(c)).toBe("UNAUTHORIZED");
   });
 
+  test("INBOX_TOKEN equal to another service's token: that service refuses everything too", async () => {
+    const t = convexTest(schema, modules);
+    vi.stubEnv("MEDIA_TOKEN", INBOX);
+    expect(await errorCode(t.query(api.media.pending, { token: INBOX }))).toBe("UNAUTHORIZED");
+    vi.stubEnv("MEDIA_TOKEN", OTHER.MEDIA_TOKEN);
+    vi.stubEnv("PUBLISHER_TOKEN", INBOX);
+    expect(await errorCode(t.query(api.publisher.queue, { token: INBOX }))).toBe("UNAUTHORIZED");
+    vi.stubEnv("PUBLISHER_TOKEN", OTHER.PUBLISHER_TOKEN);
+    vi.stubEnv("RELAY_TOKEN", INBOX);
+    expect(await errorCode(t.query(api.relay.pending, { token: INBOX }))).toBe("UNAUTHORIZED");
+    vi.stubEnv("RELAY_TOKEN", OTHER.RELAY_TOKEN);
+    for (const name of ["AGENT_SUBMIT_TOKEN", "DEMO_AGENT_SUBMIT_TOKEN"]) {
+      vi.stubEnv(name, INBOX);
+      const res = await t.fetch("/agent/radar", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${INBOX}` }, body: "{}" });
+      expect(res.status).toBe(401);
+      vi.stubEnv(name, OTHER[name as keyof typeof OTHER]);
+    }
+  });
+
   test("the human mutations: FORBIDDEN signed out, and for the demo actor on real rows", async () => {
     const t = convexTest(schema, modules);
     const id = await insertRelease(t, { embedState: "failed" });
@@ -239,15 +258,36 @@ describe("pending and record", () => {
     expect(after).toEqual(before);
   });
 
-  test("a saved release holding a link or address is refused", async () => {
+  test("a saved release that breaks a rule is stored as refused with a plain reason (body kept), so it cannot block pending", async () => {
     const t = convexTest(schema, modules);
-    await received(t, "m1");
-    expect(await errorCode(record(t, "m1", saved({ label: "https://evil.example/a" })))).toBe("BAD_INPUT");
-    expect(await errorCode(record(t, "m1", saved({ genre: "x@evil.example" })))).toBe("BAD_INPUT");
-    expect(await errorCode(record(t, "m1", saved({ releasedOn: "soon" })))).toBe("BAD_INPUT");
-    expect(await errorCode(record(t, "m1", saved({ artist: "" })))).toBe("BAD_INPUT");
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      ["m1", { label: "https://evil.example/a" }, /link or address/],
+      ["m2", { genre: "x@evil.example" }, /link or address/],
+      ["m3", { releasedOn: "soon" }, /date/],
+      ["m4", { artist: "" }, /artist and title/i],
+      ["m5", { embargo: { until: "" } }, /embargo date/],
+    ];
+    for (const [id, release] of cases) {
+      await received(t, id);
+      expect(await record(t, id, saved(release))).toEqual({});
+    }
+    for (const [id, , reason] of cases) {
+      const row = await inboxRow(t, id);
+      expect(row).toMatchObject({ state: "refused", body: mail().body });
+      expect(row!.reasons).toHaveLength(1);
+      expect(row!.reasons![0]).toMatch(reason);
+      expect(row!.reasons![0]).toMatch(/^[A-Z]/);
+    }
     expect(await releases(t)).toEqual([]);
-    expect(await inboxRow(t, "m1")).toMatchObject({ state: "received" });
+    expect(await t.query(api.radar.pending, { token: INGEST })).toEqual([]);
+  });
+
+  test("a stored link that is not http(s) is refused", async () => {
+    const t = convexTest(schema, modules);
+    expect(await errorCode(received(t, "m1", mail({ links: ["javascript:alert(1)"] })))).toBe("BAD_INPUT");
+    expect(await errorCode(received(t, "m2", mail({ links: ["ftp://x.example/a"] })))).toBe("BAD_INPUT");
+    expect(await errorCode(received(t, "m3", mail({ bandcampPages: ["x.bandcamp.com/album/a"] })))).toBe("BAD_INPUT");
+    expect(await inboxRows(t)).toEqual([]);
   });
 });
 
@@ -301,6 +341,39 @@ describe("merge by release key (Review Focus 4)", () => {
     await received(t, "m2");
     await record(t, "m2", saved({ genre: "pop" }));
     expect((await releases(t))[0]).not.toHaveProperty("genre");
+  });
+
+  test("R5: Tarik's Clear embargo always wins; a later embargo email leaves only a notice", async () => {
+    const t = convexTest(schema, modules);
+    const id = await savedRelease(t, "m1", mail(), { embargo: { until: "2026-11-07" } });
+    await t.withIdentity(human).mutation(api.radar.setEmbargo, { releaseId: id, embargo: null });
+    await received(t, "m2", mail(), { receivedAt: T0 + 5 });
+    await record(t, "m2", saved({ embargo: { until: null } }));
+    const [rel] = await releases(t);
+    expect(rel).not.toHaveProperty("embargo");
+    expect(rel!.editedFields).toContain("embargo");
+    expect(rel!.laterEmbargoNotice).toEqual({ at: T0 + 5, until: null });
+  });
+
+  test("R5: a date Tarik set by hand is not moved by a later email either", async () => {
+    const t = convexTest(schema, modules);
+    const id = await savedRelease(t, "m1");
+    await t.withIdentity(human).mutation(api.radar.setEmbargo, { releaseId: id, embargo: { until: "2026-11-01" } });
+    await received(t, "m2", mail(), { receivedAt: T0 + 5 });
+    await record(t, "m2", saved({ embargo: { until: "2026-11-20" } }));
+    const [rel] = await releases(t);
+    expect(rel!.embargo).toEqual({ until: "2026-11-01" });
+    expect(rel!.laterEmbargoNotice).toEqual({ at: T0 + 5, until: "2026-11-20" });
+  });
+
+  test("R5: a release Tarik never touched still takes the stricter embargo, with no notice", async () => {
+    const t = convexTest(schema, modules);
+    await savedRelease(t, "m1");
+    await received(t, "m2");
+    await record(t, "m2", saved({ embargo: { until: "2026-11-07" } }));
+    const [rel] = await releases(t);
+    expect(rel!.embargo).toEqual({ until: "2026-11-07" });
+    expect(rel).not.toHaveProperty("laterEmbargoNotice");
   });
 
   test("senders are capped at 10", async () => {
@@ -411,6 +484,7 @@ describe("human mutations", () => {
     await as.mutation(api.radar.setEmbargo, { releaseId: id, embargo: { until: "2026-11-07" } });
     expect((await releases(t))[0]!.embargo).toEqual({ until: "2026-11-07" });
     expect(await errorCode(as.mutation(api.radar.setEmbargo, { releaseId: id, embargo: { until: "Nov 7" } }))).toBe("BAD_INPUT");
+    expect(await errorCode(as.mutation(api.radar.setEmbargo, { releaseId: id, embargo: { until: "" } }))).toBe("BAD_INPUT");
     await as.mutation(api.radar.setEmbargo, { releaseId: id, embargo: null });
     expect((await releases(t))[0]).not.toHaveProperty("embargo");
     await as.mutation(api.radar.setStatus, { releaseId: id, status: "passed", reason: "Too long" });

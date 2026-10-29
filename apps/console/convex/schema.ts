@@ -213,6 +213,8 @@ export default defineSchema({
     key: v.optional(v.string()),
     receivedAt: v.optional(v.number()),
     editedFields: v.optional(v.array(v.string())),
+    // R5: Tarik set or cleared the embargo by hand, and a later email mentions one. Shown, never enforced.
+    laterEmbargoNotice: v.optional(v.object({ at: v.number(), until: v.union(v.string(), v.null()) })),
   })
     .index("by_workspace", ["workspace"])
     .index("by_workspace_key", ["workspace", "key"])
