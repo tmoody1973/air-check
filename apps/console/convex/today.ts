@@ -35,9 +35,15 @@ export const summary = query({
       .sort((a, b) => b.receivedAt! - a.receivedAt!);
     const today = chicagoDayKey(now);
     const shown = fresh.filter((r) => !isEmbargoActive(r.embargo, today));
-    const labels = [...new Set(shown.map((r) => r.label).filter((l): l is string => !!l))];
+    // The card and its labels are the Bandcamp tab's; co-signs are counted, per tab, like embargoed records.
+    const bandcamp = shown.filter((r) => (r.source ?? "bandcamp") === "bandcamp");
+    const labels = [...new Set(bandcamp.map((r) => r.label).filter((l): l is string => !!l))];
     const byTab = { bandcamp: 0, cosign: 0 };
-    for (const r of fresh) byTab[r.source ?? "bandcamp"] += 1;
+    const embargoed = { bandcamp: 0, cosign: 0 };
+    for (const r of fresh) {
+      byTab[r.source ?? "bandcamp"] += 1;
+      if (isEmbargoActive(r.embargo, today)) embargoed[r.source ?? "bandcamp"] += 1;
+    }
 
     const blocked = (
       await ctx.db
@@ -55,8 +61,8 @@ export const summary = query({
         count: fresh.length,
         labels,
         // Only what the card shows: never senders, links, players or edit marks.
-        items: shown.slice(0, 2).map((r) => ({ artist: r.artist, title: r.title, ...(r.label && { label: r.label }), ...(r.type && { type: r.type }), tab: r.source ?? ("bandcamp" as const) })),
-        embargoed: fresh.length - shown.length,
+        items: bandcamp.slice(0, 2).map((r) => ({ artist: r.artist, title: r.title, ...(r.label && { label: r.label }), ...(r.type && { type: r.type }), tab: r.source ?? ("bandcamp" as const) })),
+        embargoed,
         byTab,
       },
       blockedSince: blocked.length,

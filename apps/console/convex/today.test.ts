@@ -39,13 +39,27 @@ describe("today.summary", () => {
     const r = await t.withIdentity(human).query(api.today.summary, {});
     expect(r?.awaiting).toEqual([{ packageId: "real-1", title: real.title, tracks: real.tracks.length, flags: real.flags?.length ?? 0 }]);
     expect(r?.openClaims).toEqual([{ claim: "A", status: "conflict" }]);
-    expect(r?.releases).toMatchObject({ count: 3, labels: ["L1", "L2"] });
-    expect(r?.releases.items).toHaveLength(2);
+    // Fix round 1: labels and items are the Bandcamp tab's only; co-signs are counted in byTab.
+    expect(r?.releases).toMatchObject({ count: 3, labels: ["L1"], byTab: { bandcamp: 2, cosign: 1 } });
+    expect(r?.releases.items.map((i) => i.tab)).toEqual(["bandcamp", "bandcamp"]);
 
     const d = await t.withIdentity(demo).query(api.today.summary, {});
     expect(d?.awaiting.map((a) => a.packageId)).toEqual(["demo-1"]);
     expect(d?.openClaims).toEqual([{ claim: "C", status: "could-not-verify" }]);
     expect(d?.releases.count).toBe(1);
+  });
+
+  test("releases: Bandcamp items are cut to two after the tab filter, so newer co-signs never crowd them out", async () => {
+    const t = convexTest(schema, modules);
+    const at = Date.now();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("releases", { workspace: "real", artist: "B", title: "Older Bandcamp", label: "BL", receivedAt: at - 2000, source: "bandcamp" });
+      await ctx.db.insert("releases", { workspace: "real", artist: "C", title: "Co 1", label: "CL", receivedAt: at - 1000, source: "cosign" });
+      await ctx.db.insert("releases", { workspace: "real", artist: "C", title: "Co 2", label: "CL", receivedAt: at, source: "cosign" });
+    });
+    const rel = (await t.withIdentity(human).query(api.today.summary, {}))!.releases;
+    expect(rel.items.map((i) => i.title)).toEqual(["Older Bandcamp"]);
+    expect(rel.labels).toEqual(["BL"]);
   });
 
   test("releases: new records received since the cutoff; embargoed and byTab count them; no embargoed item in labels or items", async () => {
@@ -64,12 +78,12 @@ describe("today.summary", () => {
       await r({ title: "No time" , receivedAt: undefined, label: "N" });
     });
     const rel = (await t.withIdentity(human).query(api.today.summary, {}))!.releases;
-    expect(rel).toMatchObject({ count: 4, embargoed: 2, byTab: { bandcamp: 2, cosign: 2 }, labels: ["Open Label"] });
-    expect(rel.items.map((i) => i.title).sort()).toEqual(["Fresh", "Missing status reads as new"]);
+    expect(rel).toMatchObject({ count: 4, embargoed: { bandcamp: 1, cosign: 1 }, byTab: { bandcamp: 2, cosign: 2 }, labels: ["Open Label"] });
+    expect(rel.items.map((i) => i.title)).toEqual(["Fresh"]);
     expect(JSON.stringify(rel)).not.toMatch(/Secret|Dated/);
     // Only what the card shows: never senders, links, players or edit marks.
     for (const item of rel.items) expect(Object.keys(item).sort()).toEqual(["artist", "label", "tab", "title"]);
-    expect(rel.items.find((i) => i.title === "Missing status reads as new")).toEqual({ artist: "A", title: "Missing status reads as new", label: "Open Label", tab: "cosign" });
+    expect(rel.items).toEqual([{ artist: "A", title: "Fresh", label: "Open Label", tab: "bandcamp" }]);
   });
 
   test("blockedSince counts blocked rows since 18:00 America/Chicago yesterday", async () => {

@@ -43,6 +43,8 @@ describe("seedDemo", () => {
       expect(r).not.toHaveProperty("links");
     }
     expect(rows.filter((r) => r.embargo).map((r) => r.embargo)).toEqual([{ until: null }]);
+    // Co-signs show their sender prominently: a bracketed sample one, never a real address.
+    for (const r of rows.filter((x) => x.source === "cosign")) expect(r.senders?.map((s) => [s.name, s.address])).toEqual([["[Label or PR company]", undefined]]);
     // The demo has no inbox (Hard Rule 9: inbound mail writes the real workspace only).
     expect(await t.run((ctx) => ctx.db.query("inbox").collect())).toEqual([]);
   });

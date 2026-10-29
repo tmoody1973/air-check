@@ -145,7 +145,10 @@ export const seedDemo = internalMutation({
     // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases. Both radar tabs, one undated
     // embargo, and no players or links: no real music in the demo or the video (Plan 8, Hard Rule 9).
     for (const [i, row] of SAMPLE_RELEASES.entries()) {
-      await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", receivedAt: newest - i * 60_000, ...row });
+      const at = newest - i * 60_000;
+      // A co-sign shows its sender prominently: a bracketed sample one, never a real address.
+      const sender = row.source === "cosign" ? { senders: [{ name: "[Label or PR company]", messageId: `demo-sample-${i}`, at }] } : {};
+      await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", receivedAt: at, ...sender, ...row });
     }
 
     await ctx.db.insert("runs", {

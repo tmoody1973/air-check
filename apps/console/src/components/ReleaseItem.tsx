@@ -207,6 +207,9 @@ function EditForm({ r, ctx, onClose }: { r: Release; ctx: ReleaseCtx; onClose: (
   );
 }
 
+// Phone: tighter side padding and gap so Consider, Played, Pass and Edit share one row in a 375px card (height stays 44px).
+const ACT = `${SECONDARY} max-md:px-3`;
+
 function Actions({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const [open, setOpen] = useState<"pass" | "edit" | null>(null);
   const { busy, error, save } = useSave(ctx.announce);
@@ -216,16 +219,16 @@ function Actions({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const s = r.status;
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        {s === "new" && <button type="button" className={SECONDARY} disabled={busy} onClick={() => move("considering", "moved to Considering")}>Consider</button>}
+      <div className="flex flex-wrap gap-2 max-md:gap-1.5">
+        {s === "new" && <button type="button" className={ACT} disabled={busy} onClick={() => move("considering", "moved to Considering")}>Consider</button>}
         {(s === "new" || s === "considering") && (
           <>
-            <button type="button" className={SECONDARY} disabled={busy} onClick={() => move("played", "marked played")}>Played</button>
-            <button type="button" className={SECONDARY} onClick={() => setOpen("pass")}>Pass</button>
+            <button type="button" className={ACT} disabled={busy} onClick={() => move("played", "marked played")}>Played</button>
+            <button type="button" className={ACT} onClick={() => setOpen("pass")}>Pass</button>
           </>
         )}
-        {s !== "new" && <button type="button" className={SECONDARY} disabled={busy} onClick={() => move("new", "moved back to New")}>Move back to New</button>}
-        <button type="button" className={SECONDARY} onClick={() => setOpen("edit")}>Edit</button>
+        {s !== "new" && <button type="button" className={ACT} disabled={busy} onClick={() => move("new", "moved back to New")}>Move back to New</button>}
+        <button type="button" className={ACT} onClick={() => setOpen("edit")}>Edit</button>
       </div>
       {error && <p role="alert" className="text-sm text-problem-text">{error}</p>}
     </div>
@@ -243,7 +246,8 @@ function Body({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
     <div className="flex min-w-0 flex-col gap-3">
       {r.laterEmbargoNotice && <p className="text-sm text-muted">A newer email mentions an embargo — you cleared it</p>}
       {r.status === "passed" && r.passReason && <p className="text-sm text-ink-soft [overflow-wrap:anywhere]">Passed: {r.passReason}</p>}
-      {(ctx.demo || page || r.embedState) && (
+      {/* A co-sign gets a player only through a Bandcamp link, so a demo co-sign has no player box. */}
+      {((ctx.demo && r.source !== "cosign") || page || r.embedState) && (
         <div className="flex flex-col gap-2">
           {player}
           {page && <ul aria-label="Bandcamp page" className="flex flex-col"><LinkLine href={page} /></ul>}

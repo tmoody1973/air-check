@@ -18,7 +18,18 @@ const FAILED: Record<string, string> = {
   no_player: "the page has no player",
   timeout: "Bandcamp took longer than 15 seconds",
   network: "Bandcamp couldn't be reached",
+  bad_id: "the stored player id isn't valid",
 };
+
+/** The iframe src, or null when the stored id is malformed (core throws): the page shows "No player" instead of crashing. */
+function playerSrc(embed: BandcampEmbed | undefined): string | null {
+  if (!embed) return null;
+  try {
+    return bandcampEmbedSrc(embed);
+  } catch {
+    return null;
+  }
+}
 
 /** The ingest worker's failure code as plain words. Unknown codes never show raw. */
 export function embedErrorText(code: string | undefined): string {
@@ -70,6 +81,8 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, d
     );
   }
   if (!embed || embedState !== "ready") return null;
+  const src = playerSrc(embed);
+  if (!src) return <p className="text-sm text-ink-soft">No player: {embedErrorText("bad_id")}</p>;
   if (!playing)
     return (
       <button type="button" className={`${SECONDARY} self-start`} onClick={() => setPlaying(true)}>
@@ -78,9 +91,10 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, d
     );
   return (
     <iframe
-      src={bandcampEmbedSrc(embed)}
+      src={src}
       title={`Bandcamp player: ${artist} – ${title}`}
       loading="lazy"
+      referrerPolicy="no-referrer"
       sandbox="allow-scripts allow-same-origin allow-popups"
       width="100%"
       height="120"

@@ -79,6 +79,12 @@ describe("a record shows", () => {
     expect(screen.getByText(/Not for this show/)).toBeInTheDocument();
   });
 
+  it("a demo co-sign shows its sample sender and no player box (co-signs get a player only through a Bandcamp link)", () => {
+    setup(rel({ workspace: "demo", source: "cosign", artist: "[Artist]", senders: [{ name: "[Label or PR company]", messageId: "demo", at: 1 }] }), { demo: true });
+    expect(screen.getByText("From [Label or PR company]")).toBeInTheDocument();
+    expect(screen.queryByText("[Bandcamp player]")).toBeNull();
+  });
+
   it("the Sample tag on a demo row", () => {
     setup(rel({ workspace: "demo", artist: "[Artist]" }), { demo: true });
     expect(screen.getAllByText("Sample").length).toBeGreaterThan(0);
@@ -174,6 +180,16 @@ describe("actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear embargo" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear it" }));
     await waitFor(() => expect(actions.setEmbargo).toHaveBeenCalledWith({ releaseId: "r1", embargo: null }));
+  });
+
+  it("phone: Consider, Played, Pass and Edit tighten their side padding below md so they share one row (height kept)", () => {
+    setup(rel());
+    for (const name of ["Consider", "Played", "Pass", "Edit"]) {
+      const b = screen.getByRole("button", { name });
+      expect(b.className).toMatch(/max-md:px-3/);
+      expect(b.className).toMatch(/min-h-11/);
+    }
+    expect(screen.getByRole("button", { name: "Consider" }).parentElement!.className).toMatch(/max-md:gap-1\.5/);
   });
 
   it("all controls are 44px targets (min-h-11)", () => {

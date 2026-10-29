@@ -23,6 +23,14 @@ describe("BandcampPlayer", () => {
     expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-popups");
     expect(frame).toHaveAttribute("width", "100%");
     expect(frame).toHaveAttribute("height", "120");
+    expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
+  });
+
+  it("a malformed stored id never crashes the page: the No player line instead", () => {
+    const { container } = render(<BandcampPlayer {...base} embed={{ kind: "album", id: "12x<script>" }} embedState="ready" />);
+    expect(screen.getByText(`No player: ${embedErrorText("bad_id")}`)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Play on Bandcamp" })).toBeNull();
+    expect(container.querySelector("iframe")).toBeNull();
   });
 
   it("queued: says it is getting the player, no button, no iframe", () => {

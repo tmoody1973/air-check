@@ -44,7 +44,6 @@ export default function TodayPage() {
   const { isSignedIn } = useAuth();
   // Plan 8: the card counts the Bandcamp tab only; co-signs get their own line.
   const bandcampNew = s?.releases.byTab.bandcamp ?? 0;
-  const bandcampItems = s?.releases.items.filter((r) => r.tab === "bandcamp") ?? [];
 
   return (
     <Shell title="Today">
@@ -119,12 +118,11 @@ export default function TodayPage() {
                 title="New Bandcamp releases"
                 badge={bandcampNew > 0 && <Pill tone="ready">{bandcampNew} new</Pill>}
               >
-                {bandcampNew === 0 ? (
-                  <Empty>No new Bandcamp releases.</Empty>
-                ) : (
-                  // ponytail: the summary's two newest items can both be co-signs; then the count stands alone.
-                  bandcampItems.length > 0 && <ul className="divide-y divide-line">
-                    {bandcampItems.map((r) => (
+                {bandcampNew === 0 && <Empty>No new Bandcamp releases.</Empty>}
+                {/* The server sends Bandcamp items only, never an embargoed one: all embargoed means no list. */}
+                {s.releases.items.length > 0 && (
+                  <ul className="divide-y divide-line">
+                    {s.releases.items.map((r) => (
                       <li key={`${r.artist}|${r.title}`} className="py-2.5 text-sm first:pt-0">
                         <p className="font-medium">
                           {r.artist} · {r.title}
@@ -134,18 +132,21 @@ export default function TodayPage() {
                     ))}
                   </ul>
                 )}
-                {s.releases.embargoed > 0 && (
+                {s.releases.embargoed.bandcamp > 0 && (
                   // Plan 8: counted, never named here; the radar page (a private view) shows which.
                   <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
                     <Pill tone="caution">Embargoed</Pill>
-                    {s.releases.embargoed === 1 ? "1 new release is embargoed, so it isn't named here." : `${s.releases.embargoed} new releases are embargoed, so they aren't named here.`}
+                    {s.releases.embargoed.bandcamp === 1
+                      ? "1 new Bandcamp release is embargoed, so it isn't named here."
+                      : `${s.releases.embargoed.bandcamp} new Bandcamp releases are embargoed, so they aren't named here.`}
                   </p>
                 )}
                 {s.releases.byTab.cosign > 0 && (
-                  <p className="mt-3 text-sm">
+                  <p className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                     <Link href="/release-radar?tab=cosign" className={link}>
                       {plural(s.releases.byTab.cosign, "new co-sign")}
                     </Link>
+                    {s.releases.embargoed.cosign > 0 && <Pill tone="caution">{s.releases.embargoed.cosign} embargoed</Pill>}
                   </p>
                 )}
                 <Link href="/release-radar" className={`${btn} mt-4 border border-line-strong bg-surface text-ink hover:bg-surface-quiet`}>

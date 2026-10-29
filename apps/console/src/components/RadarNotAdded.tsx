@@ -27,12 +27,35 @@ const STATE: Record<NotAddedRow["state"], [PillTone, string]> = {
   failed: ["problem", "Failed"],
 };
 const RETRYABLE = new Set<NotAddedRow["state"]>(["refused", "failed"]);
+/** Core's senderDecision reasons as stored by the inbound route, in the words Tarik reads (R9: no env-var name). */
+const IGNORED: Record<string, string> = {
+  "Sender not on the list": "Sender not on the list. To accept their mail, add the address to Air Check's sender list.",
+  "Sender's signature (DKIM) did not pass": "Sender's signature (DKIM) did not pass.",
+};
+const sentence = (r: string) => (/[.!?]$/.test(r) ? r : `${r}.`);
+
+/** The stored reasons in plain words. Anything unknown is shown as stored: it is already a plain reason. */
+function reasonLines(row: NotAddedRow): string[] {
+  switch (row.state) {
+    case "received":
+      return row.reasons.length ? row.reasons : ["Being read now"];
+    case "not-a-release":
+      return ["Not a release email."];
+    case "ignored":
+      return row.reasons.map((r) => IGNORED[r] ?? r);
+    case "refused":
+    case "failed":
+      return row.reasons.length ? row.reasons.map((r) => `Couldn't read it: ${sentence(r)}`) : ["Couldn't read it."];
+    default:
+      return row.reasons;
+  }
+}
 
 function Row({ row, retry, announce }: { row: NotAddedRow; retry: (a: { messageId: string }) => Promise<unknown>; announce: (msg: string) => void }) {
   const { busy, error, save } = useSave(announce);
   const [tone, word] = STATE[row.state];
   const waiting = row.reasons.includes("Waiting to be read");
-  const reasons = row.state === "received" && row.reasons.length === 0 ? ["Being read now"] : row.reasons;
+  const reasons = reasonLines(row);
   return (
     <li className="flex min-w-0 flex-col gap-1.5 py-3 text-sm first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
