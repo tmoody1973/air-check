@@ -61,6 +61,8 @@ test("the public writes are exactly the allowlist", async () => {
       // what it read and a Bandcamp player id; a signed-in human moves records. None can reach a package (Hard Rule 1).
       "radar.received", "radar.record", "radar.embedResult",
       "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed",
+      // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
+      "radar.setFavorite",
     ].sort(),
   );
   expect(internal.sort()).toEqual(

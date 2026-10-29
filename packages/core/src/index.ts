@@ -29,6 +29,7 @@ export * from "./episode/dates";
 export * from "./episode/rerun";
 export * from "./radar/email";
 export * from "./radar/bandcamp";
+export * from "./radar/bandcampPage";
 export * from "./radar/extract";
 export * from "./radar/embargo";
 export * from "./radar/extractionSkill";

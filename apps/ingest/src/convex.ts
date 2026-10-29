@@ -1,4 +1,4 @@
-import type { BandcampEmbed, LinkedPackageStatus, RadarTab, ReleaseFields } from "@aircheck/core";
+import type { BandcampDetails, BandcampEmbed, LinkedPackageStatus, RadarTab, ReleaseFields } from "@aircheck/core";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi, type FunctionReference } from "convex/server"; // untyped on purpose, like media: the console's generated api would drag its tsconfig in
 
@@ -95,7 +95,8 @@ export interface IngestConvex {
 export interface PendingEmail { messageId: string; tab: RadarTab; subject: string; body: string; receivedAt: number }
 /** Mirrors outcomeV in apps/console/convex/radar.ts: any other key is refused by its validator. */
 export type RadarOutcome = { kind: "saved"; release: ReleaseFields } | { kind: "not-a-release" | "refused" | "failed"; reasons: string[] };
-export type EmbedOutcome = BandcampEmbed | { failed: string };
+/** Mirrors embedResult's validator: the player id, and (Task 6b) the page's art, tags and about from the same fetch. */
+export type EmbedOutcome = (BandcampEmbed & BandcampDetails) | { failed: string };
 /** The radar code's only Convex calls (Plan 8 Global Constraints): radar.pending, record, embedsWanted, embedResult. */
 export interface RadarConvex {
   pending(): Promise<PendingEmail[]>;

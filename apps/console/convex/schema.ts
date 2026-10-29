@@ -215,11 +215,20 @@ export default defineSchema({
     editedFields: v.optional(v.array(v.string())),
     // R5: Tarik set or cleared the embargo by hand, and a later email mentions one. Shown, never enforced.
     laterEmbargoNotice: v.optional(v.object({ at: v.number(), until: v.union(v.string(), v.null()) })),
+    // Task 6b, from the one Bandcamp page fetch: the cover art URL (never the image), checked tags, and the about.
+    // `about` is untrusted page text, display-only: no agent-facing path returns it. All optional: older rows validate.
+    art: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    about: v.optional(v.string()),
+    favorite: v.optional(v.boolean()),
+    // Artist, title, label, tags and about, folded; rewritten on every write that changes one of them.
+    searchText: v.optional(v.string()),
   })
     .index("by_workspace", ["workspace"])
     .index("by_workspace_key", ["workspace", "key"])
     .index("by_workspace_source_receivedAt", ["workspace", "source", "receivedAt"])
-    .index("by_embedState", ["embedState"]),
+    .index("by_embedState", ["embedState"])
+    .searchIndex("search_text", { searchField: "searchText", filterFields: ["workspace", "source", "status", "favorite"] }),
   // Plan 8: forwarded email as the console stored it, real workspace only (Hard Rule 9). `body` is cleaned (no link or
   // address) and deleted once the ingest worker has read it; an ignored sender's body is never stored.
   inbox: defineTable({

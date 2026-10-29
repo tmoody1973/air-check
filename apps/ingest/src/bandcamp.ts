@@ -1,6 +1,6 @@
 // Hard Rule 5's one exception (ARCHITECTURE 3.7): the ingest worker reads one public Bandcamp album or track page per
 // release, in code, for its player id. Nothing else fetches a link from an email. No audio, no cookie, no credential.
-import { bandcampPageUrl, readBandcampEmbed, type BandcampEmbed } from "@aircheck/core";
+import { bandcampPageUrl, readBandcampDetails, readBandcampEmbed, type BandcampDetails, type BandcampEmbed } from "@aircheck/core";
 import type { RadarConvex } from "./convex.js";
 import { call, HttpError, readText, type Http } from "./http.js";
 
@@ -67,11 +67,15 @@ async function fetchPage(http: Http, pageUrl: string): Promise<{ html: string } 
   }
 }
 
-/** The album or track id from one queued page's own player URL. The HTML is dropped once the id is read. */
-export async function bandcampEmbed(http: Http, pageUrl: string): Promise<BandcampEmbed | { failed: EmbedFailure }> {
+/**
+ * The album or track id from one queued page's own player URL, plus its cover art URL, tags and about (Task 6b), all
+ * from this one request. The HTML is dropped once they are read; a page with no player keeps nothing.
+ */
+export async function bandcampEmbed(http: Http, pageUrl: string): Promise<(BandcampEmbed & BandcampDetails) | { failed: EmbedFailure }> {
   const page = await fetchPage(http, pageUrl);
   if ("failed" in page) return page;
-  return readBandcampEmbed(page.html) ?? { failed: "no_player" };
+  const embed = readBandcampEmbed(page.html);
+  return embed ? { ...embed, ...readBandcampDetails(page.html) } : { failed: "no_player" };
 }
 
 /**

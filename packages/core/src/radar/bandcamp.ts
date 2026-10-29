@@ -30,14 +30,24 @@ export type BandcampEmbed = { kind: "album" | "track"; id: string };
 const PLAYER_PREFIX = "https://bandcamp.com/EmbeddedPlayer/";
 const PLAYER_META = new Set(["og:video", "og:video:secure_url", "twitter:player"]);
 
-// ponytail: regex over <meta> tags, fine for one meta tag on a Bandcamp page. Swap to a parser if a real page breaks it.
-/** The album or track id from the page's own player URL. Nothing else from the page is kept. */
-export function readBandcampEmbed(html: string): BandcampEmbed | null {
-  for (const tag of html.match(/<meta\b[^<>]*>/gi) ?? []) {
+// Every repeat is bounded and an attribute name starts only after a non-name character, so a hostile page stays linear.
+// A meta tag over 2,000 characters is skipped (Bandcamp's are short).
+const META_TAG = /<meta\b[^<>]{0,2000}>/gi;
+const META_ATTR = /(?<![\w:-])([\w:-]{1,100})\s{0,20}=\s{0,20}(?:"([^"]{0,2000})"|'([^']{0,2000})')/g;
+
+// ponytail: regex over <meta> tags, fine for a few meta tags on a Bandcamp page. Swap to a parser if a real page breaks it.
+/** Each `<meta>` tag's property (or name), lower-cased, with its content (`&amp;` decoded), in page order. */
+export function metaTags(html: string): { key: string; content: string }[] {
+  return (html.match(META_TAG) ?? []).map((tag) => {
     const attrs: Record<string, string> = {};
-    for (const a of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[a[1]!.toLowerCase()] = a[2] ?? a[3] ?? "";
-    const key = (attrs.property ?? attrs.name ?? "").toLowerCase();
-    const content = (attrs.content ?? "").replace(/&amp;/g, "&");
+    for (const a of tag.matchAll(META_ATTR)) attrs[a[1]!.toLowerCase()] = a[2] ?? a[3] ?? "";
+    return { key: (attrs.property ?? attrs.name ?? "").toLowerCase(), content: (attrs.content ?? "").replace(/&amp;/g, "&") };
+  });
+}
+
+/** The album or track id from the page's own player URL. */
+export function readBandcampEmbed(html: string): BandcampEmbed | null {
+  for (const { key, content } of metaTags(html)) {
     if (!PLAYER_META.has(key) || !content.startsWith(PLAYER_PREFIX)) continue;
     const path = content.slice(PLAYER_PREFIX.length);
     // A track page's player may also name its album; the track is the one the page is about.

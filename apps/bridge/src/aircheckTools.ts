@@ -232,8 +232,8 @@ const RADAR_TABS = ["bandcamp", "cosign"];
 
 /**
  * `radar_get` (Plan 8): read-only release records from the Release radar. Convex picks the fields (artist, title,
- * label, genre, type, release date, status, tab): never a link, a player, a sender or email text, and never an
- * embargoed release (Hard Rule 5). It changes nothing.
+ * label, genre, type, release date, Bandcamp tags, status, tab): never a link, a player, a sender, email text or the
+ * Bandcamp page's description, and never an embargoed release (Hard Rule 5). It changes nothing.
  */
 export function radarGetTool(opts: { siteUrl: string; token: string; fetch?: typeof fetch }): PackageSubmitTool {
   const doFetch = opts.fetch ?? fetch;

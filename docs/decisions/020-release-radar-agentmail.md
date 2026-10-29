@@ -41,7 +41,7 @@ Calls Tarik made on Oct 29:
   - a redirect is followed only if it stays on Bandcamp;
   - a time limit and a size limit.
 
-  It keeps only the player's number. The page text is thrown away and never reaches a model. The player itself is Bandcamp's, loaded in Tarik's browser when he taps Play, so no audio is stored.
+  It keeps only the player's number and, from that same request (Task 6b, Tarik's ask on Oct 29), the cover art's address on Bandcamp's image host, up to 12 checked tags, and the album description as plain text with links removed. The rest of the page is thrown away, and none of it reaches a model. The description is shown only to Tarik, never to the agent; the agent may see the tags. The art is shown from Bandcamp's own address, never copied. The player itself is Bandcamp's, loaded in Tarik's browser when he taps Play, so no audio is stored.
 - **Embargo blocks Approve**, with a "Clear embargo" button as the override. An embargo with no date stays active until Tarik dates or clears it.
 
 Smaller calls (Claude's):

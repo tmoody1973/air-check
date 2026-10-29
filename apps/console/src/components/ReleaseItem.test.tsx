@@ -24,10 +24,10 @@ const rel = (over: Partial<Release> = {}): Release => ({
 });
 const noop = async () => undefined;
 const acts = (over: Partial<RadarActions> = {}): RadarActions => ({
-  setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), ...over,
+  setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), setFavorite: vi.fn(noop), ...over,
 });
-function setup(r: Release, { layout = "card" as "card" | "row", actions = acts(), demo = false } = {}) {
-  const ctx: ReleaseCtx = { actions, announce: vi.fn(), today: TODAY, demo, tab: r.source ?? "bandcamp" };
+function setup(r: Release, { layout = "card" as "card" | "row", actions = acts(), demo = false, tag = undefined as string | undefined } = {}) {
+  const ctx: ReleaseCtx = { actions, announce: vi.fn(), today: TODAY, demo, tab: r.source ?? "bandcamp", tag, onTag: vi.fn() };
   if (layout === "card") render(<ul><ReleaseItem r={r} layout="card" ctx={ctx} /></ul>);
   else render(<table><tbody><ReleaseItem r={r} layout="row" ctx={ctx} /></tbody></table>);
   return { actions, ctx };
@@ -195,5 +195,86 @@ describe("actions", () => {
   it("all controls are 44px targets (min-h-11)", () => {
     setup(rel());
     for (const b of screen.getAllByRole("button")) expect(b.className).toMatch(/min-h-11/);
+  });
+});
+
+// Plan 8 Task 6b: cover art, tags, the about and the favorite. All page text renders as text: no HTML, no links.
+describe("art, tags, about and favorite (Task 6b)", () => {
+  const ART = "https://f4.bcbits.com/img/a0000000001_5.jpg";
+  const page = { art: ART, tags: ["deep house", "<b>jazz</b>"], about: "Recorded in one winter.\nOpen https://evil.example/a <script>x</script>" };
+
+  it.each(["card", "row"] as const)("%s: a lazy cover image with plain alt text and no referrer", (layout) => {
+    setup(rel(page), { layout });
+    const img = screen.getByRole("img", { name: "Cover art for Low Tide by Nova Reyes" });
+    expect(img).toHaveAttribute("src", ART);
+    expect(img).toHaveAttribute("loading", "lazy");
+    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
+  });
+
+  it("art not on an https *.bcbits.com image is never drawn", () => {
+    setup(rel({ art: "https://evil.example/img/a1_5.jpg" }));
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("demo: a bracketed placeholder on a Bandcamp row, never the image; none on a co-sign", () => {
+    setup(rel(page), { demo: true });
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("[Cover art]")).toBeInTheDocument();
+    cleanup();
+    setup(rel({ ...page, source: "cosign" }), { demo: true });
+    expect(screen.queryByText("[Cover art]")).toBeNull();
+  });
+
+  it.each(["card", "row"] as const)("%s: tags are plain-text chips; a click filters by that tag", (layout) => {
+    const { ctx } = setup(rel(page), { layout });
+    const tags = within(screen.getByRole("list", { name: "Tags" })).getAllByRole("button");
+    expect(tags.map((b) => b.textContent)).toEqual(["deep house", "<b>jazz</b>"]);
+    expect(document.querySelector("b")).toBeNull();
+    for (const b of tags) expect(b).toHaveClass("min-h-11");
+    fireEvent.click(tags[0]!);
+    expect(ctx.onTag).toHaveBeenCalledWith("deep house");
+  });
+
+  it("the tag being filtered on is pressed", () => {
+    setup(rel(page), { tag: "deep house" });
+    expect(screen.getByRole("button", { name: "deep house" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "<b>jazz</b>" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("About is collapsed by default and shows the description as plain text, never a link", () => {
+    setup(rel(page));
+    const details = screen.getByText("About").closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("About"));
+    expect(within(details).getByText(/Recorded in one winter/)).toHaveTextContent("Open https://evil.example/a <script>x</script>");
+    expect(details.querySelector("a, script")).toBeNull();
+  });
+
+  it("no about, no tags: neither is drawn", () => {
+    setup(rel());
+    expect(screen.queryByText("About")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Tags" })).toBeNull();
+  });
+
+  it.each(["card", "row"] as const)("%s: the star toggles the favorite and nothing else", async (layout) => {
+    const { actions } = setup(rel(), { layout });
+    const star = screen.getByRole("button", { name: "Favorite “Low Tide” by Nova Reyes" });
+    expect(star).toHaveAttribute("aria-pressed", "false");
+    expect(star).toHaveClass("min-h-11", "min-w-11");
+    fireEvent.click(star);
+    await waitFor(() => expect(actions.setFavorite).toHaveBeenCalledWith({ releaseId: "r1", favorite: true }));
+    expect(actions.setStatus).not.toHaveBeenCalled();
+    cleanup();
+    const again = setup(rel({ favorite: true, status: "passed" }), { layout });
+    const on = screen.getByRole("button", { name: "Favorite “Low Tide” by Nova Reyes" });
+    expect(on).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(on);
+    await waitFor(() => expect(again.actions.setFavorite).toHaveBeenCalledWith({ releaseId: "r1", favorite: false }));
+  });
+
+  it("phone: the action row still holds only Consider, Played, Pass and Edit", () => {
+    setup(rel(page));
+    const actionRow = screen.getByRole("button", { name: "Consider" }).parentElement!;
+    expect(within(actionRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["Consider", "Played", "Pass", "Edit"]);
   });
 });

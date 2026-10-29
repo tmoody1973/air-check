@@ -3,12 +3,17 @@ import {
   bandcampPageUrl,
   chicagoDayKey,
   agentEmbargoLines,
+  bandcampArtUrl,
+  bandcampTag,
   describeEmbargo,
   embargoHits,
   embargoMatches,
+  foldText,
   isEmbargoActive,
   isShowDate,
+  MAX_ABOUT_CHARS,
   MAX_STORED_CHARS,
+  MAX_TAGS,
   type ReleaseFields,
   releaseKey,
 } from "@aircheck/core";
@@ -27,7 +32,8 @@ import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from ".
 // - The console's inbound route has one mutation, `received` (INBOX_TOKEN).
 // - The ingest worker has four: `pending`, `record`, `embedsWanted`, `embedResult` (INGEST_TOKEN).
 // - A signed-in human moves records; the demo actor only on demo rows (Hard Rule 9).
-// - The agent reads `agentList` through POST /agent/radar: no links, player, senders or email text, and no active embargo.
+// - The agent reads `agentList` through POST /agent/radar: no links, player, senders, email text or page about, and no
+//   active embargo.
 
 const MAX_SUBJECT = 200;
 const MAX_ID = 500;
@@ -44,6 +50,7 @@ const MAX_IGNORED = 200;
 const MAX_LIST = 500;
 const MAX_AGENT = 100;
 const MAX_NOT_ADDED = 50;
+const MAX_SEARCH = 200;
 const WAITING_MS = 10 * 60_000;
 const PENDING_BATCH = 5;
 const EMBED_BATCH = 3;
@@ -76,6 +83,21 @@ function requireInbox(token: string): void {
 export const statusOf = (r: Doc<"releases">): Infer<typeof releaseStatusV> => r.status ?? "new";
 /** Rows written before Plan 8 have no source: the old Today card called them Bandcamp releases. */
 const tabOf = (r: Doc<"releases">): Infer<typeof radarTabV> => r.source ?? "bandcamp";
+
+type SearchFields = Pick<Doc<"releases">, "artist" | "title" | "label" | "tags" | "about">;
+/** Task 6b: artist, title, label, tags and about, folded, for the search index. Rewritten on every write that changes them. */
+export const searchTextOf = (r: SearchFields): string => foldText([r.artist, r.title, r.label, ...(r.tags ?? []), r.about].filter(Boolean).join(" "));
+
+/**
+ * Task 6b: what the ingest worker read from the Bandcamp page besides the player id. Each value passes core's check
+ * again, or is dropped (never thrown: a throw would leave the page queued and fetched again every pass).
+ */
+function pageDetails(r: { art?: string; tags?: string[]; about?: string }): Pick<Doc<"releases">, "art" | "tags" | "about"> {
+  const art = r.art !== undefined && bandcampArtUrl(r.art) === r.art ? r.art : undefined;
+  const tags = [...new Set((r.tags ?? []).filter((t) => bandcampTag(t) === t))].slice(0, MAX_TAGS);
+  const about = r.about?.trim() && r.about.length <= MAX_ABOUT_CHARS && !LINKISH.test(r.about) ? r.about : undefined;
+  return { art, tags: tags.length ? tags : undefined, about };
+}
 
 const senderV = v.object({ name: v.optional(v.string()), address: v.optional(v.string()) });
 /** Core's CleanMail, exactly. */
@@ -259,6 +281,7 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
     const releaseId = await ctx.db.insert("releases", {
       workspace: "real",
       ...fields,
+      searchText: searchTextOf(fields),
       status: "new",
       source: row.tab ?? "cosign",
       senders: [sender],
@@ -276,6 +299,7 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
   const embargo = tarikSet ? undefined : stricter(cur.embargo, f.embargo);
   await ctx.db.patch(cur._id, {
     ...fill,
+    searchText: searchTextOf({ ...cur, ...fill }),
     ...(embargo && { embargo }),
     ...(tarikSet && f.embargo && { laterEmbargoNotice: { at: row.receivedAt, until: f.embargo.until } }),
     senders: [...(cur.senders ?? []), sender].slice(0, MAX_SENDERS),
@@ -305,7 +329,16 @@ export const embedResult = mutation({
     token: v.string(),
     releaseId: v.id("releases"),
     pageUrl: v.string(),
-    result: v.union(v.object({ kind: v.union(v.literal("album"), v.literal("track")), id: v.string() }), v.object({ failed: v.string() })),
+    result: v.union(
+      v.object({
+        kind: v.union(v.literal("album"), v.literal("track")),
+        id: v.string(),
+        art: v.optional(v.string()),
+        tags: v.optional(v.array(v.string())),
+        about: v.optional(v.string()),
+      }),
+      v.object({ failed: v.string() }),
+    ),
   },
   handler: async (ctx, { token, releaseId, pageUrl, result }) => {
     requireIngest(token);
@@ -320,7 +353,8 @@ export const embedResult = mutation({
       const blocked = NOT_READ.has(result.failed);
       await ctx.db.insert("activity", { ...row, title: blocked ? "Bandcamp page not read" : "Read a Bandcamp page for its player", result: blocked ? "blocked" : "allowed", reason: result.failed });
     } else {
-      await ctx.db.patch(releaseId, { embedState: "ready", embed: { kind: result.kind, id: result.id }, embedError: undefined });
+      const details = pageDetails(result);
+      await ctx.db.patch(releaseId, { embedState: "ready", embed: { kind: result.kind, id: result.id }, embedError: undefined, ...details, searchText: searchTextOf({ ...rel, ...details }) });
       await ctx.db.insert("activity", { ...row, title: "Read a Bandcamp page for its player", result: "allowed" });
     }
     return null;
@@ -362,9 +396,11 @@ export const edit = mutation({
     const releasedOn = val(fields.releasedOn);
     if (releasedOn && !isShowDate(releasedOn)) throw badInput("the release date must be a date, yyyy-mm-dd");
     const patch = { label: val(fields.label), genre: val(fields.genre), type: fields.type || undefined, releasedOn };
+    const changes = Object.fromEntries(keys.map((k) => [k, patch[k as keyof typeof patch]]));
     await ctx.db.patch(releaseId, {
-      ...Object.fromEntries(keys.map((k) => [k, patch[k as keyof typeof patch]])),
+      ...changes,
       editedFields: [...new Set([...(doc.editedFields ?? []), ...keys])],
+      searchText: searchTextOf({ ...doc, ...changes }),
     });
   },
 });
@@ -383,6 +419,15 @@ export const setEmbargo = mutation({
       laterEmbargoNotice: undefined,
       editedFields: [...new Set([...(doc.editedFields ?? []), "embargo"])],
     });
+  },
+});
+
+/** Task 6b: Tarik's ☆. Independent of status: no status change sets or clears it. */
+export const setFavorite = mutation({
+  args: { releaseId: v.id("releases"), favorite: v.boolean() },
+  handler: async (ctx, { releaseId, favorite }) => {
+    await ownRelease(ctx, releaseId);
+    await ctx.db.patch(releaseId, { favorite });
   },
 });
 
@@ -407,19 +452,38 @@ export const retryEmbed = mutation({
   },
 });
 
-/** One tab of the Release radar page, newest first, with the counts for the status chips. Private view. */
+/** The search box's words that are all in a row: each must start a word of its searchText (Convex search alone matches any). */
+const matchesAll = (words: string[], r: Doc<"releases">) => {
+  const have = (r.searchText ?? "").split(" ");
+  return words.every((w) => have.some((h) => h.startsWith(w)));
+};
+
+/**
+ * One tab of the Release radar page, newest first, with the counts for the status chips. Private view. Task 6b: a
+ * search runs over artist, title, label, tags and about (the search index), in the caller's workspace and tab only.
+ */
 export const list = query({
-  args: { tab: radarTabV, status: v.optional(releaseStatusV) },
-  handler: async (ctx, { tab, status }) => {
+  args: { tab: radarTabV, status: v.optional(releaseStatusV), search: v.optional(v.string()) },
+  handler: async (ctx, { tab, status, search }) => {
     const ws = workspaceOf(await actorOf(ctx));
     if (!ws) return null;
-    const rows = (
-      await ctx.db
-        .query("releases")
-        .withIndex("by_workspace_source_receivedAt", (q) => q.eq("workspace", ws).eq("source", tab))
-        .order("desc")
-        .take(MAX_LIST)
-    ).map((r) => ({ ...r, status: statusOf(r) }));
+    // Convex search takes at most 16 terms.
+    const words = foldText((search ?? "").slice(0, MAX_SEARCH)).split(" ").filter(Boolean).slice(0, 16);
+    const found = words.length
+      ? (
+          await ctx.db
+            .query("releases")
+            .withSearchIndex("search_text", (q) => q.search("searchText", words.join(" ")).eq("workspace", ws).eq("source", tab))
+            .take(MAX_LIST)
+        )
+          .filter((r) => matchesAll(words, r))
+          .sort((a, b) => (b.receivedAt ?? b._creationTime) - (a.receivedAt ?? a._creationTime))
+      : await ctx.db
+          .query("releases")
+          .withIndex("by_workspace_source_receivedAt", (q) => q.eq("workspace", ws).eq("source", tab))
+          .order("desc")
+          .take(MAX_LIST);
+    const rows = found.map(({ searchText: _searchText, ...r }) => ({ ...r, status: statusOf(r) }));
     const counts = { new: 0, considering: 0, played: 0, passed: 0 };
     for (const r of rows) counts[r.status] += 1;
     return { rows: status ? rows.filter((r) => r.status === status) : rows, counts };
@@ -512,6 +576,7 @@ export type AgentRelease = {
   genre?: string;
   type?: "album" | "single" | "ep";
   releasedOn?: string;
+  tags?: string[];
   status: Infer<typeof releaseStatusV>;
   tab: Infer<typeof radarTabV>;
   embargo?: { until: string | null };
@@ -539,6 +604,8 @@ export const agentList = internalQuery({
         ...(r.genre && { genre: r.genre }),
         ...(r.type && { type: r.type }),
         ...(r.releasedOn && { releasedOn: r.releasedOn }),
+        // Task 6b: tags are checked short words and may help theme ideas. Never the about (untrusted page text).
+        ...(r.tags?.length && { tags: r.tags }),
         status: statusOf(r),
         tab: tabOf(r),
         ...(r.embargo && { embargo: r.embargo }),

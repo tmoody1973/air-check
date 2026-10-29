@@ -29,13 +29,16 @@ const COSIGN = [
 ];
 const lists: RadarLists = { bandcamp: list(BANDCAMP), cosign: list(COSIGN) };
 const noop = async () => undefined;
-const acts = (): RadarActions => ({ setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop) });
+const acts = (): RadarActions => ({ setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), setFavorite: vi.fn(noop) });
 
-function setup({ tab = "bandcamp" as "bandcamp" | "cosign", workspace = "real" as "real" | "demo", layout = "table" as "table" | "cards", data = lists, notAdded = [] as never[] } = {}) {
+function setup({ tab = "bandcamp" as "bandcamp" | "cosign", workspace = "real" as "real" | "demo", layout = "table" as "table" | "cards", data = lists, notAdded = [] as never[], search = "" } = {}) {
   const onTabChange = vi.fn();
+  const onSearchChange = vi.fn();
   const actions = acts();
-  const view = render(<RadarView lists={data} tab={tab} onTabChange={onTabChange} workspace={workspace} today="2026-10-30" actions={actions} notAdded={notAdded} layout={layout} />);
-  return { onTabChange, actions, ...view };
+  const view = render(
+    <RadarView lists={data} tab={tab} onTabChange={onTabChange} workspace={workspace} today="2026-10-30" actions={actions} notAdded={notAdded} layout={layout} search={search} onSearchChange={onSearchChange} />,
+  );
+  return { onTabChange, onSearchChange, actions, ...view };
 }
 const visibleArtists = () => screen.queryAllByText(/^Artist [bc]\d$/).map((e) => e.textContent);
 
@@ -120,7 +123,7 @@ describe("workspaces", () => {
   it("loading and not allowed", () => {
     const { rerender } = setup({ data: { bandcamp: undefined, cosign: undefined } });
     expect(screen.getByText("Loading…")).toBeInTheDocument();
-    rerender(<RadarView lists={{ bandcamp: null, cosign: null }} tab="bandcamp" onTabChange={vi.fn()} workspace="real" today="2026-10-30" actions={acts()} notAdded={[]} />);
+    rerender(<RadarView lists={{ bandcamp: null, cosign: null }} tab="bandcamp" onTabChange={vi.fn()} workspace="real" today="2026-10-30" actions={acts()} notAdded={[]} search="" onSearchChange={vi.fn()} />);
     expect(screen.getByText("This account can't use Air Check. Sign in with your Radio Milwaukee account.")).toBeInTheDocument();
   });
 
@@ -138,5 +141,64 @@ describe("phone", () => {
     expect(screen.getByRole("group", { name: "Status" })).toBeInTheDocument();
     const card = screen.getByRole("listitem", { name: "Artist b1 – Title b1" });
     for (const name of ["Consider", "Played", "Pass", "Edit", "Play on Bandcamp"]) expect(within(card).getByRole("button", { name })).toBeInTheDocument();
+  });
+});
+
+// Plan 8 Task 6b: one search box, a Favorites filter and tag filtering, on both tabs and both layouts.
+describe("search, favorites and tags (Task 6b)", () => {
+  const TAGGED = [
+    rel("b1", { tags: ["deep house", "jazz"], favorite: true }),
+    rel("b2", { tags: ["jazz"] }),
+    rel("b3", { status: "considering", favorite: true }),
+    rel("b4", {}),
+  ];
+  const data: RadarLists = { bandcamp: list(TAGGED), cosign: list(COSIGN) };
+  const chip = (name: RegExp) => within(screen.getByRole("group", { name: "Filters" })).getByRole("button", { name });
+
+  it.each(["table", "cards"] as const)("%s: one labelled search box; typing asks the page to search", (layout) => {
+    const { onSearchChange } = setup({ data, layout, search: "jaz" });
+    const box = screen.getByRole("searchbox", { name: "Search" });
+    expect(box).toHaveValue("jaz");
+    expect(box).toHaveAttribute("placeholder", "Artist, title, label, tag or description");
+    fireEvent.change(box, { target: { value: "jazz" } });
+    expect(onSearchChange).toHaveBeenCalledWith("jazz");
+  });
+
+  it("a search with no results says so, naming what was searched", () => {
+    setup({ data: { bandcamp: list([]), cosign: list([]) }, search: "zzz" });
+    expect(screen.getByText("Nothing on this tab matches “zzz”.")).toBeInTheDocument();
+  });
+
+  it("Favorites narrows to starred releases; the status chips count within it", () => {
+    setup({ data });
+    expect(visibleArtists()).toEqual(["Artist b1", "Artist b2", "Artist b4"]);
+    const fav = chip(/Favorites/);
+    expect(fav).toHaveAttribute("aria-pressed", "false");
+    expect(fav).toHaveTextContent("Favorites 2");
+    fireEvent.click(fav);
+    expect(fav).toHaveAttribute("aria-pressed", "true");
+    expect(visibleArtists()).toEqual(["Artist b1"]);
+    expect(chip(/^Considering/)).toHaveTextContent("Considering 1");
+    fireEvent.click(chip(/^All/));
+    expect(visibleArtists()).toEqual(["Artist b1", "Artist b3"]);
+    fireEvent.click(chip(/Favorites/));
+    expect(visibleArtists()).toEqual(["Artist b1", "Artist b2", "Artist b3", "Artist b4"]);
+  });
+
+  it.each(["table", "cards"] as const)("%s: a tag chip filters by that tag; Clear tag undoes it", (layout) => {
+    setup({ data, layout });
+    fireEvent.click(screen.getAllByRole("button", { name: "deep house" })[0]!);
+    expect(visibleArtists()).toEqual(["Artist b1"]);
+    expect(screen.getByText("Tag: deep house")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear tag" }));
+    expect(visibleArtists()).toEqual(["Artist b1", "Artist b2", "Artist b4"]);
+  });
+
+  it("the tag filter stays when the tab changes back and forth, and favorites hold too", () => {
+    const view = setup({ data });
+    fireEvent.click(screen.getAllByRole("button", { name: "jazz" })[0]!);
+    expect(visibleArtists()).toEqual(["Artist b1", "Artist b2"]);
+    view.rerender(<RadarView lists={data} tab="cosign" onTabChange={vi.fn()} workspace="real" today="2026-10-30" actions={acts()} notAdded={[]} layout="table" search="" onSearchChange={vi.fn()} />);
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 });

@@ -32,11 +32,28 @@ describe("bandcampEmbed: the one allowlisted page fetch (Hard Rule 5's exception
     expect(headers.get("user-agent")).toBe("AirCheck/1.0 (Radio Milwaukee release radar)");
     expect(headers.get("cookie")).toBeNull();
     expect(headers.get("authorization")).toBeNull();
-    expect(cv.results).toEqual([{ releaseId: "r1", pageUrl: ALBUM, result: { kind: "album", id: "1234567890" } }]);
+    expect(cv.results).toEqual([{ releaseId: "r1", pageUrl: ALBUM, result: { kind: "album", id: "1234567890", art: "https://f4.bcbits.com/img/a0000000001_5.jpg" } }]);
+  });
+
+  test("Task 6b: the same one request also gives cover art, tags and the about; nothing else from the page", async () => {
+    const cv = fakeRadar([], [{ releaseId: "r1", pageUrl: ALBUM }]);
+    const s = stubHttp(() => page(html("album-page")));
+    await embedPass({ convex: cv.convex, log: () => {}, http: s.http, sleep: async () => {} });
+    expect(s.sent.map((x) => x.url)).toEqual([ALBUM]); // no second fetch: not the art, not a tag link
+    const { result } = cv.results[0]!;
+    expect(Object.keys(result).sort()).toEqual(["about", "art", "id", "kind", "tags"]);
+    expect(result).toMatchObject({ kind: "album", id: "1234567890", art: "https://f4.bcbits.com/img/a0000000001_5.jpg", tags: ["electronic", "deep house", "r&b", "milwaukee"] });
+    expect((result as { about: string }).about).toMatch(/^Recorded over one winter/);
+    expect(JSON.stringify(result)).not.toMatch(/:\/\/[^"]*bandcamp|@|merch/);
+  });
+
+  test("Task 6b: a page with no player still gives no_player, and its details are dropped with it", async () => {
+    const off = html("album-page").replaceAll("https://bandcamp.com/EmbeddedPlayer/", "https://evil.example/EmbeddedPlayer/");
+    expect(await bandcampEmbed(stubHttp(() => page(off)).http, ALBUM)).toEqual({ failed: "no_player" });
   });
 
   test("a track page gives the track id", async () => {
-    expect(await bandcampEmbed(stubHttp(() => page(html("track-meta"))).http, TRACK)).toEqual({ kind: "track", id: "987654321" });
+    expect(await bandcampEmbed(stubHttp(() => page(html("track-meta"))).http, TRACK)).toMatchObject({ kind: "track", id: "987654321" });
   });
 
   test.each([
@@ -54,7 +71,7 @@ describe("bandcampEmbed: the one allowlisted page fetch (Hard Rule 5's exception
 
   test("a 301 to another Bandcamp album page is followed (a relative Location too)", async () => {
     const s = stubHttp((_u, _i, n) => (n === 1 ? moved("https://other.bandcamp.com/album/b") : n === 2 ? moved("/album/c") : page(html("album-meta"))));
-    expect(await bandcampEmbed(s.http, ALBUM)).toEqual({ kind: "album", id: "1234567890" });
+    expect(await bandcampEmbed(s.http, ALBUM)).toMatchObject({ kind: "album", id: "1234567890" });
     expect(s.sent.map((x) => x.url)).toEqual([ALBUM, "https://other.bandcamp.com/album/b", "https://other.bandcamp.com/album/c"]);
     for (const x of s.sent) expect(x.init.redirect).toBe("manual");
   });
@@ -132,13 +149,8 @@ describe("embedPass", () => {
     expect(cv.results.map((r) => r.releaseId)).toEqual(["r1", "r2", "r3"]);
     expect(events).toEqual(["fetch", "sleep 2000", "fetch", "sleep 2000", "fetch"]);
     await embedPass(d);
-    expect(cv.results.map((r) => [r.releaseId, r.result])).toEqual([
-      ["r1", { kind: "album", id: "1234567890" }],
-      ["r2", { failed: "http_404" }],
-      ["r3", { kind: "album", id: "1234567890" }],
-      ["r4", { kind: "album", id: "1234567890" }],
-      ["r5", { kind: "album", id: "1234567890" }],
-    ]);
+    const ok = { kind: "album", id: "1234567890", art: "https://f4.bcbits.com/img/a0000000001_5.jpg" };
+    expect(cv.results.map((r) => [r.releaseId, r.result])).toEqual([["r1", ok], ["r2", { failed: "http_404" }], ["r3", ok], ["r4", ok], ["r5", ok]]);
     await embedPass(d);
     expect(s.sent).toHaveLength(5);
     // Hard Rule 8: steps and codes only.

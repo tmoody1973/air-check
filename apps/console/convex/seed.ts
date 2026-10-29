@@ -2,6 +2,7 @@ import { type PackageDraft, applyRunEvent, fingerprint, initialRun, type RunStat
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
+import { searchTextOf } from "./radar";
 import { createdAtOf, statusOf } from "./runDefaults";
 import {
   DEMO_MP3_SHA256,
@@ -80,9 +81,11 @@ function demoRunState(now: number): RunState {
   return { ...s, steps: s.steps.map((st, i) => ({ ...st, label: rows[i]!.label, sources: rows[i]!.sources })) };
 }
 
+// Task 6b: Bandcamp rows get bracketed tags and an about, never cover art (copyrighted: the page shows a placeholder).
+const SAMPLE_PAGE = { tags: ["[tag]", "[another tag]"], about: "[The album's description from its Bandcamp page]" };
 const SAMPLE_RELEASES = [
-  { source: "bandcamp", status: "new", type: "album" },
-  { source: "bandcamp", status: "considering", type: "single" },
+  { source: "bandcamp", status: "new", type: "album", favorite: true, ...SAMPLE_PAGE },
+  { source: "bandcamp", status: "considering", type: "single", ...SAMPLE_PAGE },
   { source: "cosign", status: "new", type: "single", embargo: { until: null } },
   { source: "cosign", status: "passed", type: "ep", passReason: "[Reason]" },
 ] as const;
@@ -148,7 +151,8 @@ export const seedDemo = internalMutation({
       const at = newest - i * 60_000;
       // A co-sign shows its sender prominently: a bracketed sample one, never a real address.
       const sender = row.source === "cosign" ? { senders: [{ name: "[Label or PR company]", messageId: `demo-sample-${i}`, at }] } : {};
-      await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", receivedAt: at, ...sender, ...row });
+      const fields = { artist: "[Artist]", title: "[Release title]", label: "[Label]", ...row, ...("tags" in row && { tags: [...row.tags] }) };
+      await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...sender, ...fields, searchText: searchTextOf(fields) });
     }
 
     await ctx.db.insert("runs", {

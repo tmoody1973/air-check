@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +18,7 @@ vi.mock("convex/react", () => ({
   useMutation: () => vi.fn(),
 }));
 vi.mock("../../../../convex/_generated/api", () => ({
-  api: { radar: { list: "radar.list", notAdded: "radar.notAdded", setStatus: "s", edit: "e", setEmbargo: "m", retry: "r", retryEmbed: "re" } },
+  api: { radar: { list: "radar.list", notAdded: "radar.notAdded", setStatus: "s", edit: "e", setEmbargo: "m", retry: "r", retryEmbed: "re", setFavorite: "f" } },
 }));
 vi.mock("@/components/Shell", () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -56,5 +56,21 @@ describe("Release radar page", () => {
     expect(queries).toContainEqual({ name: "radar.list", args: { tab: "bandcamp" } });
     expect(queries).toContainEqual({ name: "radar.list", args: { tab: "cosign" } });
     expect(queries.some((q) => q.name === "radar.notAdded")).toBe(true);
+  });
+
+  it("Task 6b: the search box searches both tabs in Convex, after a short pause", () => {
+    vi.useFakeTimers();
+    try {
+      nav.search = "";
+      render(<RadarPage />);
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "deep house" } });
+      expect(screen.getByRole("searchbox")).toHaveValue("deep house");
+      expect(queries).not.toContainEqual({ name: "radar.list", args: { tab: "bandcamp", search: "deep house" } });
+      act(() => void vi.advanceTimersByTime(300));
+      expect(queries).toContainEqual({ name: "radar.list", args: { tab: "bandcamp", search: "deep house" } });
+      expect(queries).toContainEqual({ name: "radar.list", args: { tab: "cosign", search: "deep house" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

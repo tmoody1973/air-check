@@ -1,6 +1,6 @@
 "use client";
 
-import { isEmbargoActive, type BandcampEmbed } from "@aircheck/core";
+import { bandcampArtUrl, isEmbargoActive, type BandcampEmbed } from "@aircheck/core";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { BandcampPlayer } from "./BandcampPlayer";
@@ -11,7 +11,9 @@ import { SampleTag } from "./SampleTag";
 // Plan 8 Task 6: one release record, drawn two ways like EpisodeItem: two table rows on a wide screen, a stacked card on
 // a phone. The actions follow the theme-card pattern (accept / edit / dismiss): Consider, Played, Pass, Edit, with "Move
 // back to New" as the undo. Each calls an injected Convex mutation as the signed-in person, never the model.
-// Everything here came from an email, so it is rendered as text: no auto-linking, no HTML (Hard Rule 5).
+// Everything here came from an email or a Bandcamp page, so it is rendered as text: no auto-linking, no HTML (Hard Rule 5).
+// Task 6b adds the page's cover art (a lazy image, no referrer), its tags (a click filters), the about (collapsed) and a
+// favorite star that is independent of status.
 
 export type ReleaseStatus = "new" | "considering" | "played" | "passed";
 export type RadarTab = "bandcamp" | "cosign";
@@ -36,6 +38,10 @@ export type Release = {
   embedState?: "queued" | "ready" | "failed";
   embedError?: string;
   laterEmbargoNotice?: { at: number; until: string | null };
+  art?: string;
+  tags?: string[];
+  about?: string;
+  favorite?: boolean;
 };
 type EditFields = { label?: string; genre?: string; type?: "album" | "single" | "ep" | ""; releasedOn?: string };
 export type RadarActions = {
@@ -44,8 +50,18 @@ export type RadarActions = {
   setEmbargo: (a: { releaseId: string; embargo: Embargo | null }) => Promise<unknown>;
   retry: (a: { messageId: string }) => Promise<unknown>;
   retryEmbed: (a: { releaseId: string }) => Promise<unknown>;
+  setFavorite: (a: { releaseId: string; favorite: boolean }) => Promise<unknown>;
 };
-export type ReleaseCtx = { actions: RadarActions; announce: (msg: string) => void; today: string; demo: boolean; tab: RadarTab };
+export type ReleaseCtx = {
+  actions: RadarActions;
+  announce: (msg: string) => void;
+  today: string;
+  demo: boolean;
+  tab: RadarTab;
+  /** The tag the list is filtered on, if any; a tag chip's click sets or clears it. */
+  tag?: string;
+  onTag: (tag: string) => void;
+};
 
 export const STATUS: Record<ReleaseStatus, [PillTone, string]> = {
   new: ["ready", "New"],
@@ -244,6 +260,8 @@ function Body({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   );
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      <Tags r={r} ctx={ctx} />
+      {r.about && <About text={r.about} />}
       {r.laterEmbargoNotice && <p className="text-sm text-muted">A newer email mentions an embargo — you cleared it</p>}
       {r.status === "passed" && r.passReason && <p className="text-sm text-ink-soft [overflow-wrap:anywhere]">Passed: {r.passReason}</p>}
       {/* A co-sign gets a player only through a Bandcamp link, so a demo co-sign has no player box. */}
@@ -256,6 +274,86 @@ function Body({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
       <Links links={others} />
       <Actions r={r} ctx={ctx} />
     </div>
+  );
+}
+
+/** Bandcamp's tags as chips. Each is a 44px target around a small pill; a click filters the list by it. */
+function Tags({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
+  if (!r.tags?.length) return null;
+  return (
+    <ul aria-label="Tags" className="-my-1.5 flex flex-wrap gap-x-1.5">
+      {r.tags.map((t) => {
+        const on = ctx.tag === t;
+        return (
+          <li key={t}>
+            <button type="button" aria-pressed={on} onClick={() => ctx.onTag(t)} className="group inline-flex min-h-11 items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-signal">
+              <span className={`rounded-full px-2.5 py-1 text-xs [overflow-wrap:anywhere] ${on ? "bg-ink text-paper" : "bg-chip text-ink-soft group-hover:text-ink"}`}>{t}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The page's description: untrusted text, collapsed until asked for, never a link. */
+function About({ text }: { text: string }) {
+  return (
+    <details className="group text-sm">
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal [&::-webkit-details-marker]:hidden">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" className="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+          <path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        About
+      </summary>
+      <p className="max-w-[65ch] whitespace-pre-line pb-1 text-ink-soft [overflow-wrap:anywhere]">{text}</p>
+    </details>
+  );
+}
+
+/** Cover art: a lazy image with no referrer, only from Bandcamp's image host. The demo shows a placeholder (copyright). */
+function Art({ r, ctx, size }: { r: Release; ctx: ReleaseCtx; size: "sm" | "md" }) {
+  const box = size === "md" ? "size-16" : "size-14";
+  if (ctx.demo)
+    return r.source === "cosign" ? null : (
+      <span className={`${box} flex shrink-0 items-center justify-center rounded-control border border-dashed border-line-strong text-center font-mono text-[10.5px] leading-tight text-muted`}>[Cover art]</span>
+    );
+  if (!r.art || bandcampArtUrl(r.art) !== r.art) return null;
+  return <img src={r.art} alt={`Cover art for ${r.title} by ${r.artist}`} loading="lazy" referrerPolicy="no-referrer" width={64} height={64} className={`${box} shrink-0 rounded-control border border-line bg-chip object-cover`} />;
+}
+
+function StarIcon({ on }: { on: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 2.2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L10 14.6l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"
+        fill={on ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Tarik's star. Independent of status: it changes nothing else. */
+function Favorite({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
+  const { busy, error, save } = useSave(ctx.announce);
+  const on = !!r.favorite;
+  return (
+    <span className="flex flex-col items-end">
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={`Favorite ${said(r)}`}
+        disabled={busy}
+        onClick={() => save(() => ctx.actions.setFavorite({ releaseId: r._id, favorite: !on }), on ? `${said(r)} taken off favorites` : `${said(r)} added to favorites`)}
+        className={`-my-2 -mr-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-control hover:bg-surface-quiet focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:opacity-60 ${on ? "text-ink" : "text-muted hover:text-ink"}`}
+      >
+        <StarIcon on={on} />
+      </button>
+      {error && <span role="alert" className="text-xs text-problem-text">{error}</span>}
+    </span>
   );
 }
 
@@ -286,9 +384,13 @@ export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "c
     return (
       <li aria-label={`${r.artist} – ${r.title}`} className="flex min-w-0 flex-col gap-3 rounded-card border border-line bg-surface p-4">
         {cosign && sender && <p className="text-sm font-medium text-ink-soft [overflow-wrap:anywhere]">From {sender}</p>}
-        <div className="flex items-start justify-between gap-3">
-          <Title r={r} ctx={ctx} />
-          <Pill tone={tone}>{word}</Pill>
+        <div className="flex items-start gap-3">
+          <Art r={r} ctx={ctx} size="md" />
+          <div className="min-w-0 flex-1"><Title r={r} ctx={ctx} /></div>
+          <span className="flex shrink-0 items-start gap-1">
+            <Pill tone={tone}>{word}</Pill>
+            <Favorite r={r} ctx={ctx} />
+          </span>
         </div>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">{meta([r.label, r.genre, type, released(r) && `Out ${released(r)}`])}</p>
         {!cosign && sender && <p className="text-sm text-muted [overflow-wrap:anywhere]">From {sender}</p>}
@@ -304,12 +406,22 @@ export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "c
     <>
       <tr aria-label={`${r.artist} – ${r.title}`} className="border-t border-line">
         <td className={td}>
-          <Title r={r} ctx={ctx} />
-          {!cosign && sender && <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]">From {sender}</p>}
+          <div className="flex items-start gap-3">
+            <Art r={r} ctx={ctx} size="sm" />
+            <div className="min-w-0">
+              <Title r={r} ctx={ctx} />
+              {!cosign && sender && <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]">From {sender}</p>}
+            </div>
+          </div>
         </td>
         {cells.map((c, i) => <td key={i} className={`${td} [overflow-wrap:anywhere]`}>{c}</td>)}
         <td className={`${td} whitespace-nowrap`}>{released(r) ?? <span className="text-muted">[Not known]</span>}</td>
-        <td className={td}><Pill tone={tone}>{word}</Pill></td>
+        <td className={td}>
+          <span className="flex items-start gap-1">
+            <Pill tone={tone}>{word}</Pill>
+            <Favorite r={r} ctx={ctx} />
+          </span>
+        </td>
       </tr>
       <tr>
         <td colSpan={5} className="px-3 pb-4 pt-0">

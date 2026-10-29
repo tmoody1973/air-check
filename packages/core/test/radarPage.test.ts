@@ -1,0 +1,121 @@
+import { describe, expect, test } from "vitest";
+import { MAX_ABOUT_CHARS, MAX_TAGS, bandcampArtUrl, bandcampTag, readBandcampDetails, readBandcampEmbed } from "../src/index";
+import { readFixture } from "./helpers/fixtures";
+
+// Plan 8 Task 6b: the same Bandcamp page the ingest worker reads for its player id also gives cover art, tags and the
+// album description. Everything else on the page is discarded.
+
+describe("bandcampArtUrl: only an https image on a *.bcbits.com host", () => {
+  test("Bandcamp's own image URL is kept as is", () => {
+    expect(bandcampArtUrl("https://f4.bcbits.com/img/a0000000001_5.jpg")).toBe("https://f4.bcbits.com/img/a0000000001_5.jpg");
+    expect(bandcampArtUrl("https://f1.bcbits.com/img/0012345678_10.png")).toBe("https://f1.bcbits.com/img/0012345678_10.png");
+  });
+  test.each([
+    "http://f4.bcbits.com/img/a1_5.jpg",
+    "https://bcbits.com/img/a1_5.jpg",
+    "https://f4.bcbits.com.evil.example/img/a1_5.jpg",
+    "https://evil.example/f4.bcbits.com/img/a1_5.jpg",
+    "https://f4.bcbits.com/img/a1_5.jpg?x=1",
+    "https://f4.bcbits.com/img/a1_5.jpg#x",
+    "https://u:p@f4.bcbits.com/img/a1_5.jpg",
+    "https://f4.bcbits.com:8443/img/a1_5.jpg",
+    "https://f4.bcbits.com/stream/a1_5.mp3",
+    "https://f4.bcbits.com/img/a1_5.svg",
+    "https://f4.bcbits.com/img/../a1_5.jpg",
+    "javascript:alert(1)",
+    "",
+  ])("refused: %s", (u) => expect(bandcampArtUrl(u)).toBeNull());
+});
+
+describe("bandcampTag: a checked short word, lower-cased", () => {
+  test("kept: letters, numbers, space, & ' - / and a dot before a space or the end", () => {
+    expect(bandcampTag("Electronic")).toBe("electronic");
+    expect(bandcampTag("  deep \n  house ")).toBe("deep house");
+    expect(bandcampTag("R&B")).toBe("r&b");
+    expect(bandcampTag("hip-hop/rap")).toBe("hip-hop/rap");
+    expect(bandcampTag("Música Popular Brasileira")).toBe("música popular brasileira");
+    expect(bandcampTag("St. Louis")).toBe("st. louis");
+    expect(bandcampTag("rock 'n' roll")).toBe("rock 'n' roll");
+  });
+  test.each([
+    "",
+    "   ",
+    "x".repeat(41),
+    "ignore <rules>",
+    "see: this",
+    "a@b",
+    "evil.example/a",
+    "bit.ly",
+    "www.x",
+    "washington d.c.",
+    "tag\u0000",
+    "#hashtag",
+  ])("refused: %j", (t) => expect(bandcampTag(t)).toBeNull());
+  test("40 characters is the cap", () => expect(bandcampTag("x".repeat(40))).toBe("x".repeat(40)));
+});
+
+describe("readBandcampDetails", () => {
+  const page = readFixture("bandcamp/album-page.html");
+
+  test("art, tags and the about block from the fixture page; nothing else", () => {
+    const d = readBandcampDetails(page);
+    expect(Object.keys(d).sort()).toEqual(["about", "art", "tags"]);
+    expect(d.art).toBe("https://f4.bcbits.com/img/a0000000001_5.jpg");
+    // Checked, lower-cased, deduplicated; the link-shaped and the bracketed ones are dropped.
+    expect(d.tags).toEqual(["electronic", "deep house", "r&b", "milwaukee"]);
+    // Plain text: tags gone, entities decoded, links and addresses stripped, lines kept.
+    expect(d.about).toBe("Recorded over one winter in a Milwaukee basement.\n\nMixed by Ana & Jo. Pre-order at [link] or write to [email]");
+    expect(d.about).not.toMatch(/:\/\/|@|<|>/);
+    // The player id still comes from the same page.
+    expect(readBandcampEmbed(page)).toEqual({ kind: "album", id: "1234567890" });
+  });
+
+  test("no about block: og:description is the about", () => {
+    expect(readBandcampDetails('<meta property="og:description" content="Ten songs &amp; a long goodbye. www.example.com">').about).toBe("Ten songs & a long goodbye. [link]");
+  });
+
+  test("an og:image off bcbits.com is no art; a page with nothing gives nothing", () => {
+    expect(readBandcampDetails('<meta property="og:image" content="https://evil.example/img/a1_5.jpg">')).toEqual({});
+    expect(readBandcampDetails("<html>nothing here</html>")).toEqual({});
+  });
+
+  test(`at most ${MAX_TAGS} tags; the about is at most ${MAX_ABOUT_CHARS} characters`, () => {
+    const tags = Array.from({ length: 20 }, (_, i) => `<a class="tag" href="https://bandcamp.com/discover/t${i}">tag ${i}</a>`).join("\n");
+    const about = `<div class="tralbumData tralbum-about">${"word ".repeat(1_000)}</div>`;
+    const d = readBandcampDetails(`${about}${tags}`);
+    expect(d.tags).toHaveLength(MAX_TAGS);
+    expect(d.tags![0]).toBe("tag 0");
+    expect(d.about!.length).toBeLessThanOrEqual(MAX_ABOUT_CHARS);
+    expect(MAX_TAGS).toBe(12);
+    expect(MAX_ABOUT_CHARS).toBe(2_000);
+  });
+
+  test("an about of only whitespace or tags is no about", () => {
+    expect(readBandcampDetails('<div class="tralbumData tralbum-about">  <br> </div>')).toEqual({});
+  });
+});
+
+describe("page parsing stays linear on a hostile 200k-character page", () => {
+  const fast = (label: string, run: () => unknown) =>
+    test(`${label} finishes under 200 ms`, () => {
+      const times = [0, 1, 2].map(() => {
+        const t = performance.now();
+        run();
+        return performance.now() - t;
+      });
+      expect(Math.min(...times)).toBeLessThan(200);
+    });
+  const N = 200_000;
+  fast("one <meta with a 200k attribute name", () => readBandcampDetails(`<meta ${"a".repeat(N)}>`));
+  fast("one <meta with a 200k unclosed quote", () => readBandcampDetails(`<meta property="og:image" content="${"a".repeat(N)}>`));
+  fast("readBandcampEmbed on a 200k attribute name", () => readBandcampEmbed(`<meta ${"a".repeat(N)}>`));
+  fast("a= runs inside one meta", () => readBandcampDetails(`<meta ${"a=".repeat(N / 2)}>`));
+  fast("<a class=\"tag\" x 20k, unclosed", () => readBandcampDetails('<a class="tag" '.repeat(N / 15)));
+  fast("<a then 200k text, no </a>", () => readBandcampDetails(`<a class="tag">${"x".repeat(N)}`));
+  fast("<a x 100k", () => readBandcampDetails("<a".repeat(N / 2)));
+  fast("tralbum-about x 15k", () => readBandcampDetails('class="tralbum-about"'.repeat(N / 21)));
+  fast("an unclosed about block with 200k of text and <br>", () => readBandcampDetails(`<div class="tralbum-about">${"a<br>".repeat(N / 5)}`));
+  fast("an about block of 200k dotted words", () => readBandcampDetails(`<div class="tralbum-about">${"a.".repeat(N / 2)}</div>`));
+  fast("bandcampTag on 200k characters", () => bandcampTag("a.".repeat(N / 2)));
+  fast("bandcampArtUrl on 200k characters", () => bandcampArtUrl(`https://f4.bcbits.com/img/${"a".repeat(N)}.jpg`));
+});
