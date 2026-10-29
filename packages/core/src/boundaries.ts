@@ -75,7 +75,9 @@ function plan8Violations(path: string, content: string): string[] {
   // ponytail: apps/ only; spikes/ prototypes and the agent's own model provider config are not the console or a service.
   if (path.startsWith("apps/") && content.includes(TOKEN_FACTORY_HOST) && path !== TOKEN_FACTORY_ALLOWED)
     found.push(`${path}: Token Factory host outside ${TOKEN_FACTORY_ALLOWED} (Plan 8)`);
-  if (content.includes("bandcamp.com") && content.includes("fetch(") && path !== BANDCAMP_FETCH_ALLOWED)
+  // In the ingest worker, call( is the shared fetch helper (http.ts), so it counts as a fetch there.
+  const fetches = content.includes("fetch(") || (path.startsWith("apps/ingest/") && content.includes("call("));
+  if (content.includes("bandcamp.com") && fetches && path !== BANDCAMP_FETCH_ALLOWED)
     found.push(`${path}: fetches next to bandcamp.com outside ${BANDCAMP_FETCH_ALLOWED} (Plan 8)`);
   if (path.startsWith("apps/") && MAIL_ONLY_READS.some((s) => content.includes(s)))
     found.push(`${path}: AgentMail attachments or send call in apps/ (Plan 8)`);

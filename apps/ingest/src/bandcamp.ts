@@ -20,6 +20,7 @@ const MAX_PAGE_BYTES = 2 * 1024 ** 2;
 const MAX_REDIRECTS = 2;
 const EMBED_BATCH = 3;
 const EMBED_GAP_MS = 2_000;
+const USER_AGENT = "AirCheck/1.0 (Radio Milwaukee release radar)";
 
 const isTimeout = (e: unknown) => ["TimeoutError", "AbortError"].includes((e as { name?: unknown } | null)?.name as string);
 const resolve = (location: string, base: string) => {
@@ -41,7 +42,7 @@ async function fetchPage(http: Http, pageUrl: string): Promise<{ html: string } 
   for (let hop = 0; ; hop++) {
     let res: Response;
     try {
-      res = await call(http, url, { redirect: "manual", credentials: "omit", headers: { accept: "text/html" } }, PAGE_TIMEOUT_MS);
+      res = await call(http, url, { redirect: "manual", credentials: "omit", headers: { accept: "text/html", "user-agent": USER_AGENT } }, PAGE_TIMEOUT_MS);
     } catch (e) {
       return { failed: isTimeout(e) ? "timeout" : "network" };
     }

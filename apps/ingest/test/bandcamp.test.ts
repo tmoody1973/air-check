@@ -27,7 +27,9 @@ describe("bandcampEmbed: the one allowlisted page fetch (Hard Rule 5's exception
     expect(init.credentials).toBe("omit");
     expect(init.body).toBeUndefined();
     const headers = new Headers(init.headers);
-    expect([...headers.keys()]).toEqual(["accept"]);
+    expect([...headers.keys()]).toEqual(["accept", "user-agent"]);
+    expect(headers.get("accept")).toBe("text/html");
+    expect(headers.get("user-agent")).toBe("AirCheck/1.0 (Radio Milwaukee release radar)");
     expect(headers.get("cookie")).toBeNull();
     expect(headers.get("authorization")).toBeNull();
     expect(cv.results).toEqual([{ releaseId: "r1", pageUrl: ALBUM, result: { kind: "album", id: "1234567890" } }]);

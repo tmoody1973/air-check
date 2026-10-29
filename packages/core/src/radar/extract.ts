@@ -142,7 +142,7 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
     if (!v) reasons.push(`The ${key} is missing`);
     else if (LINKISH.test(v)) reasons.push(`The ${key} looks like a link or an address`);
     else if (v.length > MAX_FIELD_CHARS) reasons.push(`The ${key} is too long`);
-    else if (!inEmail(v)) reasons.push(`The ${key} '${v}' is not in the email`);
+    else if (!inEmail(v)) reasons.push(`The ${key} is not in the email`); // never the model's value: reasons are stored text
     else return v;
     return "";
   };

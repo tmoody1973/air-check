@@ -50,7 +50,9 @@ describe("radarPass", () => {
     const body = bodyOf(init);
     expect(body).not.toHaveProperty("tools");
     expect(body).not.toHaveProperty("tool_choice");
-    expect(body).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b", temperature: 0, max_tokens: 600 });
+    // R7: reasoning off through the chat template, a budget big enough if it is ignored; no reasoning_effort.
+    expect(Object.keys(body).sort()).toEqual(["chat_template_kwargs", "max_tokens", "messages", "model", "temperature"]);
+    expect(body).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b", temperature: 0, max_tokens: 4000, chat_template_kwargs: { enable_thinking: false } });
     expect(body.messages.map((m) => m.role)).toEqual(["system", "user"]);
     expect(body.messages[0]!.content).toBe(EXTRACTION_SKILL_TEXT);
     const user = body.messages[1]!.content;
@@ -88,7 +90,7 @@ describe("radarPass", () => {
       { messageId: "<b@t>", outcome: { kind: "saved", release: COSIGN } },
     ]);
     expect(logs).toEqual([
-      "ingest step=radar-read ok=false state=failed reasons=1 ms=0",
+      "ingest step=radar-read ok=false state=failed reasons=1 code=timeout ms=0",
       "ingest step=radar-read ok=true state=saved reasons=0 ms=0",
     ]);
   });
@@ -97,7 +99,7 @@ describe("radarPass", () => {
     const cv = fakeRadar([pendingFromFixture("cosign-forwarded")]);
     const s = stubHttp(() => tfReply(JSON.stringify({ artist: "Somebody Else", title: "[Song Title]" })));
     await radarPass(deps(cv, s.http).d);
-    expect(cv.records[0]!.outcome).toEqual({ kind: "refused", reasons: ["The artist 'Somebody Else' is not in the email"] });
+    expect(cv.records[0]!.outcome).toEqual({ kind: "refused", reasons: ["The artist is not in the email"] });
   });
 
   test("a stored body that still holds a link or address never reaches the model (defence in depth)", async () => {
@@ -133,21 +135,56 @@ describe("radarPass", () => {
     await radarPass(d);
     expect(logs).toHaveLength(6);
     for (const l of logs) {
-      expect(l).toMatch(/^ingest step=radar-read ok=(true|false) state=[a-z-]+ reasons=\d+ ms=\d+$/);
+      expect(l).toMatch(/^ingest step=radar-read ok=(true|false) state=[a-z-]+ reasons=\d+(?: code=[a-z_0-9]+)? ms=\d+$/);
       for (const bad of ["bandcamp", "http", "glass-weather", "Ferro", "Artist", "Fwd", "@"]) expect(l).not.toContain(bad);
     }
   });
 });
 
 describe("chatJson (the one Token Factory client)", () => {
-  test("returns the first JSON object of the reply; null on a bad status, bad JSON, no object or a thrown fetch", async () => {
+  const reply = (content: string | null, finish = "stop") =>
+    new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }] }), { headers: { "content-type": "application/json" } });
+
+  test("returns the first JSON object of the reply, or null with a short code saying why", async () => {
     const ask = (r: () => Response | Promise<Response>) => chatJson(stubHttp(r).http, KEY, { system: "s", user: "u" });
-    expect(await ask(() => tfReply('Here: {"a": "x}{", "b": {"c": 1}} and {"d": 2}'))).toEqual({ a: "x}{", b: { c: 1 } });
-    expect(await ask(() => tfReply("no object here"))).toBeNull();
-    expect(await ask(() => tfReply("{not json}"))).toBeNull();
-    expect(await ask(() => new Response("{}", { status: 500 }))).toBeNull();
-    expect(await ask(() => new Response("not json", { status: 200 }))).toBeNull();
-    expect(await ask(() => Promise.reject(timeoutError()))).toBeNull();
+    expect(await ask(() => tfReply('Here: {"a": "x}{", "b": {"c": 1}} and {"d": 2}'))).toEqual({ json: { a: "x}{", b: { c: 1 } } });
+    expect(await ask(() => tfReply("no object here"))).toEqual({ json: null, code: "bad_json" });
+    expect(await ask(() => tfReply("{not json}"))).toEqual({ json: null, code: "bad_json" });
+    expect(await ask(() => new Response("not json", { status: 200 }))).toEqual({ json: null, code: "bad_json" });
+    expect(await ask(() => new Response("{}", { status: 500 }))).toEqual({ json: null, code: "http_500" });
+    expect(await ask(() => Promise.reject(timeoutError()))).toEqual({ json: null, code: "timeout" });
+    expect(await ask(() => Promise.reject(new TypeError("fetch failed")))).toEqual({ json: null, code: "network" });
+    expect(await ask(() => reply(null))).toEqual({ json: null, code: "empty" });
+    expect(await ask(() => reply("   "))).toEqual({ json: null, code: "empty" });
+    expect(await ask(() => reply(null, "length"))).toEqual({ json: null, code: "length" });
+    expect(await ask(() => reply('{"artist": "A', "length"))).toEqual({ json: null, code: "length" });
+  });
+
+  test("an HTTP 400 is retried once without chat_template_kwargs; a second 400 is http_400", async () => {
+    const s = stubHttp((_u, _i, n) => (n === 1 ? new Response("{}", { status: 400 }) : tfReply('{"notRelease": true}')));
+    expect(await chatJson(s.http, KEY, { system: "s", user: "u" })).toEqual({ json: { notRelease: true } });
+    expect(s.sent).toHaveLength(2);
+    const [first, second] = s.sent.map((x) => bodyOf(x.init));
+    expect(first).toHaveProperty("chat_template_kwargs", { enable_thinking: false });
+    expect(second).not.toHaveProperty("chat_template_kwargs");
+    expect(second).not.toHaveProperty("reasoning_effort");
+    expect({ ...second, chat_template_kwargs: { enable_thinking: false } }).toEqual(first);
+    const twice = stubHttp(() => new Response("{}", { status: 400 }));
+    expect(await chatJson(twice.http, KEY, { system: "s", user: "u" })).toEqual({ json: null, code: "http_400" });
+    expect(twice.sent).toHaveLength(2);
+    const other = stubHttp(() => new Response("{}", { status: 401 }));
+    expect(await chatJson(other.http, KEY, { system: "s", user: "u" })).toEqual({ json: null, code: "http_401" });
+    expect(other.sent).toHaveLength(1);
+  });
+
+  test("radarPass logs the failure code on its line, and the stored reason stays plain", async () => {
+    for (const [answer, code] of [[() => new Response("{}", { status: 503 }), "http_503"], [() => tfReply(""), "empty"]] as const) {
+      const cv = fakeRadar([pendingFromFixture("cosign-forwarded")]);
+      const { d, logs } = deps(cv, stubHttp(answer).http);
+      await radarPass(d);
+      expect(cv.records[0]!.outcome).toEqual({ kind: "failed", reasons: ["The reader gave no answer"] });
+      expect(logs).toEqual([`ingest step=radar-read ok=false state=failed reasons=1 code=${code} ms=0`]);
+    }
   });
 
   test("firstObject is linear on hostile text (200k characters)", () => {

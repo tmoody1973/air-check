@@ -1,7 +1,7 @@
 import { checkExtraction, EXTRACTION_SKILL_TEXT, MAX_EMAIL_CHARS, parseBandcampEmail, type Extraction } from "@aircheck/core";
 import type { PendingEmail, RadarConvex, RadarOutcome } from "./convex.js";
 import type { Http } from "./http.js";
-import { chatJson } from "./tokenFactory.js";
+import { chatJson, type ChatFailure } from "./tokenFactory.js";
 
 export interface RadarDeps {
   convex: RadarConvex;
@@ -32,11 +32,11 @@ export async function radarPass(deps: RadarDeps): Promise<void> {
   for (const email of await deps.convex.pending()) {
     const t0 = deps.now();
     try {
-      const outcome = await read(deps, email);
+      const { outcome, code } = await read(deps, email);
       await deps.convex.record(email.messageId, outcome);
       const ok = outcome.kind === "saved" || outcome.kind === "not-a-release";
       const reasons = outcome.kind === "saved" ? 0 : outcome.reasons.length;
-      deps.log(`ingest step=radar-read ok=${ok} state=${outcome.kind} reasons=${reasons} ms=${deps.now() - t0}`);
+      deps.log(`ingest step=radar-read ok=${ok} state=${outcome.kind} reasons=${reasons}${code ? ` code=${code}` : ""} ms=${deps.now() - t0}`);
     } catch {
       // The row stays received and is read again next pass.
       deps.log(`ingest step=radar-read ok=false state=error reasons=0 ms=${deps.now() - t0}`);
@@ -44,17 +44,19 @@ export async function radarPass(deps: RadarDeps): Promise<void> {
   }
 }
 
-async function read(deps: RadarDeps, email: PendingEmail): Promise<RadarOutcome> {
+/** One email's outcome; `code` is the Token Factory client's short failure code, for the log only. */
+async function read(deps: RadarDeps, email: PendingEmail): Promise<{ outcome: RadarOutcome; code?: ChatFailure }> {
   // The same text goes to the model and to checkExtraction, so every field is grounded in what the model saw.
   const text = `Subject: ${email.subject}\n\n${email.body}`.slice(0, MAX_EMAIL_CHARS);
-  if (LINKISH.test(text)) return { kind: "refused", reasons: [STILL_LINKED] };
+  if (LINKISH.test(text)) return { outcome: { kind: "refused", reasons: [STILL_LINKED] } };
   let candidate: unknown = email.tab === "bandcamp" ? parseBandcampEmail(email.subject, email.body) : null;
   if (!candidate) {
-    if (!deps.nebiusKey) return { kind: "failed", reasons: [NOT_SET_UP] };
-    candidate = await chatJson(deps.http, deps.nebiusKey, { system: EXTRACTION_SKILL_TEXT, user: text });
-    if (candidate === null) return { kind: "failed", reasons: [NO_ANSWER] };
+    if (!deps.nebiusKey) return { outcome: { kind: "failed", reasons: [NOT_SET_UP] } };
+    const answer = await chatJson(deps.http, deps.nebiusKey, { system: EXTRACTION_SKILL_TEXT, user: text });
+    if ("code" in answer) return { outcome: { kind: "failed", reasons: [NO_ANSWER] }, code: answer.code };
+    candidate = answer.json;
   }
-  return outcomeOf(checkExtraction(candidate, text, email.receivedAt));
+  return { outcome: outcomeOf(checkExtraction(candidate, text, email.receivedAt)) };
 }
 
 function outcomeOf(x: Extraction): RadarOutcome {

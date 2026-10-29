@@ -90,6 +90,16 @@ test("a file that names bandcamp.com and calls fetch( is only the ingest worker'
   expect(one("packages/core/src/radar/bandcamp.ts", 'const BANDCAMP_DOMAIN = "bandcamp.com"')).toEqual([]);
 });
 
+test("in apps/ingest, the shared call( helper next to bandcamp.com trips the wire too; bandcamp.ts itself is allowed", () => {
+  const code = 'await call(http, "https://x.bandcamp.com/album/a")';
+  expect(one("apps/ingest/src/bandcamp.ts", code)).toEqual([]);
+  for (const path of ["apps/ingest/src/radar.ts", "apps/ingest/src/x.ts"]) {
+    expect(one(path, code), path).toEqual([`${path}: fetches next to bandcamp.com outside apps/ingest/src/bandcamp.ts (Plan 8)`]);
+  }
+  // Outside the ingest worker, call( is not the fetch helper.
+  expect(one("apps/console/src/lib/x.ts", 'call(x, "bandcamp.com")')).toEqual([]);
+});
+
 test("no attachments or send call anywhere in apps/", () => {
   for (const s of ['`/inboxes/${i}/messages/${m}/attachments/${a}`', '"/inboxes/x/messages/send"']) {
     for (const path of ["apps/console/src/lib/agentmail.ts", "apps/ingest/src/x.ts", "apps/console/convex/x.ts"]) {
