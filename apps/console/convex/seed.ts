@@ -80,6 +80,13 @@ function demoRunState(now: number): RunState {
   return { ...s, steps: s.steps.map((st, i) => ({ ...st, label: rows[i]!.label, sources: rows[i]!.sources })) };
 }
 
+const SAMPLE_RELEASES = [
+  { source: "bandcamp", status: "new", type: "album" },
+  { source: "bandcamp", status: "considering", type: "single" },
+  { source: "cosign", status: "new", type: "single", embargo: { until: null } },
+  { source: "cosign", status: "passed", type: "ep", passReason: "[Reason]" },
+] as const;
+
 const SEEDED_ACTIVITY_TITLES = new Set<string>(ACTIVITY.map(([, row]) => row.title));
 
 /**
@@ -135,9 +142,11 @@ export const seedDemo = internalMutation({
     await ctx.db.insert("verifications", { workspace: WS, claim: "ALA.NI release date", status: "conflict" });
     await ctx.db.insert("verifications", { workspace: WS, claim: "Silvan Strauss project credit", status: "could-not-verify", show: "10-2-26" });
 
-    // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases.
-    await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", type: "album" });
-    await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", type: "single" });
+    // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases. Both radar tabs, one undated
+    // embargo, and no players or links: no real music in the demo or the video (Plan 8, Hard Rule 9).
+    for (const [i, row] of SAMPLE_RELEASES.entries()) {
+      await ctx.db.insert("releases", { workspace: WS, artist: "[Artist]", title: "[Release title]", label: "[Label]", receivedAt: newest - i * 60_000, ...row });
+    }
 
     await ctx.db.insert("runs", {
       workspace: WS,

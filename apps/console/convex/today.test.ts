@@ -27,10 +27,11 @@ describe("today.summary", () => {
       await ctx.db.insert("verifications", { workspace: "real", claim: "A", status: "conflict" });
       await ctx.db.insert("verifications", { workspace: "real", claim: "B", status: "confirmed" });
       await ctx.db.insert("verifications", { workspace: "demo", claim: "C", status: "could-not-verify" });
-      await ctx.db.insert("releases", { workspace: "real", artist: "X", title: "1", label: "L1" });
-      await ctx.db.insert("releases", { workspace: "real", artist: "Y", title: "2", label: "L1" });
-      await ctx.db.insert("releases", { workspace: "real", artist: "Z", title: "3", label: "L2" });
-      await ctx.db.insert("releases", { workspace: "demo", artist: "D", title: "4", label: "L9" });
+      const at = Date.now();
+      await ctx.db.insert("releases", { workspace: "real", artist: "X", title: "1", label: "L1", receivedAt: at, source: "bandcamp" });
+      await ctx.db.insert("releases", { workspace: "real", artist: "Y", title: "2", label: "L1", receivedAt: at, source: "bandcamp" });
+      await ctx.db.insert("releases", { workspace: "real", artist: "Z", title: "3", label: "L2", receivedAt: at, source: "cosign" });
+      await ctx.db.insert("releases", { workspace: "demo", artist: "D", title: "4", label: "L9", receivedAt: at, source: "cosign" });
     });
 
     expect(await t.query(api.today.summary, {})).toBeNull();
@@ -45,6 +46,27 @@ describe("today.summary", () => {
     expect(d?.awaiting.map((a) => a.packageId)).toEqual(["demo-1"]);
     expect(d?.openClaims).toEqual([{ claim: "C", status: "could-not-verify" }]);
     expect(d?.releases.count).toBe(1);
+  });
+
+  test("releases: new records received since the cutoff; embargoed and byTab count them; no embargoed item in labels or items", async () => {
+    const t = convexTest(schema, modules);
+    vi.setSystemTime(Date.parse("2026-10-30T12:00:00Z")); // Fri 07:00 CDT; cutoff Thu 18:00 CDT = 23:00Z
+    const after = Date.parse("2026-10-30T01:00:00Z");
+    const before = Date.parse("2026-10-29T22:00:00Z");
+    await t.run(async (ctx) => {
+      const r = (fields: Record<string, unknown>) => ctx.db.insert("releases", { workspace: "real", artist: "A", title: "T", receivedAt: after, source: "bandcamp", ...fields } as never);
+      await r({ title: "Fresh", label: "Open Label" });
+      await r({ title: "Missing status reads as new", label: "Open Label", source: "cosign" });
+      await r({ title: "Secret Single", label: "Secret Label", embargo: { until: null }, source: "cosign" });
+      await r({ title: "Dated Secret", label: "Dated Label", embargo: { until: "2026-11-07" } });
+      await r({ title: "Considering", status: "considering", label: "C" });
+      await r({ title: "Yesterday", receivedAt: before, label: "Y" });
+      await r({ title: "No time" , receivedAt: undefined, label: "N" });
+    });
+    const rel = (await t.withIdentity(human).query(api.today.summary, {}))!.releases;
+    expect(rel).toMatchObject({ count: 4, embargoed: 2, byTab: { bandcamp: 2, cosign: 2 }, labels: ["Open Label"] });
+    expect(rel.items.map((i) => i.title).sort()).toEqual(["Fresh", "Missing status reads as new"]);
+    expect(JSON.stringify(rel)).not.toMatch(/Secret|Dated/);
   });
 
   test("blockedSince counts blocked rows since 18:00 America/Chicago yesterday", async () => {

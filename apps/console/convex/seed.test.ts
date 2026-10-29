@@ -24,7 +24,27 @@ describe("seedDemo", () => {
     const first = await counts(t);
     await t.mutation(internal.seed.seedDemo, {});
     expect(await counts(t)).toEqual(first);
-    expect(first).toEqual({ packages: 2, activity: 9, verifications: 2, releases: 2, runs: 1 });
+    expect(first).toEqual({ packages: 2, activity: 9, verifications: 2, releases: 4, runs: 1 });
+  });
+
+  test("demo releases: both tabs, a status and a source each, bracketed values, one undated embargo, no players", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const rows = await t.run((ctx) => ctx.db.query("releases").collect());
+    expect(rows.every((r) => r.workspace === "demo")).toBe(true);
+    expect(new Set(rows.map((r) => r.source))).toEqual(new Set(["bandcamp", "cosign"]));
+    for (const r of rows) {
+      expect(r.status).toBeTruthy();
+      expect(r.receivedAt).toBeTypeOf("number");
+      for (const v of [r.artist, r.title, r.label]) expect(v).toMatch(/^\[.+\]$/);
+      expect(r).not.toHaveProperty("embed");
+      expect(r).not.toHaveProperty("bandcampPage");
+      expect(r).not.toHaveProperty("embedState");
+      expect(r).not.toHaveProperty("links");
+    }
+    expect(rows.filter((r) => r.embargo).map((r) => r.embargo)).toEqual([{ until: null }]);
+    // The demo has no inbox (Hard Rule 9: inbound mail writes the real workspace only).
+    expect(await t.run((ctx) => ctx.db.query("inbox").collect())).toEqual([]);
   });
 
   test("seedDemo never touches real rows", async () => {

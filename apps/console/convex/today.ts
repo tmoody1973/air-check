@@ -1,6 +1,8 @@
+import { chicagoDayKey, isEmbargoActive } from "@aircheck/core";
 import { query } from "./_generated/server";
 import { digestCutoff } from "./cutoff";
 import { actorOf, workspaceOf } from "./gate";
+import { statusOf } from "./radar";
 
 /** The Today digest for the caller's workspace. Every number is counted here, never by the model. */
 export const summary = query({
@@ -24,11 +26,19 @@ export const summary = query({
       ctx.db.query("verifications").withIndex("by_workspace_status", (q) => q.eq("workspace", ws).eq("status", status)).collect();
     const openClaims = [...(await open("conflict")), ...(await open("could-not-verify"))].map((c) => ({ claim: c.claim, status: c.status }));
 
-    // ponytail: counts every release (no added-at field yet; Plan 5 adds one to window this).
-    const releases = await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", ws)).collect();
-    const labels = [...new Set(releases.map((r) => r.label).filter((l): l is string => !!l))];
+    const now = Date.now();
+    const cutoff = digestCutoff(now);
+    // Plan 8: new records received since the cutoff. An embargoed one is counted, never named: no title, label or row
+    // of it reaches the digest (job 9 sends counts and labels to Telegram).
+    const fresh = (await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", ws)).collect())
+      .filter((r) => statusOf(r) === "new" && (r.receivedAt ?? 0) >= cutoff)
+      .sort((a, b) => b.receivedAt! - a.receivedAt!);
+    const today = chicagoDayKey(now);
+    const shown = fresh.filter((r) => !isEmbargoActive(r.embargo, today));
+    const labels = [...new Set(shown.map((r) => r.label).filter((l): l is string => !!l))];
+    const byTab = { bandcamp: 0, cosign: 0 };
+    for (const r of fresh) byTab[r.source ?? "bandcamp"] += 1;
 
-    const cutoff = digestCutoff(Date.now());
     const blocked = (
       await ctx.db
         .query("activity")
@@ -41,7 +51,7 @@ export const summary = query({
     return {
       awaiting,
       openClaims,
-      releases: { count: releases.length, labels, items: releases.slice(0, 2) },
+      releases: { count: fresh.length, labels, items: shown.slice(0, 2), embargoed: fresh.length - shown.length, byTab },
       blockedSince: blocked.length,
       blockedLatest: latest ? { title: latest.title, destination: latest.destination } : undefined,
     };

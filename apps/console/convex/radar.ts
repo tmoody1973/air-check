@@ -1,0 +1,477 @@
+import {
+  type ActiveEmbargo,
+  bandcampPageUrl,
+  chicagoDayKey,
+  isEmbargoActive,
+  isShowDate,
+  MAX_STORED_CHARS,
+  type ReleaseFields,
+  releaseKey,
+} from "@aircheck/core";
+import { ConvexError, v, type Infer } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalQuery, mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
+import { sameToken } from "./agentSubmit";
+import { requireRealHuman } from "./episodes";
+import { actorOf, type Workspace, workspaceOf } from "./gate";
+import { requireIngest } from "./ingest";
+import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from "./schema";
+
+// Plan 8: the release radar. Forwarded email is untrusted data (Hard Rule 5). The one write an email may cause is its
+// own inbox row, at most one releases record (new or merged) with its queued player fetch, and the "links not followed"
+// activity row. Nothing here reaches a package, a run or Mixcloud (Hard Rule 1), and nothing here fetches anything.
+// - The console's inbound route has one mutation, `received` (INBOX_TOKEN).
+// - The ingest worker has four: `pending`, `record`, `embedsWanted`, `embedResult` (INGEST_TOKEN).
+// - A signed-in human moves records; the demo actor only on demo rows (Hard Rule 9).
+// - The agent reads `agentList` through POST /agent/radar: no links, player, senders or email text, and no active embargo.
+
+const MAX_SUBJECT = 200;
+const MAX_ID = 500;
+const MAX_ADDRESS = 320;
+const MAX_FIELD = 200;
+const MAX_LINKS = 20;
+const MAX_LINK = 500;
+const MAX_PAGES = 3;
+const MAX_HOSTS = 20;
+const MAX_REASONS = 10;
+const MAX_REASON = 300;
+const MAX_SENDERS = 10;
+const MAX_IGNORED = 200;
+const MAX_LIST = 500;
+const MAX_AGENT = 100;
+const MAX_NOT_ADDED = 50;
+const WAITING_MS = 10 * 60_000;
+const PENDING_BATCH = 5;
+const EMBED_BATCH = 3;
+const HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+const EMBED_ID = /^\d{1,12}$/;
+const FAIL_CODE = /^[a-z_0-9]{1,40}$/;
+/** A redirect off Bandcamp or a page that failed the URL rule was never read: blocked. Any other code was a fetch made. */
+const NOT_READ = new Set(["redirect_off_host", "not_allowed"]);
+/** Stored email text holds no link or address: the console replaced them (core's stripLinks). */
+const LINK_OR_ADDRESS = /:\/\/|@/;
+/** Release fields reach the agent, so they hold no link, address or www. host either. */
+const LINKISH = /:\/\/|@|\bwww\./i;
+const FILLABLE = ["label", "type", "releasedOn", "genre"] as const;
+
+const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
+const FORBIDDEN = new ConvexError({ code: "FORBIDDEN", message: "only a signed-in Radio Milwaukee user can do this" });
+
+/**
+ * The console's INBOX_TOKEN, in constant time. Fails closed when unset or under 32 characters, and refuses everything
+ * when it equals any other service's token, so one service can never act as another (Hard Rule 2).
+ */
+function requireInbox(token: string): void {
+  const { INBOX_TOKEN, INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN } = process.env;
+  const shared = [INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN].includes(INBOX_TOKEN);
+  if (shared || !sameToken(token, INBOX_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
+}
+
+/** Rows written before Plan 8 have no status: they read as new. */
+export const statusOf = (r: Doc<"releases">): Infer<typeof releaseStatusV> => r.status ?? "new";
+/** Rows written before Plan 8 have no source: the old Today card called them Bandcamp releases. */
+const tabOf = (r: Doc<"releases">): Infer<typeof radarTabV> => r.source ?? "bandcamp";
+
+const senderV = v.object({ name: v.optional(v.string()), address: v.optional(v.string()) });
+/** Core's CleanMail, exactly. */
+const cleanMailV = v.object({
+  tab: radarTabV,
+  sender: v.optional(senderV),
+  subject: v.string(),
+  body: v.string(),
+  links: v.array(v.string()),
+  bandcampPages: v.array(v.string()),
+  hosts: v.array(v.string()),
+});
+/** Core's ReleaseFields, exactly. A forged outcome with any other key (status, approve, sendTo...) fails validation. */
+const releaseFieldsV = v.object({
+  artist: v.string(),
+  title: v.string(),
+  label: v.optional(v.string()),
+  type: v.optional(releaseTypeV),
+  releasedOn: v.optional(v.string()),
+  genre: v.optional(v.string()),
+  embargo: v.optional(embargoV),
+});
+const outcomeV = v.union(
+  v.object({ kind: v.literal("saved"), release: releaseFieldsV }),
+  v.object({ kind: v.union(v.literal("not-a-release"), v.literal("refused"), v.literal("failed")), reasons: v.array(v.string()) }),
+);
+type CleanMailArg = Infer<typeof cleanMailV>;
+type Embargo = Infer<typeof embargoV>;
+
+const tooLong = (s: string | undefined, max: number) => (s?.length ?? 0) > max;
+
+function mailProblem(m: CleanMailArg): string | null {
+  if (LINK_OR_ADDRESS.test(m.body) || LINK_OR_ADDRESS.test(m.subject)) return "the stored text must hold no link or address";
+  if (m.body.length > MAX_STORED_CHARS) return `the body is over ${MAX_STORED_CHARS} characters`;
+  if (tooLong(m.sender?.name, MAX_FIELD) || tooLong(m.sender?.address, MAX_ADDRESS) || LINK_OR_ADDRESS.test(m.sender?.name ?? "")) return "the sender is not a plain name and address";
+  if (m.links.length > MAX_LINKS || m.links.some((l) => l.length > MAX_LINK)) return `at most ${MAX_LINKS} links of ${MAX_LINK} characters`;
+  if (m.bandcampPages.length > MAX_PAGES || m.bandcampPages.some((l) => l.length > MAX_LINK)) return `at most ${MAX_PAGES} Bandcamp pages`;
+  if (m.hosts.length > MAX_HOSTS || m.hosts.some((h) => h.length > 253 || !HOST.test(h))) return "hosts must be host names only";
+  return null;
+}
+
+function releaseProblem(f: ReleaseFields): string | null {
+  for (const [k, val] of Object.entries(f)) {
+    if (typeof val !== "string") continue;
+    if (tooLong(val, MAX_FIELD)) return `${k} is over ${MAX_FIELD} characters`;
+    if (LINKISH.test(val)) return `${k} must not hold a link or address`;
+  }
+  if (!f.artist.trim() || !f.title.trim()) return "artist and title are required";
+  if (f.releasedOn !== undefined && !isShowDate(f.releasedOn)) return "releasedOn must be a date, yyyy-mm-dd";
+  if (f.embargo?.until && !isShowDate(f.embargo.until)) return "the embargo date must be a date, yyyy-mm-dd";
+  return null;
+}
+
+const inboxByMessageId = (ctx: QueryCtx, messageId: string) =>
+  ctx.db.query("inbox").withIndex("by_messageId", (q) => q.eq("messageId", messageId)).first();
+
+/**
+ * The console's one call (Plan 8 Task 3's inbound route). Stores a cleaned email once per message id; `mail: null` is an
+ * ignored sender, stored with its reason and no body. Links the email held are kept for Tarik and never fetched; one
+ * activity row says so, with host names only.
+ */
+export const received = mutation({
+  args: {
+    token: v.string(),
+    messageId: v.string(),
+    receivedAt: v.number(),
+    from: v.string(),
+    subject: v.string(),
+    mail: v.union(cleanMailV, v.null()),
+    ignoredReason: v.optional(v.string()),
+  },
+  handler: async (ctx, a): Promise<{ fresh: boolean }> => {
+    requireInbox(a.token);
+    if (!a.messageId || tooLong(a.messageId, MAX_ID) || tooLong(a.from, MAX_ADDRESS)) throw badInput("messageId and from must be short");
+    if (LINK_OR_ADDRESS.test(a.subject)) throw badInput("the stored text must hold no link or address");
+    if (!a.mail && !a.ignoredReason?.trim()) throw badInput("an ignored email needs a reason");
+    if (tooLong(a.ignoredReason, MAX_REASON)) throw badInput(`the reason is over ${MAX_REASON} characters`);
+    const problem = a.mail && mailProblem(a.mail);
+    if (problem) throw badInput(problem);
+    if (await inboxByMessageId(ctx, a.messageId)) return { fresh: false };
+
+    const base = { messageId: a.messageId, receivedAt: a.receivedAt, from: a.from, subject: a.subject.slice(0, MAX_SUBJECT) };
+    const m = a.mail;
+    if (!m) {
+      await ctx.db.insert("inbox", { ...base, state: "ignored", reasons: [a.ignoredReason!.trim()], linkCount: 0 });
+      await pruneIgnored(ctx);
+      return { fresh: true };
+    }
+    await ctx.db.insert("inbox", {
+      ...base,
+      state: "received",
+      tab: m.tab,
+      ...(m.sender && { sender: m.sender }),
+      body: m.body,
+      links: m.links,
+      bandcampPages: m.bandcampPages,
+      linkCount: m.links.length,
+    });
+    if (m.hosts.length) {
+      const notFollowed = m.links.filter((l) => bandcampPageUrl(l) === null).length;
+      await ctx.db.insert("activity", {
+        workspace: "real",
+        at: a.receivedAt,
+        kind: "action",
+        result: "blocked",
+        title: `Links in an email were not followed (${notFollowed})`,
+        destination: m.hosts.join(", "),
+        reason: "Email is data: links are kept for you and never fetched",
+      });
+    }
+    return { fresh: true };
+  },
+});
+
+// ponytail: a simple cap on ignored rows; add a cron prune if the inbox gets busy.
+async function pruneIgnored(ctx: MutationCtx) {
+  const ignored = await ctx.db.query("inbox").withIndex("by_state_receivedAt", (q) => q.eq("state", "ignored")).order("desc").collect();
+  for (const r of ignored.slice(MAX_IGNORED)) await ctx.db.delete(r._id);
+}
+
+/** The ingest worker's batch: received emails, oldest first. */
+export const pending = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    requireIngest(token);
+    const rows = await ctx.db.query("inbox").withIndex("by_state_receivedAt", (q) => q.eq("state", "received")).order("asc").take(PENDING_BATCH);
+    return rows.map((r) => ({ messageId: r.messageId, tab: r.tab ?? ("cosign" as const), subject: r.subject, body: r.body ?? "", receivedAt: r.receivedAt }));
+  },
+});
+
+/**
+ * What the ingest worker read from one email. The sender, links and Bandcamp pages come from the stored inbox row, never
+ * from these arguments. A row no longer `received` (a crash between pending and record, read twice) is left alone.
+ */
+export const record = mutation({
+  args: { token: v.string(), messageId: v.string(), outcome: outcomeV },
+  handler: async (ctx, { token, messageId, outcome }): Promise<{ releaseId?: Id<"releases">; merged?: boolean }> => {
+    requireIngest(token);
+    const row = await inboxByMessageId(ctx, messageId);
+    if (!row) throw new ConvexError({ code: "NOT_FOUND", message: "no such email" });
+    if (row.state !== "received") return {};
+    if (outcome.kind !== "saved") {
+      if (outcome.reasons.length > MAX_REASONS || outcome.reasons.some((r) => tooLong(r, MAX_REASON))) throw badInput(`at most ${MAX_REASONS} short reasons`);
+      // A refused or failed email keeps its body so Try again can read it again.
+      await ctx.db.patch(row._id, { state: outcome.kind, reasons: outcome.reasons, ...(outcome.kind === "not-a-release" && { body: undefined }) });
+      return {};
+    }
+    const problem = releaseProblem(outcome.release);
+    if (problem) throw badInput(problem);
+    const { releaseId, merged } = await saveRelease(ctx, row, outcome.release);
+    await ctx.db.patch(row._id, { state: merged ? "merged" : "saved", releaseId, body: undefined, reasons: undefined });
+    return { releaseId, merged };
+  },
+});
+
+/** The stricter of two embargoes: an undated one beats a date, a later date beats an earlier one. */
+function stricter(a: Embargo | undefined, b: Embargo | undefined): Embargo | undefined {
+  if (!a || !b) return a ?? b;
+  if (a.until === null || b.until === null) return { until: null };
+  return { until: a.until > b.until ? a.until : b.until };
+}
+
+/** One record per release key. A merge fills only empty fields Tarik has not edited and leaves status and tab alone. */
+async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields): Promise<{ releaseId: Id<"releases">; merged: boolean }> {
+  const key = releaseKey(f.artist, f.title);
+  const sender = { ...row.sender, messageId: row.messageId, at: row.receivedAt };
+  // The stored page passes the URL rule again here: a page forged past the console queues nothing.
+  const page = (row.bandcampPages ?? []).map(bandcampPageUrl).find((p): p is string => p !== null);
+  const queue = page ? { bandcampPage: page, embedState: "queued" as const } : {};
+  const cur = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
+  if (!cur) {
+    const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as ReleaseFields;
+    const releaseId = await ctx.db.insert("releases", {
+      workspace: "real",
+      ...fields,
+      status: "new",
+      source: row.tab ?? "cosign",
+      senders: [sender],
+      links: row.links ?? [],
+      key,
+      receivedAt: row.receivedAt,
+      ...queue,
+    });
+    return { releaseId, merged: false };
+  }
+  const edited = new Set(cur.editedFields ?? []);
+  const fill = Object.fromEntries(FILLABLE.filter((k) => f[k] !== undefined && cur[k] === undefined && !edited.has(k)).map((k) => [k, f[k]]));
+  const embargo = stricter(cur.embargo, f.embargo);
+  await ctx.db.patch(cur._id, {
+    ...fill,
+    ...(embargo && { embargo }),
+    senders: [...(cur.senders ?? []), sender].slice(0, MAX_SENDERS),
+    links: [...new Set([...(cur.links ?? []), ...(row.links ?? [])])].slice(0, MAX_LINKS),
+    ...(!cur.bandcampPage && queue),
+  });
+  return { releaseId: cur._id, merged: true };
+}
+
+/** Real releases waiting for their Bandcamp player id, oldest first. Each page passes the URL rule again. */
+export const embedsWanted = query({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    requireIngest(token);
+    // ponytail: collects the whole queue to filter it; it holds a handful of rows. Index by workspace if it ever grows.
+    const queued = await ctx.db.query("releases").withIndex("by_embedState", (q) => q.eq("embedState", "queued")).collect();
+    return queued
+      .filter((r) => r.workspace === "real" && r.bandcampPage !== undefined && bandcampPageUrl(r.bandcampPage) === r.bandcampPage)
+      .slice(0, EMBED_BATCH)
+      .map((r) => ({ releaseId: r._id, pageUrl: r.bandcampPage! }));
+  },
+});
+
+/** The player id the ingest worker read from the page (or a short failure code), and one audit row with the host only. */
+export const embedResult = mutation({
+  args: {
+    token: v.string(),
+    releaseId: v.id("releases"),
+    pageUrl: v.string(),
+    result: v.union(v.object({ kind: v.union(v.literal("album"), v.literal("track")), id: v.string() }), v.object({ failed: v.string() })),
+  },
+  handler: async (ctx, { token, releaseId, pageUrl, result }) => {
+    requireIngest(token);
+    const rel = await ctx.db.get(releaseId);
+    if (!rel || rel.workspace !== "real" || !rel.bandcampPage || rel.bandcampPage !== pageUrl) throw badInput("pageUrl is not this release's Bandcamp page");
+    if ("failed" in result ? !FAIL_CODE.test(result.failed) : !EMBED_ID.test(result.id)) throw badInput("the result must be a player id (digits) or a short failure code");
+    if (rel.embedState !== "queued") return null;
+    const destination = new URL(pageUrl).hostname;
+    const row = { workspace: "real" as const, at: Date.now(), kind: "network" as const, destination };
+    if ("failed" in result) {
+      await ctx.db.patch(releaseId, { embedState: "failed", embedError: result.failed, embed: undefined });
+      const blocked = NOT_READ.has(result.failed);
+      await ctx.db.insert("activity", { ...row, title: blocked ? "Bandcamp page not read" : "Read a Bandcamp page for its player", result: blocked ? "blocked" : "allowed", reason: result.failed });
+    } else {
+      await ctx.db.patch(releaseId, { embedState: "ready", embed: { kind: result.kind, id: result.id }, embedError: undefined });
+      await ctx.db.insert("activity", { ...row, title: "Read a Bandcamp page for its player", result: "allowed" });
+    }
+    return null;
+  },
+});
+
+/** A release the caller may change: a real human on a real row, the demo actor on a demo row (Hard Rule 9). */
+async function ownRelease(ctx: MutationCtx, releaseId: Id<"releases">): Promise<Doc<"releases">> {
+  const ws = workspaceOf(await actorOf(ctx));
+  const doc = ws ? await ctx.db.get(releaseId) : null;
+  if (!ws || !doc || doc.workspace !== ws) throw FORBIDDEN;
+  return doc;
+}
+
+export const setStatus = mutation({
+  args: { releaseId: v.id("releases"), status: releaseStatusV, reason: v.optional(v.string()) },
+  handler: async (ctx, { releaseId, status, reason }) => {
+    await ownRelease(ctx, releaseId);
+    if (tooLong(reason, MAX_FIELD)) throw badInput(`the reason is over ${MAX_FIELD} characters`);
+    await ctx.db.patch(releaseId, { status, statusAt: Date.now(), passReason: status === "passed" ? reason?.trim() || undefined : undefined });
+  },
+});
+
+/** Tarik's edit. An empty string clears a field. Edited fields are never overwritten by a later email. */
+export const edit = mutation({
+  args: {
+    releaseId: v.id("releases"),
+    fields: v.object({ label: v.optional(v.string()), genre: v.optional(v.string()), type: v.optional(v.union(releaseTypeV, v.literal(""))), releasedOn: v.optional(v.string()) }),
+  },
+  handler: async (ctx, { releaseId, fields }) => {
+    const doc = await ownRelease(ctx, releaseId);
+    const keys = Object.keys(fields).filter((k) => fields[k as keyof typeof fields] !== undefined);
+    if (!keys.length) throw badInput("nothing to change");
+    const val = (s: string | undefined) => s?.trim() || undefined;
+    for (const s of [fields.label, fields.genre]) {
+      if (tooLong(s, MAX_FIELD)) throw badInput(`labels and genres are at most ${MAX_FIELD} characters`);
+      if (LINKISH.test(s ?? "")) throw badInput("a label or genre must not hold a link or address");
+    }
+    const releasedOn = val(fields.releasedOn);
+    if (releasedOn && !isShowDate(releasedOn)) throw badInput("the release date must be a date, yyyy-mm-dd");
+    const patch = { label: val(fields.label), genre: val(fields.genre), type: fields.type || undefined, releasedOn };
+    await ctx.db.patch(releaseId, {
+      ...Object.fromEntries(keys.map((k) => [k, patch[k as keyof typeof patch]])),
+      editedFields: [...new Set([...(doc.editedFields ?? []), ...keys])],
+    });
+  },
+});
+
+/** `embargo: null` is "Clear embargo". A dated or undated embargo is set as given. */
+export const setEmbargo = mutation({
+  args: { releaseId: v.id("releases"), embargo: v.union(v.null(), embargoV) },
+  handler: async (ctx, { releaseId, embargo }) => {
+    await ownRelease(ctx, releaseId);
+    if (embargo?.until && !isShowDate(embargo.until)) throw badInput("the embargo date must be a date, yyyy-mm-dd");
+    await ctx.db.patch(releaseId, { embargo: embargo ?? undefined });
+  },
+});
+
+/** "Try again" on an email that was refused or failed: it goes back to the ingest worker with its kept body. */
+export const retry = mutation({
+  args: { messageId: v.string() },
+  handler: async (ctx, { messageId }) => {
+    await requireRealHuman(ctx);
+    const row = await inboxByMessageId(ctx, messageId);
+    if (!row || (row.state !== "refused" && row.state !== "failed")) throw badInput("only an email that was refused or failed can be read again");
+    await ctx.db.patch(row._id, { state: "received", reasons: undefined });
+  },
+});
+
+/** "Try again" on a player the ingest worker could not read. */
+export const retryEmbed = mutation({
+  args: { releaseId: v.id("releases") },
+  handler: async (ctx, { releaseId }) => {
+    const doc = await ownRelease(ctx, releaseId);
+    if (doc.embedState !== "failed") throw badInput("only a player that failed can be tried again");
+    await ctx.db.patch(releaseId, { embedState: "queued", embedError: undefined });
+  },
+});
+
+/** One tab of the Release radar page, newest first, with the counts for the status chips. Private view. */
+export const list = query({
+  args: { tab: radarTabV, status: v.optional(releaseStatusV) },
+  handler: async (ctx, { tab, status }) => {
+    const ws = workspaceOf(await actorOf(ctx));
+    if (!ws) return null;
+    const rows = (
+      await ctx.db
+        .query("releases")
+        .withIndex("by_workspace_source_receivedAt", (q) => q.eq("workspace", ws).eq("source", tab))
+        .order("desc")
+        .take(MAX_LIST)
+    ).map((r) => ({ ...r, status: statusOf(r) }));
+    const counts = { new: 0, considering: 0, played: 0, passed: 0 };
+    for (const r of rows) counts[r.status] += 1;
+    return { rows: status ? rows.filter((r) => r.status === status) : rows, counts };
+  },
+});
+
+/** Why an email made no record: the last emails not saved or merged, with plain reasons. Never the body. */
+export const notAdded = query({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") return [];
+    const now = Date.now();
+    const rows = await ctx.db
+      .query("inbox")
+      .withIndex("by_receivedAt")
+      .order("desc")
+      .filter((q) => q.and(q.neq(q.field("state"), "saved"), q.neq(q.field("state"), "merged")))
+      .take(MAX_NOT_ADDED);
+    return rows.map((r) => ({
+      messageId: r.messageId,
+      receivedAt: r.receivedAt,
+      from: r.from,
+      subject: r.subject,
+      state: r.state,
+      ...(r.tab && { tab: r.tab }),
+      reasons: r.state === "received" ? (now - r.receivedAt > WAITING_MS ? ["Waiting to be read"] : []) : (r.reasons ?? []),
+    }));
+  },
+});
+
+// ponytail: scans the workspace's releases (hundreds at radio scale). Add an index on embargo if it grows.
+/** Active embargoes in a workspace on `today` (a Chicago day key). Plan 8 Task 5 and Plan 7 check text against these. */
+export async function activeEmbargoes(ctx: QueryCtx, workspace: Workspace, today: string): Promise<ActiveEmbargo[]> {
+  const rows = await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", workspace)).collect();
+  return rows.filter((r) => isEmbargoActive(r.embargo, today)).map((r) => ({ artist: r.artist, title: r.title, until: r.embargo!.until }));
+}
+
+export type AgentRelease = {
+  id: Id<"releases">;
+  artist: string;
+  title: string;
+  label?: string;
+  genre?: string;
+  type?: "album" | "single" | "ep";
+  releasedOn?: string;
+  status: Infer<typeof releaseStatusV>;
+  tab: Infer<typeof radarTabV>;
+  embargo?: { until: string | null };
+};
+
+/**
+ * The agent's read-only view (POST /agent/radar, the bridge's radar_get). Picked field by field: no links, player,
+ * senders, subject, body or inbox, so no URL from an email ever reaches the agent. An actively embargoed release is left
+ * out entirely (Hard Rules 5 and 10: embargoed items stay in private views).
+ */
+export const agentList = internalQuery({
+  args: { workspace: workspaceV, status: v.optional(releaseStatusV), tab: v.optional(radarTabV) },
+  handler: async (ctx, { workspace, status, tab }): Promise<AgentRelease[]> => {
+    const today = chicagoDayKey(Date.now());
+    const rows = await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", workspace)).collect();
+    return rows
+      .filter((r) => !isEmbargoActive(r.embargo, today) && (!status || statusOf(r) === status) && (!tab || tabOf(r) === tab))
+      .sort((a, b) => (b.receivedAt ?? b._creationTime) - (a.receivedAt ?? a._creationTime))
+      .slice(0, MAX_AGENT)
+      .map((r) => ({
+        id: r._id,
+        artist: r.artist,
+        title: r.title,
+        ...(r.label && { label: r.label }),
+        ...(r.genre && { genre: r.genre }),
+        ...(r.type && { type: r.type }),
+        ...(r.releasedOn && { releasedOn: r.releasedOn }),
+        status: statusOf(r),
+        tab: tabOf(r),
+        ...(r.embargo && { embargo: r.embargo }),
+      }));
+  },
+});

@@ -5,6 +5,15 @@ export const workspaceV = v.union(v.literal("real"), v.literal("demo"));
 export const resultV = v.union(v.literal("needs_you"), v.literal("done"), v.literal("allowed"), v.literal("blocked"));
 export const kindV = v.union(v.literal("waiting"), v.literal("action"), v.literal("network"));
 
+export const radarTabV = v.union(v.literal("bandcamp"), v.literal("cosign"));
+export const releaseStatusV = v.union(v.literal("new"), v.literal("considering"), v.literal("played"), v.literal("passed"));
+export const releaseTypeV = v.union(v.literal("album"), v.literal("single"), v.literal("ep"));
+export const embargoV = v.object({ until: v.union(v.string(), v.null()) });
+export const inboxStateV = v.union(
+  v.literal("received"), v.literal("saved"), v.literal("merged"), v.literal("not-a-release"),
+  v.literal("refused"), v.literal("ignored"), v.literal("failed"),
+);
+
 export const mixcloudStatusFields = {
   state: v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected")),
   account: v.optional(v.string()),
@@ -178,15 +187,57 @@ export default defineSchema({
     status: v.union(v.literal("conflict"), v.literal("could-not-verify"), v.literal("confirmed")),
     show: v.optional(v.string()),
   }).index("by_workspace_status", ["workspace", "status"]),
+  // Plan 8: one record per release from forwarded email. Every new field is optional, so rows written before the deploy
+  // (the hourly demo seed) stay valid; radar.statusOf reads a missing status as "new". No email text is kept here, and
+  // `links`, `bandcampPage`, `embed` and `senders` never reach the agent (radar.agentList).
   releases: defineTable({
     workspace: workspaceV,
     artist: v.string(),
     title: v.string(),
     label: v.optional(v.string()),
-    type: v.optional(v.union(v.literal("album"), v.literal("single"), v.literal("ep"))),
+    type: v.optional(releaseTypeV),
     releasedOn: v.optional(v.string()),
     playedNote: v.optional(v.string()),
-  }).index("by_workspace", ["workspace"]),
+    genre: v.optional(v.string()),
+    embargo: v.optional(embargoV),
+    status: v.optional(releaseStatusV),
+    statusAt: v.optional(v.number()),
+    passReason: v.optional(v.string()),
+    source: v.optional(radarTabV),
+    senders: v.optional(v.array(v.object({ name: v.optional(v.string()), address: v.optional(v.string()), messageId: v.string(), at: v.number() }))),
+    links: v.optional(v.array(v.string())),
+    bandcampPage: v.optional(v.string()),
+    embed: v.optional(v.object({ kind: v.union(v.literal("album"), v.literal("track")), id: v.string() })),
+    embedState: v.optional(v.union(v.literal("queued"), v.literal("ready"), v.literal("failed"))),
+    embedError: v.optional(v.string()),
+    key: v.optional(v.string()),
+    receivedAt: v.optional(v.number()),
+    editedFields: v.optional(v.array(v.string())),
+  })
+    .index("by_workspace", ["workspace"])
+    .index("by_workspace_key", ["workspace", "key"])
+    .index("by_workspace_source_receivedAt", ["workspace", "source", "receivedAt"])
+    .index("by_embedState", ["embedState"]),
+  // Plan 8: forwarded email as the console stored it, real workspace only (Hard Rule 9). `body` is cleaned (no link or
+  // address) and deleted once the ingest worker has read it; an ignored sender's body is never stored.
+  inbox: defineTable({
+    messageId: v.string(),
+    receivedAt: v.number(),
+    from: v.string(),
+    subject: v.string(),
+    state: inboxStateV,
+    tab: v.optional(radarTabV),
+    sender: v.optional(v.object({ name: v.optional(v.string()), address: v.optional(v.string()) })),
+    body: v.optional(v.string()),
+    links: v.optional(v.array(v.string())),
+    bandcampPages: v.optional(v.array(v.string())),
+    reasons: v.optional(v.array(v.string())),
+    releaseId: v.optional(v.id("releases")),
+    linkCount: v.number(),
+  })
+    .index("by_messageId", ["messageId"])
+    .index("by_state_receivedAt", ["state", "receivedAt"])
+    .index("by_receivedAt", ["receivedAt"]),
   runs: defineTable({
     workspace: workspaceV,
     runId: v.string(),
