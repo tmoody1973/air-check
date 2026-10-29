@@ -63,6 +63,7 @@ describe("INGEST_TOKEN", () => {
       t.mutation(api.ingest.setFetch, { token, showDate: "2026-01-02", status: "fetching" }),
       t.mutation(api.ingest.requestDraft, { token, showDate: "2026-01-02" }),
       t.mutation(api.ingest.sourceStatus, { token, source: "box", state: "connected" }),
+      t.mutation(api.ingest.prune, { token, keep: [] }),
     ];
     for (const token of ["", "x".repeat(48), ...Object.values(OTHER)]) for (const c of calls(token)) expect(await errorCode(c)).toBe("UNAUTHORIZED");
     vi.stubEnv("INGEST_TOKEN", "short");
@@ -346,6 +347,37 @@ describe("ingest.requestDraft", () => {
     expect(l.episodes[0]!.draftAttempts).toBe(1);
     expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
     expect(await runs(t)).toHaveLength(2);
+  });
+});
+
+describe("ingest.prune (I3)", () => {
+  const dates = (t: T) => t.run(async (ctx) => (await ctx.db.query("episodes").collect()).map((e) => e.showDate).sort());
+
+  test("a date gone from every source (a renamed doc) loses its row; kept dates stay", async () => {
+    const t = convexTest(schema, modules);
+    for (const d of ["2026-01-02", "2026-01-09", "2026-01-16"]) await upsert(t, episode({ showDate: d }));
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: ["2026-01-02", "2026-01-16", "2026-01-23"] })).toEqual({ deleted: 1 });
+    expect(await dates(t)).toEqual(["2026-01-02", "2026-01-16"]);
+  });
+
+  test("never removes a row with a package, a rerun mark, or a bare mark made ahead of time", async () => {
+    const t = convexTest(schema, modules);
+    for (const d of ["2026-01-02", "2026-03-13", "2026-10-02"]) await upsert(t, episode({ showDate: d }));
+    await insertPackage(t, "succeeded"); // 2026-10-02
+    await t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true }).mutation(api.episodes.markRerun, { showDate: "2026-03-13", rerunOf: "2026-01-02" });
+    await t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true }).mutation(api.episodes.markRerun, { showDate: "2026-11-06", rerunOf: "2026-01-02" });
+    await t.run(async (ctx) => void (await ctx.db.insert("episodes", { showDate: "2026-12-04", audio: { status: "none", flags: [] }, tracklist: { status: "missing" }, notes: { status: "missing" }, questions: [], scannedAt: 0 })));
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: ["2026-01-02"] })).toEqual({ deleted: 0 });
+    expect(await dates(t)).toEqual(["2026-01-02", "2026-03-13", "2026-10-02", "2026-11-06", "2026-12-04"]);
+  });
+
+  test("a pass that would remove more than 3 rows removes none and says how many", async () => {
+    const t = convexTest(schema, modules);
+    for (const d of ["2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30"]) await upsert(t, episode({ showDate: d }));
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: ["2026-01-02"] })).toEqual({ deleted: 0, skipped: 4 });
+    expect(await dates(t)).toHaveLength(5);
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: ["2026-01-02", "2026-01-09"] })).toEqual({ deleted: 3 });
+    expect(await dates(t)).toEqual(["2026-01-02", "2026-01-09"]);
   });
 });
 

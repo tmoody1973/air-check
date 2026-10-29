@@ -4,7 +4,7 @@ import type { DraftOutcome, IngestConvex, IngestRow, ScannedEpisode, SourceRepor
 /**
  * In-memory stand-in for apps/console/convex/ingest.ts with the same rules that matter here: upsert replaces the scanned
  * facts, list never returns the notes text, requestDraft is idempotent per date (an open run means "drafting"), counts
- * open runs in the pace, and stops after two finished runs (R10).
+ * open runs in the pace, stops after two finished runs (R10), and prunes like ingest.prune (I3).
  */
 export function fakeConvex() {
   const rows = new Map<string, ScannedEpisode>();
@@ -15,6 +15,7 @@ export function fakeConvex() {
   const fetches: { showDate: string; status: string; error?: string }[] = [];
   const draftCalls: { showDate: string; outcome: DraftOutcome }[] = [];
   const sources: SourceReport[] = [];
+  const prunes: string[][] = [];
   let awaitingExtra = 0;
 
   const rowOf = (e: ScannedEpisode): IngestRow => {
@@ -57,9 +58,16 @@ export function fakeConvex() {
     async sourceStatus(r) {
       sources.push(r);
     },
+    async prune(keep) {
+      prunes.push([...keep]);
+      const gone = [...rows.keys()].filter((d) => !keep.includes(d) && !packages.has(d) && !extra.get(d)?.rerunOf);
+      if (gone.length > 3) return { deleted: 0, skipped: gone.length };
+      for (const d of gone) rows.delete(d);
+      return { deleted: gone.length };
+    },
   };
   return {
-    convex, rows, extra, packages, runs, upserts, fetches, draftCalls, sources,
+    convex, rows, extra, packages, runs, upserts, fetches, draftCalls, sources, prunes,
     setAwaiting: (n: number) => void (awaitingExtra = n),
     lastSource: (s: SourceReport["source"]) => sources.filter((x) => x.source === s).at(-1),
   };

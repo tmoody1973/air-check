@@ -249,3 +249,40 @@ describe("one unreadable doc is that show's question, not a failed source (fix r
     expect(w.deps.memory.lastScanComplete).toBe(false);
   });
 });
+
+describe("I3: rows for dates no source has any more are pruned, only after a complete scan", () => {
+  const stale = (w: Awaited<ReturnType<typeof world>>, ...dates: string[]) => {
+    for (const d of dates) w.cv.rows.set(d, { ...structuredClone(w.cv.rows.get("2026-01-30")!), showDate: d });
+  };
+
+  test("a complete scan prunes to the dates it found (a not-connected source is fine)", async () => {
+    const w = await make({ dropboxToken: undefined });
+    await runScan(w.deps);
+    stale(w, "2026-02-27"); // its doc was renamed to another date
+    await runScan(w.deps);
+    expect(w.cv.prunes.at(-1)).toEqual(["2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30"]);
+    expect(w.cv.rows.has("2026-02-27")).toBe(false);
+    expect(w.logs).toContain("ingest step=prune ok=true deleted=1");
+  });
+
+  test("no prune after a scan where a connected source failed", async () => {
+    let listOk = true;
+    const w = await make({ dropboxList: () => listOk });
+    await runScan(w.deps);
+    const n = w.cv.prunes.length;
+    stale(w, "2026-02-27");
+    listOk = false;
+    await runScan(w.deps);
+    expect(w.cv.prunes).toHaveLength(n);
+    expect(w.cv.rows.has("2026-02-27")).toBe(true);
+  });
+
+  test("more than 3 rows to remove: none removed, and the log says how many (counts only)", async () => {
+    const w = await make();
+    await runScan(w.deps);
+    stale(w, "2026-02-06", "2026-02-13", "2026-02-20", "2026-02-27");
+    await runScan(w.deps);
+    expect(w.cv.rows.has("2026-02-27")).toBe(true);
+    expect(w.logs).toContain("ingest step=prune skipped=true count=4");
+  });
+});

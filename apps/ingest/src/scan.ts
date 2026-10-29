@@ -205,4 +205,16 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   }
   const partial = failed.length ? ` failed=${failed.join("_")}` : "";
   deps.log(`ingest step=scan ok=${ok === episodes.length && !failed.length} stored=${ok} questions=${questions}${partial} ms=${Date.now() - t0}`);
+  // I3: only a scan that read every connected source knows a date is gone (a renamed or deleted doc).
+  if (deps.memory.lastScanComplete) await prune(deps, episodes.map((e) => e.showDate));
+}
+
+async function prune(deps: ScanDeps, keep: string[]): Promise<void> {
+  try {
+    const r = await deps.convex.prune(keep);
+    if (r.skipped) deps.log(`ingest step=prune skipped=true count=${r.skipped}`);
+    else if (r.deleted) deps.log(`ingest step=prune ok=true deleted=${r.deleted}`);
+  } catch {
+    deps.log("ingest step=prune ok=false");
+  }
 }

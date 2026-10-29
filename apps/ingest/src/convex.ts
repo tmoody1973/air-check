@@ -46,6 +46,8 @@ export interface IngestConvex {
   setFetch(showDate: string, status: "fetching" | "fetched" | "failed", error?: string): Promise<void>;
   requestDraft(showDate: string): Promise<DraftOutcome>;
   sourceStatus(report: SourceReport): Promise<void>;
+  /** I3: remove rows for dates not in `keep`; Convex refuses (skipped) when that would be more than 3. */
+  prune(keep: string[]): Promise<{ deleted: number; skipped?: number }>;
 }
 
 /** Like media and the publisher: a Convex call that never answers fails instead of wedging the pass. */
@@ -53,12 +55,13 @@ export const CONVEX_TIMEOUT_MS = 15_000;
 
 export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) });
-  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus", FunctionReference<"mutation">>;
+  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune", FunctionReference<"mutation">>;
   return {
     list: () => client.query(m.list, { token }),
     upsert: async (episode) => void (await client.mutation(m.upsert, { token, episode })),
     setFetch: async (showDate, status, error) => void (await client.mutation(m.setFetch, { token, showDate, status, ...(error ? { error } : {}) })),
     requestDraft: (showDate) => client.mutation(m.requestDraft, { token, showDate }),
     sourceStatus: async (r) => void (await client.mutation(m.sourceStatus, { token, ...r })),
+    prune: (keep) => client.mutation(m.prune, { token, keep }),
   };
 }

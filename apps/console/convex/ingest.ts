@@ -24,6 +24,8 @@ const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
 const MAX_ERROR_CHARS = 200;
 const PACE = 3;
+/** I3: more than this many rows to remove in one pass looks like a bad read, not renamed docs: remove none. */
+const MAX_PRUNE = 3;
 
 const scannedEpisodeV = v.object(scannedEpisodeFields);
 type ScannedEpisode = Infer<typeof scannedEpisodeV>;
@@ -70,6 +72,27 @@ export const list = query({
     requireIngest(token);
     const rows = await episodeRows(ctx);
     return { episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx) };
+  },
+});
+
+/**
+ * I3: after a scan that read every connected source, rows for dates no source has any more (a renamed or deleted doc)
+ * go. A row with a package, a rerun mark or an ahead-of-time mark (scannedAt 0) is a person's record and stays.
+ */
+export const prune = mutation({
+  args: { token: v.string(), keep: v.array(v.string()) },
+  handler: async (ctx, { token, keep }) => {
+    requireIngest(token);
+    const kept = new Set(keep);
+    const gone = [];
+    for (const e of await ctx.db.query("episodes").collect()) {
+      if (kept.has(e.showDate) || e.rerunOf || e.scannedAt === 0) continue;
+      if ((await linkedPackage(ctx, e.showDate)).packageStatus !== "none") continue;
+      gone.push(e._id);
+    }
+    if (gone.length > MAX_PRUNE) return { deleted: 0, skipped: gone.length };
+    for (const id of gone) await ctx.db.delete(id);
+    return { deleted: gone.length };
   },
 });
 
