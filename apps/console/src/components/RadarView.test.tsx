@@ -110,15 +110,31 @@ describe("sort", () => {
     expect(visibleArtists()).toEqual(["Artist b2", "Artist b4", "Artist b1", "Artist b3"]);
   });
 
-  it("Considering defaults to Release date (the crate for the next show); each status chip starts from its own default", () => {
+  it("Considering defaults to Release date (the crate for the next show); Tarik's choice holds across the other chips", () => {
     setup({ data });
-    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: /^Considering/ }));
+    const chip = (name: RegExp) => fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name }));
+    fireEvent.change(sortBox(), { target: { value: "label" } });
+    chip(/^Played/);
+    expect(sortBox().value).toBe("label"); // kept between non-Considering chips
+    chip(/^All/);
+    expect(sortBox().value).toBe("label");
+    chip(/^Considering/); // entering Considering resets to its default
     expect(sortBox().value).toBe("date");
     expect(visibleArtists()).toEqual(["Artist b7", "Artist b5", "Artist b6"]);
     fireEvent.change(sortBox(), { target: { value: "received" } });
     expect(visibleArtists()).toEqual(["Artist b5", "Artist b6", "Artist b7"]);
-    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: /^New/ }));
+    chip(/^New/); // leaving Considering resets too
     expect(sortBox().value).toBe("received");
+  });
+
+  it("review fix 8: Favorites and Sort share one row (one flex row, spread apart)", () => {
+    setup({ data });
+    const row = screen.getByLabelText("Sort").closest("[data-favorites-sort]")!;
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByRole("button", { name: /Favorites/ })).toBeInTheDocument();
+    expect(row.className).toMatch(/flex/);
+    expect(row.className).toMatch(/items-center/);
+    expect(row.className).toMatch(/justify-between/);
   });
 
   it("All: each block names its status", () => {

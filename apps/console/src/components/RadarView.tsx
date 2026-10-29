@@ -120,7 +120,7 @@ export function RadarView({
   const [filter, setFilter] = useState<Filter>("new");
   const [favorites, setFavorites] = useState(false);
   const [tag, setTag] = useState<string | undefined>();
-  // null: the status chip's own default (Considering: release date; the rest: newest received).
+  // null: the default (Considering: release date; the rest: newest received).
   const [sort, setSort] = useState<Sort | null>(null);
   const [playing, setPlaying] = useState<string | undefined>();
   // A save message with a counter: the same words twice still change the live region, so both are announced.
@@ -161,8 +161,7 @@ export function RadarView({
     const searching = search.trim() !== "";
     return (
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div role="group" aria-label="Filters" className="flex flex-wrap gap-2">
+        <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
           <div role="group" aria-label="Status" className="flex flex-wrap gap-2">
             {FILTERS.map(({ f, label }) => {
               const on = f === filter;
@@ -172,8 +171,9 @@ export function RadarView({
                   type="button"
                   aria-pressed={on}
                   onClick={() => {
+                    // Tarik's sort holds across chips; entering or leaving Considering starts from that chip's default.
+                    if ((f === "considering") !== (filter === "considering")) setSort(null);
                     setFilter(f);
-                    setSort(null);
                   }}
                   className={chipClass(on)}
                 >
@@ -182,19 +182,21 @@ export function RadarView({
               );
             })}
           </div>
+          {/* Favorites and Sort share a row: on a phone it is its own line, so the status chips take two rows, not three. */}
+          <div data-favorites-sort className="flex min-w-0 flex-1 items-center justify-between gap-2 max-md:basis-full">
             <button type="button" aria-pressed={favorites} onClick={() => setFavorites(!favorites)} className={chipClass(favorites)}>
               <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M10 2.2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L10 14.6l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z" fill={favorites ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
               </svg>
               Favorites <b className="font-semibold tabular-nums">{favoriteCount}</b>
             </button>
+            <span className="flex items-center gap-2">
+              <label htmlFor="radar-sort" className="text-sm text-ink-soft">Sort</label>
+              <select id="radar-sort" value={by} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal">
+                {SORTS.map((o) => <option key={o.by} value={o.by}>{o.label}</option>)}
+              </select>
+            </span>
           </div>
-          <span className="flex items-center gap-2">
-            <label htmlFor="radar-sort" className="text-sm text-ink-soft">Sort</label>
-            <select id="radar-sort" value={by} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal">
-              {SORTS.map((o) => <option key={o.by} value={o.by}>{o.label}</option>)}
-            </select>
-          </span>
         </div>
         {tag && (
           <p className="flex flex-wrap items-center gap-2 text-sm">

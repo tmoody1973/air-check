@@ -131,6 +131,15 @@ describe("Play", () => {
     expect(open.ctx.onPlay).toHaveBeenCalledWith(undefined);
   });
 
+  it("review fix 2: a page re-queued for its date keeps its working player: Play stays, no 'Getting…' line", () => {
+    setup(rel({ ...READY, embedState: "queued", embedQueuedAt: Date.now() }));
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(screen.queryByText("Getting the Bandcamp player…")).toBeNull();
+    cleanup();
+    setup(rel({ ...READY, embedState: "queued" }), { playing: "r1" });
+    expect(document.querySelector("iframe")!.getAttribute("src")).toMatch(/album=42\//);
+  });
+
   it("no player: no Play, the reason line as before (queued, failed with Try again)", async () => {
     setup(rel({ ...READY, embed: undefined, embedState: "queued" }));
     expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
@@ -268,9 +277,10 @@ describe("actions", () => {
     await waitFor(() => expect(actions.setEmbargo).toHaveBeenCalledWith({ releaseId: "r1", embargo: null }));
   });
 
-  it("phone: the action row never wraps Play, Consider and Pass apart, and every button is a 44px target", () => {
+  it("phone: the action row may wrap (a Considering row is wider than 375px), and every button is a 44px target", () => {
     setup(rel({ ...READY, tags: ["deep house"], about: "x" }));
-    expect(actionRow().className).toMatch(/flex-nowrap/);
+    expect(actionRow().className).toMatch(/flex-wrap/);
+    expect(actionRow().className).not.toMatch(/flex-nowrap/);
     for (const name of ["Play", "Consider", "Pass", "More"]) expect(screen.getByRole("button", { name }).className).toMatch(/max-md:px-3/);
     more();
     for (const b of screen.getAllByRole("button")) expect(b.className).toMatch(/min-h-11/);

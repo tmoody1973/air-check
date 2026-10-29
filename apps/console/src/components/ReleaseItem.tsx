@@ -231,7 +231,8 @@ function EditForm({ r, ctx, onClose }: { r: Release; ctx: ReleaseCtx; onClose: (
   );
 }
 
-// Phone: tighter side padding so Play, Consider, Pass and More share one row at 375px (height stays 44px).
+// Phone: tighter side padding so a New row's Play, Consider, Pass and More share one line at 375px (height stays 44px).
+// The row may wrap: a Considering row (Play, Pass, Back to New, More) is wider than 375px, so More drops to a second line.
 const ACT = `${SECONDARY} max-md:px-3`;
 const CHIP_TAGS = 3; // tags in the dates line; More shows every tag when there are more
 
@@ -331,8 +332,9 @@ function PlayButton({ open, controls, onClick }: { open: boolean; controls: stri
   );
 }
 
-/** Whether a player could open now: a ready, well-formed id, or the demo's placeholder on a Bandcamp row. */
-const canPlay = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : r.embedState === "ready" && !!r.embed);
+/** Whether a player could open now: a stored id (ready, or being re-read), or the demo's placeholder on a Bandcamp row. */
+// A page re-queued for its date (radar.reparse, B2) keeps the player it already had: Play stays while it is re-read.
+const canPlay = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : !!r.embed && r.embedState !== "failed");
 
 function More({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const [editing, setEditing] = useState(false);
@@ -385,7 +387,7 @@ export function ReleaseItem({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const open = ctx.playing === r._id;
   const playable = canPlay(r, ctx);
   // No player yet (or it failed): the player's own reason line, as before. The demo has none.
-  const reason = !ctx.demo && (r.embedState === "queued" || r.embedState === "failed");
+  const reason = !ctx.demo && ((r.embedState === "queued" && !r.embed) || r.embedState === "failed");
   const meta = [
     r.type && TYPE[r.type],
     r.genre,
@@ -432,7 +434,7 @@ export function ReleaseItem({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
         {mode === "pass" ? (
           <PassForm r={r} ctx={ctx} onClose={() => setMode("idle")} />
         ) : (
-          <div role="group" aria-label="Actions" className="flex flex-nowrap items-center gap-2 max-md:gap-1.5">
+          <div role="group" aria-label="Actions" className="flex flex-wrap items-center gap-2 max-md:gap-1.5">
             {playable && <PlayButton open={open} controls={playerId} onClick={() => ctx.onPlay(open ? undefined : r._id)} />}
             {s === "new" && <button type="button" className={ACT} disabled={busy} onClick={() => move("considering", "moved to Considering")}>Consider</button>}
             {(s === "new" || s === "considering") && <button type="button" className={ACT} onClick={() => setMode("pass")}>Pass</button>}

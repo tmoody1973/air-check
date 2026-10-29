@@ -64,7 +64,8 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
         <SampleTag />
       </div>
     );
-  if (embedState === "queued") {
+  // Queued with a stored id is a page re-read for its date: the player that already worked stays usable meanwhile.
+  if (embedState === "queued" && !embed) {
     // ponytail: read at render; a Convex update or a page visit re-renders it, no ticking clock.
     const stale = embedQueuedAt !== undefined && Date.now() - embedQueuedAt > STALE_MS;
     return (
@@ -94,7 +95,7 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
       </div>
     );
   }
-  if (!embed || embedState !== "ready") return null;
+  if (!embed || embedState === undefined) return null; // ready, or queued for a re-read with the id it already had
   const src = playerSrc(embed);
   if (!src) return <p className="text-sm text-ink-soft">No player: {embedErrorText("bad_id")}</p>;
   if (!playing)
