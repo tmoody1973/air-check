@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { convexTest } from "convex-test";
 import { afterEach, expect, test, vi } from "vitest";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import http from "./http";
 import schema from "./schema";
@@ -34,6 +34,8 @@ test("the public writes are exactly the allowlist", async () => {
       "packages.reopen", "packages.confirmPosted",
       // Plan 5c: a signed-in real human edits the description before approval (re-fingerprints; never approves).
       "packages.editDescription",
+      // R7: a signed-in real human fixes the tracks before approval (re-fingerprints; never approves).
+      "packages.editTracklist",
       // Plan 5c Task 4: a live show's description. A signed-in human proposes and approves; the publisher claims and records.
       "descriptionUpdates.propose", "descriptionUpdates.approve", "descriptionUpdates.claim", "descriptionUpdates.record",
       "media.attached", "media.waiting",
@@ -182,6 +184,17 @@ test("packages.editDescription checks the signed-in actor and the workspace befo
   }
 });
 
+test("packages.editTracklist checks the signed-in actor and the workspace before the gate", () => {
+  const fn = fnBody(src("packages"), "export const editTracklist = mutation(");
+  const gate = fn.indexOf("gateFor(ctx).editTracklist(");
+  expect(gate).toBeGreaterThan(0);
+  expect([...fn.matchAll(/gateFor\(ctx\)\.(\w+)/g)].map((m) => m[1])).toEqual(["editTracklist"]);
+  for (const check of ["await staffOn(ctx, packageId)", `workspaceOf(actor) !== "real"`]) {
+    expect(fn.indexOf(check), check).toBeGreaterThan(0);
+    expect(fn.indexOf(check), check).toBeLessThan(gate);
+  }
+});
+
 test("the agent route files import only what they should and make one ctx.run call per route", () => {
   const read = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
   const httpSrc = read("./http.ts");
@@ -273,6 +286,7 @@ test("a package never approved through packages.decide cannot be claimed", async
   vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
   const t = convexTest(schema, modules);
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   const args = { packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 };
   await t.mutation(api.media.attached, { token: "m".repeat(48), ...args });
@@ -292,6 +306,7 @@ test("the relay's, the agent's and the ingest service's tokens are refused by ev
   vi.stubEnv("INGEST_TOKEN", "i".repeat(48));
   const t = convexTest(schema, modules);
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   const cover = await t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
   const before = await t.run((ctx) => ctx.db.query("packages").collect());
@@ -324,6 +339,7 @@ test("reopen never yields approved, and the service tokens, the demo login and n
   vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
   const t = convexTest(schema, modules);
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   await t.mutation(api.media.attached, { token: "m".repeat(48), packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 });
   const staff = t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true });
@@ -367,6 +383,7 @@ test("reopening an audio failure goes to preparing_audio, never approved, and ca
   vi.stubEnv("MEDIA_TOKEN", "m".repeat(48));
   const t = convexTest(schema, modules);
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   await t.mutation(api.media.attached, { token: "m".repeat(48), packageId: draft.id, hour1Id: "1.wav", hour2Id: "2.wav", mp3Sha256: "c".repeat(64), hour1DurationSec: 1, mp3Bytes: 1 });
   const staff = t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true });

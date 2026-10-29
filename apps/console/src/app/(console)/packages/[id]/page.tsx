@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
-import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type SettleFns, type UpdateFns } from "@/components/PackageDecision";
+import { PackageDecision, type CoverChangeFn, type DecideFn, type DescriptionSaveFn, type SettleFns, type TracklistSaveFn, type UpdateFns } from "@/components/PackageDecision";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { uploadCover } from "@/lib/cover";
 import { useChicagoDayKey } from "@/lib/date";
@@ -25,6 +25,7 @@ export default function PackagePage() {
   const reopenMutation = useMutation(api.packages.reopen);
   const confirmMutation = useMutation(api.packages.confirmPosted);
   const editDescriptionMutation = useMutation(api.packages.editDescription);
+  const editTracklistMutation = useMutation(api.packages.editTracklist);
   const updateView = useQuery(api.descriptionUpdates.forPackage, { packageId: id });
   const proposeMutation = useMutation(api.descriptionUpdates.propose);
   const approveUpdateMutation = useMutation(api.descriptionUpdates.approve);
@@ -48,6 +49,8 @@ export default function PackagePage() {
 
   // Plan 5c: the host rewrites the description before approving. Convex refuses anyone but a signed-in real human.
   const editDescription: DescriptionSaveFn = (description) => editDescriptionMutation({ packageId: id, description });
+  // R7: the host fixes a track (the agent can't); same rule as the description.
+  const editTracklist: TracklistSaveFn = (text) => editTracklistMutation({ packageId: id, text });
 
   // Plan 5c Task 4: a show already on Mixcloud. Convex lets only a signed-in real human propose or approve.
   const updateFns: UpdateFns = {
@@ -70,6 +73,7 @@ export default function PackagePage() {
           mixcloudAccount={mixcloud?.account}
           settle={workspace === "real" ? settle : undefined}
           editDescription={workspace === "real" ? editDescription : undefined}
+          editTracklist={workspace === "real" ? editTracklist : undefined}
           descriptionUpdate={workspace === "real" ? { view: updateView, fns: updateFns } : undefined}
         />
       )}

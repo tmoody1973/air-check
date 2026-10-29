@@ -1,5 +1,6 @@
 import {
-  checkDescriptionChange, formatTracklist, GateError, publishDayOffset, type GateErrorCode, type PackageDraft, type PackageRecord, type PackageStatus,
+  checkDescriptionChange, formatTracklist, GateError, parseTracklist, publishDayOffset, tracklistDifference, type GateErrorCode, type PackageDraft,
+  type PackageRecord, type PackageStatus,
 } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
@@ -9,6 +10,8 @@ import { isOpen, liveOf, proposeUpdate, updatesOf } from "./descriptionUpdates";
 import { actorOf, gateFor, workspaceOf } from "./gate";
 import type { MixcloudStatus } from "./mixcloud";
 import { toRecord } from "./packageStore";
+import { createdAtOf } from "./runDefaults";
+import { MAX_TRACKLIST } from "./tracklist";
 import { publishQueue } from "./publisher";
 
 const asDraft = (d: unknown) => d as PackageDraft;
@@ -198,6 +201,21 @@ export const editDescription = mutation({
   },
 });
 
+/**
+ * R7: a signed-in real human fixes the tracks while the package awaits review, read like the Tracklist page's text
+ * (same parser and length cap); the title's lead artists must still be in it. The Mixcloud sections come from these
+ * tracks, so it re-fingerprints and Approve needs them reviewed (Hard Rule 1). The agent has no way to do this (R6).
+ */
+export const editTracklist = mutation({
+  args: { packageId: v.string(), text: v.string() },
+  handler: async (ctx, { packageId, text }): Promise<DecideResult> => {
+    const actor = await staffOn(ctx, packageId);
+    if (!actor || workspaceOf(actor) !== "real") return STAFF_ONLY;
+    if (text.length > MAX_TRACKLIST) return { ok: false, code: "BAD_INPUT", message: "the tracklist is over 50,000 characters" };
+    return asResult(() => gateFor(ctx).editTracklist(packageId, text, actor));
+  },
+});
+
 /** A one-time Convex storage upload URL for a cover image. A signed-in real human only. */
 export const coverUploadUrl = mutation({
   args: {},
@@ -207,10 +225,24 @@ export const coverUploadUrl = mutation({
   },
 });
 
-// Internal: reachable only with the deploy key (Plans 4 and 5).
+/**
+ * R6: why the agent's tracks are not the ones it was asked to draft, or null. They are compared with the latest
+ * draft-package run (Tracklist page or ingest service) for the show in the same workspace, parsed the same way.
+ */
+async function tracklistLock(ctx: QueryCtx, d: PackageDraft): Promise<string | null> {
+  const runs = await ctx.db.query("runs").withIndex("by_kind_showDate", (q) => q.eq("kind", "draft-package").eq("form.showDate", d.showDate)).collect();
+  const latest = runs.filter((r) => r.workspace === d.workspace && r.form).sort((a, b) => createdAtOf(b) - createdAtOf(a))[0];
+  if (!latest) return "no draft request for this show";
+  const diff = tracklistDifference(d.tracks, parseTracklist(latest.form!.tracklistText).tracks);
+  return diff && `the tracklist must be exactly as given: ${diff}`;
+}
+
+// Internal: reachable only with the deploy key (Plans 4 and 5). The agent's route; it can't change a track (R6).
 export const submit = internalMutation({
   args: { draft: v.any() },
   handler: async (ctx, { draft }) => {
+    const problem = await tracklistLock(ctx, asDraft(draft));
+    if (problem) throw new ConvexError({ code: "BAD_INPUT", message: problem });
     try {
       return await gateFor(ctx).submit(asDraft(draft));
     } catch (e) {

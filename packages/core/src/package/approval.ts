@@ -1,4 +1,4 @@
-import { checkDescriptionChange } from "./build";
+import { checkDescriptionChange, checkTracklistEdit } from "./build";
 import { fingerprint } from "./fingerprint";
 import type { PackageDraft } from "./mixcloud";
 
@@ -233,6 +233,28 @@ export class ApprovalGate {
       { draft, fingerprint: await fingerprint(draft) },
     );
     if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while editing the description`);
+    await this.emit(id, "awaiting_review", "awaiting_review", actorName(actor));
+    return next;
+  }
+
+  /**
+   * R7: a signed-in real human fixes the tracks while the package awaits review (the agent never can: R6). Read like a
+   * submit, and the title's lead artists must still be in it. The Mixcloud sections come from these tracks, so it
+   * re-fingerprints and Approve needs them reviewed. Never changes the status.
+   */
+  async editTracklist(id: string, text: string, actor: Actor): Promise<PackageRecord> {
+    this.requireStaff(actor);
+    const cur = await this.load(id);
+    if (cur.status !== "awaiting_review") throw new GateError("NOT_READY", `the tracklist of ${id} cannot change now`);
+    const { tracks, problems } = checkTracklistEdit(cur.draft, text);
+    if (problems.length) throw new GateError("BAD_INPUT", problems.join("; "), problems);
+    const draft = { ...cur.draft, tracks };
+    const next = await this.store.compareAndSwap(
+      id,
+      { status: "awaiting_review", fingerprint: cur.fingerprint },
+      { draft, fingerprint: await fingerprint(draft) },
+    );
+    if (!next) throw new GateError("PACKAGE_CHANGED", `package ${id} changed while editing the tracklist`);
     await this.emit(id, "awaiting_review", "awaiting_review", actorName(actor));
     return next;
   }

@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import { fingerprint } from "@aircheck/core";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -14,6 +14,7 @@ type T = ReturnType<typeof convexTest>;
 
 async function seed(t: T, overrides = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "box-h1", hour2Id: "box-h2" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   const rec = await t.mutation(internal.packages.attachAudio, { packageId: draft.id, audio: { hour1Id: "box-h1", hour2Id: "box-h2", mp3Sha256: HASH } });
   return { id: draft.id, fp: rec.fingerprint as string };

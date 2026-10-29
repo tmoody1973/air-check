@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { updateFingerprint } from "@aircheck/core";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
@@ -24,6 +24,7 @@ type UpdateId = Id<"descriptionUpdates">;
 /** A package already on Mixcloud: submitted, MP3 attached, then marked succeeded with its receipt. */
 async function published(t: T, overrides: Parameters<typeof goldenDraft>[0] = {}, url = SHOW) {
   const draft = goldenDraft({ audio: { hour1Id: "box-h1", hour2Id: "box-h2" }, descriptionSources: SOURCES, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   await t.mutation(internal.packages.attachAudio, { packageId: draft.id, audio: { hour1Id: "box-h1", hour2Id: "box-h2", mp3Sha256: HASH } });
   await setPackage(t, draft.id, { status: "succeeded", result: { url, at: "2026-10-03T12:00:00.000Z" } });

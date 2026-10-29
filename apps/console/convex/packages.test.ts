@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -11,6 +11,7 @@ const human = { subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: tr
 
 async function seed(t: ReturnType<typeof convexTest>, overrides = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "box-h1", hour2Id: "box-h2" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   const rec = await t.mutation(internal.packages.attachAudio, {
     packageId: draft.id,
@@ -212,6 +213,7 @@ describe("packages.reopen and packages.confirmPosted", () => {
   test("a demo package is never reopened by a real human", async () => {
     const t = convexTest(schema, modules);
     const draft = goldenDraft({ id: "demo-1", workspace: "demo", audio: { hour1Id: "h1", hour2Id: "h2" } });
+    await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
     await t.mutation(internal.packages.submit, { draft });
     expect(await t.withIdentity(human).mutation(api.packages.reopen, { packageId: "demo-1" })).toMatchObject({ ok: false, code: "FORBIDDEN" });
   });

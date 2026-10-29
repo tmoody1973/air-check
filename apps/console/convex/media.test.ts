@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fingerprint } from "@aircheck/core";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -17,6 +17,7 @@ afterEach(() => vi.unstubAllEnvs());
 /** An agent-submitted package: its hour ids are placeholders the media job must replace (R3). */
 async function submitted(t: ReturnType<typeof convexTest>, overrides = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   return draft.id;
 }

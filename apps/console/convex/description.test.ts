@@ -1,8 +1,8 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { fingerprint } from "@aircheck/core";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { fingerprint, toSections } from "@aircheck/core";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -19,6 +19,7 @@ type T = ReturnType<typeof convexTest>;
 
 async function seed(t: T, overrides: Parameters<typeof goldenDraft>[0] = {}) {
   const draft = goldenDraft({ audio: { hour1Id: "box-h1", hour2Id: "box-h2" }, ...overrides });
+  await t.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
   await t.mutation(internal.packages.submit, { draft });
   const rec = await t.mutation(internal.packages.attachAudio, { packageId: draft.id, audio: { hour1Id: "box-h1", hour2Id: "box-h2", mp3Sha256: HASH } });
   return { id: draft.id, fp: rec.fingerprint as string };
@@ -79,6 +80,55 @@ describe("packages.editDescription", () => {
     await t.withIdentity(human).mutation(api.packages.decide, { packageId: real.id, fingerprint: real.fp, decision: "approve" });
     expect(await t.withIdentity(human).mutation(api.packages.editDescription, args(real.id))).toMatchObject({ ok: false, code: "NOT_READY" });
     expect((await pkg(t, real.id))!.draft.description).toBe(goldenDraft().description);
+  });
+});
+
+// R7: a host fixes a track on the package page (the agent can't: R6). Same gate as the description.
+describe("packages.editTracklist", () => {
+  const EDITED = 'HOUR 1\nMichael Kiwanuka - "Cold Little Heart"\nTinashe - "Nasty"\nHOUR 2\nBicep - "Glue"\nKaytranada - "Lite Spots"\nHiatus Kaiyote - "Nakamarra"';
+  const edit = (as: ReturnType<T["withIdentity"]> | T, packageId: string, text = EDITED) => as.mutation(api.packages.editTracklist, { packageId, text });
+
+  test("a human edits while awaiting review: the tracks (and Mixcloud sections) change, it re-fingerprints, an activity row is written", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t);
+    const before = (await t.run((ctx) => ctx.db.query("activity").collect())).length;
+    expect(await edit(t.withIdentity(human), id)).toMatchObject({ ok: true, record: { status: "awaiting_review" } });
+    const doc = (await pkg(t, id))!;
+    expect(doc.status).toBe("awaiting_review");
+    expect(toSections(doc.draft.tracks).map((x) => x.artist)).toEqual(["Michael Kiwanuka", "Tinashe", "Bicep", "Kaytranada", "Hiatus Kaiyote"]);
+    expect(doc.fingerprint).toBe(await fingerprint(doc.draft));
+    expect(doc.fingerprint).not.toBe(fp);
+    expect((await t.run((ctx) => ctx.db.query("activity").collect())).length).toBe(before + 1);
+    expect(await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" })).toMatchObject({ ok: false, code: "PACKAGE_CHANGED" });
+  });
+
+  test("a bad line, or a title lead gone from the new tracklist, is refused with plain reasons; nothing changes", async () => {
+    const t = convexTest(schema, modules);
+    const { id, fp } = await seed(t);
+    const bad = await edit(t.withIdentity(human), id, `${EDITED}\nno dash here`);
+    expect(bad).toMatchObject({ ok: false, code: "BAD_INPUT", message: 'tracklist line 8 (no-separator): "no dash here"' });
+    const lead = await edit(t.withIdentity(human), id, EDITED.replace("Bicep", "Floating Points"));
+    expect(lead).toMatchObject({ ok: false, code: "BAD_INPUT", message: "title artist not in the tracklist: Bicep" });
+    const long = await edit(t.withIdentity(human), id, `${EDITED}\n${"#".repeat(50_001)}`);
+    expect(long).toMatchObject({ ok: false, code: "BAD_INPUT", message: "the tracklist is over 50,000 characters" });
+    expect((await pkg(t, id))!.fingerprint).toBe(fp);
+  });
+
+  test("anonymous, demo, and a real human on a demo package are FORBIDDEN; once approved, or before the MP3, NOT_READY", async () => {
+    const t = convexTest(schema, modules);
+    const real = await seed(t);
+    const demoPkg = await seed(t, { id: "demo-10-2-26", workspace: "demo" });
+    expect(await edit(t, real.id)).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(await edit(t.withIdentity(demo), demoPkg.id)).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(await edit(t.withIdentity(human), demoPkg.id)).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    await t.withIdentity(human).mutation(api.packages.decide, { packageId: real.id, fingerprint: real.fp, decision: "approve" });
+    expect(await edit(t.withIdentity(human), real.id)).toMatchObject({ ok: false, code: "NOT_READY" });
+    const u = convexTest(schema, modules);
+    const draft = goldenDraft({ audio: { hour1Id: "pending", hour2Id: "pending" } });
+    await u.run((ctx) => ctx.db.insert("runs", draftRunFor(draft)));
+    await u.mutation(internal.packages.submit, { draft });
+    expect(await edit(u.withIdentity(human), draft.id)).toMatchObject({ ok: false, code: "NOT_READY" });
+    expect((await pkg(t, real.id))!.draft.tracks).toEqual(goldenDraft().tracks);
   });
 });
 

@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
+import { draftRunFor, goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -19,6 +19,7 @@ describe("today.summary", () => {
     const real = goldenDraft({ id: "real-1", workspace: "real", audio: { hour1Id: "a", hour2Id: "b" } });
     const sample = goldenDraft({ id: "demo-1", workspace: "demo", audio: { hour1Id: "a", hour2Id: "b" } });
     for (const d of [real, sample]) {
+      await t.run((ctx) => ctx.db.insert("runs", draftRunFor(d)));
       await t.mutation(internal.packages.submit, { draft: d });
       await t.mutation(internal.packages.attachAudio, { packageId: d.id, audio: { hour1Id: "a", hour2Id: "b", mp3Sha256: HASH } });
     }
