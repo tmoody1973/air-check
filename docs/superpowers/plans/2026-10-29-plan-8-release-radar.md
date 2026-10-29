@@ -667,6 +667,34 @@ Run the Impeccable design skill against `PRODUCT.md` and `DESIGN.md` first. This
   - One desktop screenshot per tab and one 390 px phone screenshot of the demo workspace, recorded in the report.
 - [ ] **Step 5: Commit.** `feat(console): Release radar page with Bandcamp and Co-signs tabs (Plan 8)`
 
+### Task 6b: Cover art, tags, description, search and favorites (Tarik, Oct 29)
+
+The same ingest Bandcamp page fetch (Task 4, no new fetch) also keeps, besides `{kind, id}`:
+- `art`: the page's `og:image`, kept only if https and the host ends in `.bcbits.com` (an image path); else none.
+- `tags`: Bandcamp's tag list, at most 12, each at most 40 characters, matching `^[\p{L}\p{N} &'\-/.]+$`u, lower-cased.
+- `about`: the album description (`og:description` or the about block), plain text, at most 2,000 characters, run through `stripLinks`.
+
+Everything else on the page is discarded. `releases` gains optional `art`, `tags`, `about`, `favorite: boolean` and `searchText` (artist, title, label, tags and about, folded), with a Convex `searchIndex("search_text", { searchField: "searchText", filterFields: ["workspace", "source", "status", "favorite"] })`.
+
+**`about` is display-only.** It is untrusted page text, so it is NEVER returned by `radar_get` or any agent-facing path (injection). Tags (checked short words) may be returned to the agent for theme ideas.
+
+UI on both tabs, desktop and phone:
+- cover art (lazy `img`, alt "Cover art for <title> by <artist>"; the demo shows a placeholder, since cover art is copyrighted — video rule);
+- tag chips, where a click filters;
+- the description collapsed under "About";
+- one search box across artist, title, label, tags and description;
+- a ☆ favorite toggle: `radar.setFavorite({ releaseId, favorite })`, human-only, demo actor on demo rows, added to the hardRule1 allowlist;
+- a Favorites filter. A favorite is independent of status.
+
+Co-signs get art, tags and about only through a public Bandcamp link in the email; attachments are never opened. Cover Art Archive via Crate is out of scope.
+
+Tests:
+- page parsing: art host check, tag caps and charset, about stripped and capped;
+- `radar_get` never returns `about`;
+- the search query;
+- the favorite toggle (human only);
+- UI on both layouts.
+
 ### Task 7: Live setup, live check and docs (controller; Tarik runs every VM and secret command)
 
 Claude cannot write to the VM and never displays a secret. Each step below is handed to Tarik as a short script he reads, then runs (DEPLOY.md: no long pasted one-liners).
