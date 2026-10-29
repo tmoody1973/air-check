@@ -355,6 +355,11 @@ describe("tidyLinks and cleanMail's stored links (brief C)", () => {
     expect(tidyLinks(["https://artist.bandcamp.com/album/unsubtle-days"])).toEqual(["https://artist.bandcamp.com/album/unsubtle-days"]);
     expect(tidyLinks(["https://x.example/unsub/123", "https://x.example/a?do=unsub", "https://x.example/Unsubscribe-now"])).toEqual([]);
   });
+
+  test("a /track/click-… release page stays; a /track/click redirect is dropped", () => {
+    expect(tidyLinks(["https://artist.bandcamp.com/track/click-clack"])).toEqual(["https://artist.bandcamp.com/track/click-clack"]);
+    expect(tidyLinks(["https://mail.example/track/click?u=1", "https://mail.example/track/click/2"])).toEqual([]);
+  });
   test("review fix 5: a query holding an address (email=, @ or %40) is dropped", () => {
     for (const l of ["https://x.example/a?email=someone", "https://x.example/a?u=tarik%40radiomilwaukee.org", "https://x.example/a?u=tarik@radiomilwaukee.org", "https://x.example/a?EMAIL=x"])
       expect(tidyLinks([l])).toEqual([]);

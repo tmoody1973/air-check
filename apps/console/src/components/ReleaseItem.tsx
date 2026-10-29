@@ -334,7 +334,7 @@ function PlayButton({ open, controls, onClick }: { open: boolean; controls: stri
 
 /** Whether a player could open now: a stored id (ready, or being re-read), or the demo's placeholder on a Bandcamp row. */
 // A page re-queued for its date (radar.reparse, B2) keeps the player it already had: Play stays while it is re-read.
-const canPlay = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : !!r.embed && r.embedState !== "failed");
+const canPlay = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : !!r.embed && (r.embedState === "ready" || r.embedState === "queued"));
 
 function More({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const [editing, setEditing] = useState(false);

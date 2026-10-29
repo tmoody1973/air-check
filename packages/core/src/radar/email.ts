@@ -301,7 +301,7 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
 
 // Listening-queue brief C: an unsubscribe or preferences link (it can carry Tarik's address and a signature) is never kept.
 // "unsub" only as a word, so a page like /album/unsubtle-days stays.
-const UNWANTED_LINK = /unsubscribe|\bunsub\b|opt-?out|preferences|email_settings|settings\/notifications|\/track\/click/i;
+const UNWANTED_LINK = /unsubscribe|\bunsub\b|opt-?out|preferences|email_settings|settings\/notifications|\/track\/click(?:[/?]|$)/i;
 // A query that holds an address (or names one) is personal, whatever the link is.
 const ADDRESS_QUERY = /(?:^\?|&)email=|@|%40/i;
 const CLICK_TRACKER = /(?:^|\.)list-manage\.com$/i; // Mailchimp's redirect host: the real link is hidden behind it
