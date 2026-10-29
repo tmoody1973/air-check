@@ -70,7 +70,6 @@ export const list = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requireIngest(token);
-    const rows = await episodeRows(ctx);
     return { episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx) };
   },
 });
