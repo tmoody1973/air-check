@@ -63,6 +63,9 @@ test("the public writes are exactly the allowlist", async () => {
       "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed",
       // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
       "radar.setFavorite",
+      // Listening-queue brief B: the catch-up script (INBOX_TOKEN, not a human) repairs artist, title and label from the
+      // same kept email and re-queues a Bandcamp page fetch. It reaches no package (Hard Rule 1).
+      "radar.reparse",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
