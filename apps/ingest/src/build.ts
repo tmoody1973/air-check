@@ -47,7 +47,7 @@ const scannedTrack = (t: Track, status: TrackStatus): ScannedTrack => ({
 function audioOf(date: string, folders: BoxFolder[] | undefined, q: Question[]): { audio: ScannedEpisode["audio"]; stampDate?: string } {
   if (!folders?.length) return { audio: { status: "none", flags: [] } };
   if (folders.length > 1) {
-    q.push(fix("audio", `Box has ${folders.length} folders dated ${date} (${folders.map((f) => `"${f.name}"`).join(", ")}). Which one is the show? Until one is removed or renamed, its audio is not used automatically.`));
+    q.push(fix("audio", `Box has ${folders.length} folders dated ${date} (${folders.map((f) => `"${f.name}"`).join(", ")}). Remove or rename the extra folder in Box; until then its audio is not used automatically.`));
     return { audio: { status: "ask", flags: ["more than one Box folder for this date"] } };
   }
   const [{ id, name, assembly: a }] = folders as [BoxFolder];
