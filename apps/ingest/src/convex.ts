@@ -64,6 +64,8 @@ export interface IngestRow {
   status: string;
   /** R4: a fix or placement saved since this show's last scan; drafting waits for the rescan. */
   rescanPending?: boolean;
+  /** Present when the show has a correction; `stale`: it points at something gone (R1). Convex sends more fields. */
+  corrected?: { stale: boolean };
 }
 
 export type DraftOutcome = { queued: true; runId: string } | { queued: false; reason: string };

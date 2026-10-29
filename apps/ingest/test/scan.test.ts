@@ -454,7 +454,7 @@ describe("Plan 6b: the scanner applies corrections and rescans after a save", ()
   test("a pass while the hourly scan runs starts no second scan; the next pass catches the save up", async () => {
     const w = await make();
     const hourly = runScan(w.deps);
-    w.cv.corrections.set("2026-01-23", { showDate: "2026-01-23", tracklistText: typed, updatedAt: w.deps.memory.lastScanStartedAt + 1 });
+    w.cv.corrections.set("2026-01-23", { showDate: "2026-01-23", tracklistText: typed, updatedAt: 1 });
     await Promise.all([rescanIfAsked(w.deps), runScan(w.deps)]);
     await hourly;
     expect(scans(w)).toBe(1);
@@ -471,7 +471,69 @@ describe("Plan 6b: the scanner applies corrections and rescans after a save", ()
     const w = await make();
     await runScan(w.deps);
     w.cv.corrections.set("2026-01-02", { showDate: "2026-01-02", paper: "id:p1", updatedAt: Date.now() + 60_000 });
+    w.deps.memory.seenRescanAfter = Date.now() + 60_000; // a scan read the fix, but its upsert for this date failed
     await draftPass(draftDeps(w));
     expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-30", true]]);
+  });
+});
+
+describe("R5 (Plan 6b fix round 1): drafting never runs on facts a save has outdated", () => {
+  const draftDeps = (w: Awaited<ReturnType<typeof world>>) => ({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+  const scans = (w: Awaited<ReturnType<typeof world>>) => w.box.calls("GET /2.0/folders/123/items").length;
+
+  test("a placement saved mid-scan: no draft until a scan that saw it; a pass during a scan drafts nothing", async () => {
+    const w = await make({ extra: { drive: { g9: { name: "Rhythm Lab Radio 9-4-226", text: "HOUR 1\nA - \"One\"\nHOUR 2\nB - \"Two\"\n" } } } });
+    await runScan(w.deps);
+    const scan = runScan(w.deps); // its list() has been read
+    await draftPass(draftDeps(w)); // beside a running scan: nothing
+    expect(w.cv.draftCalls).toEqual([]);
+    w.cv.placements.push({ source: "drive", id: "g9", date: "2026-01-02", updatedAt: Date.now() - 60_000 }); // clock-agnostic
+    await scan; // its upserts clear the time-based pending, but it never saw the placement
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toEqual([]);
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(3);
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls).toHaveLength(1);
+  });
+
+  test("a scan whose list() throws leaves the gate open and the next pass rescans", async () => {
+    const w = await make();
+    await runScan(w.deps);
+    w.cv.corrections.set("2026-01-30", { showDate: "2026-01-30", paper: "id:p5", updatedAt: 1 });
+    const list = w.cv.convex.list;
+    w.cv.convex.list = async () => { throw new Error("down"); };
+    await expect(runScan(w.deps)).rejects.toThrow();
+    expect(w.deps.memory.scanning).toBe(false);
+    w.cv.convex.list = list;
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(2);
+    expect(w.cv.rows.get("2026-01-30")!.appliedCorrectionAt).toBe(1);
+  });
+
+  test("a stale fix is never drafted, even with its question gone", async () => {
+    const w = await make();
+    w.cv.corrections.set("2026-01-02", { showDate: "2026-01-02", box: "gone-folder", updatedAt: 1 });
+    await runScan(w.deps);
+    expect(w.cv.rows.get("2026-01-02")!.questions).toEqual([]); // one folder left: picked() fell back to it
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-30", true]]);
+    expect(await w.cv.convex.requestDraft("2026-01-02")).toEqual({ queued: false, reason: "fix-stale" });
+  });
+
+  test("a scan where a connected source failed sends no appliedCorrectionAt (the fix stays 'checking')", async () => {
+    let listOk = true;
+    const w = await make({ dropboxList: () => listOk });
+    await runScan(w.deps);
+    w.cv.corrections.set("2026-01-23", { showDate: "2026-01-23", tracklistText: "HOUR 1\nA - \"One\"\nHOUR 2\nB - \"Two\"\n", updatedAt: 9 });
+    listOk = false;
+    w.cv.upserts.length = 0;
+    await runScan(w.deps);
+    expect(w.cv.upserts.length).toBeGreaterThan(0);
+    for (const e of w.cv.upserts) expect(e.appliedCorrectionAt).toBeUndefined();
+    expect((await w.cv.convex.list()).episodes.find((r) => r.showDate === "2026-01-23")!.rescanPending).toBe(true);
+    listOk = true;
+    await runScan(w.deps);
+    expect(w.cv.rows.get("2026-01-23")!.appliedCorrectionAt).toBe(9);
   });
 });

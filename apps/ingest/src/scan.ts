@@ -21,10 +21,13 @@ export interface SourceMemory {
   lastScanComplete: boolean;
   /** Plan 6b: one gate for the hourly timer and the minute pass's rescan, so two scans never run at once. */
   scanning: boolean;
-  /** When the last scan began (this machine's clock); a save newer than it asks for a rescan. 0 before the first. */
-  lastScanStartedAt: number;
+  /**
+   * R5: the `rescanAfter` the last scan read with its corrections and placements (Convex's clock only). A newer one is
+   * a save that scan never saw: the minute pass rescans, and nothing is drafted until it has. 0 before the first.
+   */
+  seenRescanAfter: number;
 }
-export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map(), lastGood: {}, lastScanComplete: false, scanning: false, lastScanStartedAt: 0 });
+export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map(), lastGood: {}, lastScanComplete: false, scanning: false, seenRescanAfter: 0 });
 
 /** R14: a source that is not connected (no token file, not configured): its column is missing for every show. */
 const ABSENT = "absent" as const;
@@ -183,7 +186,6 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   // A scan already running (hourly, or a rescan) is not doubled: its caller's next turn catches up.
   if (deps.memory.scanning) return;
   deps.memory.scanning = true;
-  deps.memory.lastScanStartedAt = Date.now();
   try {
     await scanOnce(deps);
   } finally {
@@ -192,15 +194,14 @@ export async function runScan(deps: ScanDeps): Promise<void> {
 }
 
 /**
- * Plan 6b: the minute pass's check. A correction, placement or undo saved since the last scan began starts one scan
- * now, however many were saved. ponytail: compares Convex's clock with this machine's; NTP keeps them within ms, and a
- * missed save still lands at the hourly scan. Compare against the `rescanAfter` the scan read if that ever bites.
+ * Plan 6b: the minute pass's check. A correction, placement or undo the last scan did not read starts one scan now,
+ * however many were saved. A scan whose list() failed read none, so the next pass tries again.
  */
 export async function rescanIfAsked(deps: ScanDeps): Promise<void> {
   if (deps.memory.scanning) return;
   try {
     const { rescanAfter } = await deps.convex.list();
-    if (rescanAfter > deps.memory.lastScanStartedAt) await runScan(deps);
+    if (rescanAfter > deps.memory.seenRescanAfter) await runScan(deps);
   } catch {
     deps.log("ingest step=rescan ok=false");
   }
@@ -228,7 +229,8 @@ async function scanOnce(deps: ScanDeps): Promise<void> {
     return prev ?? new Map();
   };
   // Read first: Tarik's placements date names while the sources are read; his corrections shape the episodes.
-  const { episodes: stored, corrections, placements } = await deps.convex.list();
+  const { episodes: stored, corrections, placements, rescanAfter } = await deps.convex.list();
+  deps.memory.seenRescanAfter = rescanAfter;
   const names: Names = { placements, unplaced: [] };
   const box = use("box", "box", await readBox(deps, names));
   const drive = use("google", "drive", await readDrive(deps, names));
@@ -243,6 +245,9 @@ async function scanOnce(deps: ScanDeps): Promise<void> {
     const known = new Set(stored.map((r) => r.showDate));
     episodes = episodes.filter((e) => !known.has(e.showDate));
   }
+  // R5: a fix applied over a failed source's old read isn't settled: the show stays "checking your fix" (rescan
+  // pending) until a complete scan applies it. Drafting is paused meanwhile anyway (R14).
+  if (failed.length) episodes = episodes.map(({ appliedCorrectionAt, ...e }) => (void appliedCorrectionAt, e));
   let ok = 0;
   let questions = 0;
   for (const e of episodes) {

@@ -154,7 +154,7 @@ function draftNotes(e: Doc<"episodes">): string {
  * Asks for the show's draft: the same draft-package run the Tracklist page queues. Idempotent per show date (Review
  * Focus 4). Whether a show may be drafted is decided here from the stored facts, never by the caller: a package in any
  * status, a rerun, an open question, unclear or missing audio, or a missing tracklist means no run; so do an open draft
- * run for the date, a fix not yet applied by a scan (R4, "rescan-pending"), two finished ones that made no package since
+ * run for the date, a fix not yet applied by a scan (R4, "rescan-pending"), a fix gone stale (R5, "fix-stale"), two finished ones that made no package since
  * the show's latest fix (Review Focus 3), or 3 packages already ahead of Tarik.
  */
 export const requestDraft = mutation({
@@ -171,6 +171,8 @@ export const requestDraft = mutation({
       return { queued: false, reason: status === "ready-to-draft" ? "drafting" : status } as const;
     }
     if (await rescanPending(ctx, row)) return { queued: false, reason: "rescan-pending" } as const;
+    // R5: a stale fix fell back to the doc or folder Tarik rejected; drafting it would freeze the wrong facts.
+    if (row.correctionStale) return { queued: false, reason: "fix-stale" } as const;
     const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
     if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
     if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;

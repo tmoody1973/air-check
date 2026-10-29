@@ -33,7 +33,7 @@ export function fakeConvex() {
     const { notes: { text, ...notes }, tracklist: { tracks, ...tracklist }, ...rest } = e;
     void text;
     const runsFor = runs.filter((r) => r.showDate === e.showDate);
-    const base = { ...rest, notes, tracklist, ...(tracks && { tracks }), packageStatus: packages.get(e.showDate) ?? "none", draftAttempts: runsFor.filter((r) => !r.open).length, rescanPending: rescanPending(e), ...extra.get(e.showDate) } as IngestRow;
+    const base = { ...rest, notes, tracklist, ...(tracks && { tracks }), packageStatus: packages.get(e.showDate) ?? "none", draftAttempts: runsFor.filter((r) => !r.open).length, rescanPending: rescanPending(e), ...(corrections.has(e.showDate) && { corrected: { stale: !!e.correctionStale } }), ...extra.get(e.showDate) } as IngestRow;
     return { ...base, ...episodeStatus({ ...base, questions: base.questions }) };
   };
 
@@ -63,6 +63,7 @@ export function fakeConvex() {
       const status = row ? rowOf(row).status : "not-found";
       if (mine.some((r) => r.open)) outcome = { queued: false, reason: "drafting" };
       else if (row && rescanPending(row)) outcome = { queued: false, reason: "rescan-pending" };
+      else if (row?.correctionStale) outcome = { queued: false, reason: "fix-stale" };
       else if (status !== "ready-to-draft") outcome = { queued: false, reason: status };
       else if ((await convex.list()).awaitingReview >= 3) outcome = { queued: false, reason: "pace" };
       else {

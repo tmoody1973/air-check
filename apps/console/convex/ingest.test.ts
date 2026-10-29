@@ -483,6 +483,18 @@ describe("Plan 6b: corrections and placements", () => {
     expect(await pending("2026-09-04")).toBe(false);
   });
 
+  test("R5: a show whose fix went stale is not drafted (the scan fell back to the doc Tarik rejected)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    const fixedAt = (await t.query(api.ingest.list, { token: INGEST })).corrections[0]!.updatedAt;
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt, correctionStale: true }));
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "fix-stale" });
+    expect(await runs(t)).toEqual([]);
+    await upsert(t, episode({ appliedCorrectionAt: fixedAt }));
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toMatchObject({ queued: true });
+  });
+
   test("reportUnplaced keeps one row per source and id, and caps the name and reason", async () => {
     const t = convexTest(schema, modules);
     await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem, { ...unplacedItem, name: "x".repeat(5_000), reason: "y".repeat(5_000) }] });
