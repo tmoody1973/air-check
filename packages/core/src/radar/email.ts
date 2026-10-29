@@ -191,6 +191,7 @@ const DEFANGED = /hxxps?:\/\/\S+|\S+\[\.\]\S+/gi;
 const WWW_IN_TEXT = /www\.[^\s<>"'`]+/gi;
 const HOST_PATH = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*/gi; // bit.ly/abc, evil.example/a
 const MAILTO = /\bmailto:[^\s<>"'`]*/gi;
+const ANY_SCHEME = /\S*:\/\/\S*/g; // ftp://, file://, javascript://: radar.received refuses any "://" left in stored text
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const TRAILING = /[.,;:!?)\]}>'"]+$/;
 
@@ -222,6 +223,7 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
     .replace(MAILTO, "[email]")
     .replace(URL_IN_TEXT, toLink)
     .replace(DEFANGED, asLink)
+    .replace(ANY_SCHEME, asLink)
     .replace(WWW_IN_TEXT, asLink)
     .replace(EMAIL, "[email]")
     .replace(HOST_PATH, asLink)

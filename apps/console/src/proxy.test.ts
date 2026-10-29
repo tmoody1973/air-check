@@ -39,6 +39,20 @@ describe("proxy", () => {
     const res = await run("/sign-in");
     expect(res.headers.get("location")).toBeNull();
   });
+
+  // AgentMail's webhook has no session; its own check is the Svix signature in the route.
+  it("/api/agentmail/inbound is reachable without a session", async () => {
+    const res = await run("/api/agentmail/inbound");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(200);
+  });
+
+  it("exactly that path: other /api/agentmail paths still need a session", async () => {
+    for (const path of ["/api/agentmail/other", "/api/agentmail/inbound/x", "/api/agentmail"]) {
+      const res = await run(path);
+      expect(res.headers.get("location") !== null || res.status === 404, path).toBe(true);
+    }
+  });
 });
 
 describe("proxy options", () => {

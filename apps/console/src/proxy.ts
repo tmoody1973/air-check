@@ -2,7 +2,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { appOrigin } from "./lib/app-origin";
 
 const origin = appOrigin();
-const isPublic = createRouteMatcher(["/sign-in(.*)", "/demo"]);
+// The AgentMail webhook is exactly one path, not a prefix: its own check is the Svix signature in the route.
+const isPublic = createRouteMatcher(["/sign-in(.*)", "/demo", "/api/agentmail/inbound"]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (!isPublic(req)) await auth.protect();

@@ -251,6 +251,16 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
     for (const bad of ["http", "www.", "@", "\uff20", "\ufe6b", "evil", "bit.ly"]) expect(out).not.toContain(bad);
     expect(out).toMatch(/^see \S*\[(?:link|email)\] now$/);
   });
+  // radar.received refuses any "://" in a stored subject or body, so another scheme must not survive (Plan 8 Task 3).
+  test.each(["ftp://evil.example/b", "ftp://localhost", "javascript://x", "file:///etc/passwd", "a ://b"])("other scheme %s leaves no ://", (probe) => {
+    const r = stripLinks(`see ${probe} now`);
+    expect(r.text).not.toContain("://");
+    expect(r.text).toContain("[link]");
+    expect(r.links).toEqual([]);
+  });
+  test("another scheme becomes one [link] and keeps trailing punctuation", () => {
+    expect(stripLinks("see ftp://evil.example/b, now").text).toBe("see [link], now");
+  });
   test("real http(s) links hidden behind a word char are still collected", () => {
     expect(stripLinks("foohttps://evil.example/a").links).toEqual(["https://evil.example/a"]);
   });
