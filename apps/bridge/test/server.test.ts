@@ -55,7 +55,8 @@ beforeAll(async () => {
   };
   server = await startServer({ ...base, demoMcpToken: demoToken, demoSubmitToken: "m".repeat(40) });
   port = (server.address() as AddressInfo).port;
-  bareServer = await startServer(base);
+  // An unreadable Apple Music key must not stop the bridge (R6): the option just says it is not configured.
+  bareServer = await startServer({ ...base, appleMusic: { teamId: "TEAM123456", keyId: "KEY1234567", keyFile: `${dir}/missing.p8` } });
   barePort = (bareServer.address() as AddressInfo).port;
 });
 afterAll(async () => {
@@ -258,6 +259,13 @@ describe("bridge HTTPS server", () => {
     convexHits.length = 0;
     const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a" } }) });
     expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
+    expect(convexHits).toHaveLength(0);
+  });
+
+  it("starts with an unreadable Apple Music key, and source_search apple_music answers plainly and calls nothing", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, port: barePort, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a", source: "apple_music" } }) });
+    expect(JSON.parse(r.body).result.content[0].text).toBe("Apple Music is not configured on the bridge. Use web search or Crate instead; do not retry.");
     expect(convexHits).toHaveLength(0);
   });
 

@@ -19,7 +19,7 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const isWebUrl = (s: string) => s.length <= MAX_URL && URL.canParse(s) && ["http:", "https:"].includes(new URL(s).protocol);
 
 /** The body as text, or null past `max` bytes (the console's readCapped, apps/console/src/app/api/agentmail/inbound/route.ts). */
-async function readCapped(res: Response, max: number): Promise<string | null> {
+export async function readCapped(res: Response, max: number): Promise<string | null> {
   if (!res.body) return "";
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];

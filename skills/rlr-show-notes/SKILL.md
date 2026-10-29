@@ -23,7 +23,7 @@ One document per show, split by hour.
 ## Inputs
 - The tracklist (draft or final), in play order, from the console. Never from guessing.
 - Optional per-track notes Tarik supplies (a blurb he pasted, a label bio). Air Check shows these under the track, labelled "from your supplied notes, which I did not independently check". Never blend them with sourced facts.
-- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and `source_search`.
+- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and `source_search` (the web, or `source: "apple_music"` for the Apple Music catalog: release date, label, ℗ line).
 
 ## Rules
 - Every fact carries a source link. No source, no sentence.

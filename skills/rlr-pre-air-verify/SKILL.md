@@ -9,7 +9,7 @@ The Paper show notes are dense with release dates, credits, and artist history. 
 
 ## Inputs
 - The numbered notes Air Check gives you: Paper, pasted or Air Check's own notes for the upcoming show, including any `VERIFY` flags and the Pre-Air Verify List. Each line has an `L` id; refer to lines only by that id.
-- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and `source_search`.
+- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and `source_search` (the web, or `source: "apple_music"` for the Apple Music catalog: release date, label, ℗ line).
 
 ## Steps
 1. Extract claims per track: release date, label, album, credits, personnel, artist biography facts.

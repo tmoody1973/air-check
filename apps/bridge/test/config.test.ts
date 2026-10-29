@@ -56,6 +56,14 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...env, TAVILY_API_KEY: " tvly-abc " }).tavilyApiKey).toBe("tvly-abc");
   });
 
+  it("reads the Apple Music trio as optional: all three or none, never a crash", () => {
+    const apple = { APPLE_MUSIC_TEAM_ID: " TEAM123456 ", APPLE_MUSIC_KEY_ID: "KEY1234567", APPLE_MUSIC_KEY_FILE: "/home/u/.aircheck/AuthKey.p8" };
+    expect(loadConfig(env).appleMusic).toBeUndefined();
+    expect(loadConfig({ ...env, ...apple }).appleMusic).toEqual({ teamId: "TEAM123456", keyId: "KEY1234567", keyFile: "/home/u/.aircheck/AuthKey.p8" });
+    expect(loadConfig({ ...env, ...apple, APPLE_MUSIC_KEY_FILE: " " }).appleMusic).toBeUndefined();
+    expect(loadConfig({ ...env, APPLE_MUSIC_TEAM_ID: "TEAM123456" }).appleMusic).toBeUndefined();
+  });
+
   describe("demo sandbox tokens", () => {
     const demo = { AIRCHECK_DEMO_MCP_TOKEN: "d".repeat(32), DEMO_AGENT_SUBMIT_TOKEN: "m".repeat(32) };
 

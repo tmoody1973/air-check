@@ -1,3 +1,4 @@
+import type { AppleMusicConfig } from "./appleMusic.js";
 import type { CrateProxyOptions } from "./crateProxy.js";
 
 export interface BridgeConfig {
@@ -15,6 +16,8 @@ export interface BridgeConfig {
   demoSubmitToken?: string;
   /** Tavily key for source_search (Plan 7). Optional: absent means source_search says web search is not configured. */
   tavilyApiKey?: string;
+  /** Apple Music catalog (Plan 7, R6). Optional: all three names set, or source_search says Apple Music is not configured. */
+  appleMusic?: AppleMusicConfig;
 }
 
 const MIN_TOKEN = 32;
@@ -71,5 +74,12 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
     demoMcpToken,
     demoSubmitToken,
     tavilyApiKey: env.TAVILY_API_KEY?.trim() || undefined,
+    appleMusic: appleMusicConfig(env),
   };
+}
+
+/** All three set, or none: a half-configured Apple Music is just unavailable, never a failed start. */
+function appleMusicConfig(env: Record<string, string | undefined>): AppleMusicConfig | undefined {
+  const [teamId, keyId, keyFile] = ["APPLE_MUSIC_TEAM_ID", "APPLE_MUSIC_KEY_ID", "APPLE_MUSIC_KEY_FILE"].map((k) => env[k]?.trim());
+  return teamId && keyId && keyFile ? { teamId, keyId, keyFile } : undefined;
 }

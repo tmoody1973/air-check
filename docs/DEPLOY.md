@@ -337,6 +337,20 @@ Re-run both `mcp add` commands after any re-onboard (see the Hermes section for 
 
 `scp` and `rsync` mangled the paths on this setup (see `docs/FRICTION_LOG.md`); use ssh and `cat` as above.
 
+### Apple Music catalog (Plan 7, ruling R6)
+
+`source_search` with `source: "apple_music"` looks a release up in Apple's catalog (release date, label, the ℗ line, UPC or ISRC, and the `music.apple.com` page). Never audio, previews or artwork. The bridge signs its own short-lived token from the MusicKit key; the agent never sees the key or the token. The same Convex check as web search runs first, so an embargoed release is never sent to Apple either (R2). Without the three settings, or with a key file the bridge cannot read, the bridge still starts and that option says Apple Music is not configured (`journalctl` shows `apple_music=unavailable reason=key_unreadable`).
+
+Copy the values without printing them (from the Mac; `<vm>` is the VM's static IP; `<path to AuthKey_XXXX.p8>` is wherever you keep the MusicKit key):
+
+```sh
+grep -E '^APPLE_MUSIC_(TEAM|KEY)_ID=' ~/.aircheck-local/applemusic.env | ssh user@<vm> 'cat >> ~/.aircheck/bridge.env'
+ssh user@<vm> 'umask 077; cat > ~/.aircheck/bridge/AuthKey.p8' < '<path to AuthKey_XXXX.p8>'
+ssh user@<vm> 'chmod 600 ~/.aircheck/bridge/AuthKey.p8 && echo APPLE_MUSIC_KEY_FILE=$HOME/.aircheck/bridge/AuthKey.p8 >> ~/.aircheck/bridge.env && sudo systemctl restart aircheck-bridge'
+```
+
+Check: `ssh user@<vm> 'grep -c ^APPLE_MUSIC_ ~/.aircheck/bridge.env'` should print 3 (it counts the lines; it does not show them). Run the `grep … >>` lines once; a second run adds duplicate lines.
+
 ### Where the agent's submit goes
 
 Hermes calls `package_submit`, and the bridge posts to the app's `POST /agent/packages` route on Convex with a token called `AGENT_SUBMIT_TOKEN` (decision 011). A person still has to approve the package in the console. Since Plan 5c the same token also reaches two more routes: `POST /agent/packages/revise` (`package_revise`: a new description for a package waiting for review, or a proposed update for a show already on Mixcloud) and `POST /agent/packages/get` (`package_get`: read a package; changes nothing). Neither can approve or publish (decision 011's update note, and decision 015). The bridge pointed at the **dev** Convex deployment (`optimistic-lobster-654`) until 2026-10-27, when it moved to prod. The dev checks: Live checks there gave 401 for a wrong token, 201 `{"packageId":"pkg-10-2-26","status":"preparing_audio"}` for a good one, and 409 `{"error":"ALREADY_EXISTS"}` for a repeat.

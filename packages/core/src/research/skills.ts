@@ -20,7 +20,7 @@ One document per show, split by hour.
 ## Inputs
 - The tracklist (draft or final), in play order, from the console. Never from guessing.
 - Optional per-track notes Tarik supplies (a blurb he pasted, a label bio). Air Check shows these under the track, labelled "from your supplied notes, which I did not independently check". Never blend them with sourced facts.
-- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and \`source_search\`.
+- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and \`source_search\` (the web, or \`source: "apple_music"\` for the Apple Music catalog: release date, label, ℗ line).
 
 ## Rules
 - Every fact carries a source link. No source, no sentence.
@@ -56,7 +56,7 @@ The Paper show notes are dense with release dates, credits, and artist history. 
 
 ## Inputs
 - The numbered notes Air Check gives you: Paper, pasted or Air Check's own notes for the upcoming show, including any \`VERIFY\` flags and the Pre-Air Verify List. Each line has an \`L\` id; refer to lines only by that id.
-- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and \`source_search\`.
+- Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and \`source_search\` (the web, or \`source: "apple_music"\` for the Apple Music catalog: release date, label, ℗ line).
 
 ## Steps
 1. Extract claims per track: release date, label, album, credits, personnel, artist biography facts.
@@ -86,7 +86,7 @@ Adapted from Crate's artist-deep-dive, sample-archaeology and scene-mapping work
 
 ## Steps
 1. Identify the subject with MusicBrainz (artist, label or release) so every later lookup uses the right entity. If two matches are plausible, say so in the brief's note and stop.
-2. Pull facts through Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes): discography highlights, label history, credits and collaborators, sample and influence links where the sources show them. Use \`source_search\` for what Crate cannot confirm.
+2. Pull facts through Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes): discography highlights, label history, credits and collaborators, sample and influence links where the sources show them. Use \`source_search\` for what Crate cannot confirm (the web, or \`source: "apple_music"\` for the Apple Music catalog: release date, label, ℗ line).
 3. Look for connections inside the current draft: other tracks, artists or labels in the same list, and what links them. Refer to tracks by key (\`H1.4\`).
 4. Check recent news with \`source_search\` (new release, tour, interview).
 5. Submit the brief as one \`brief\` block with \`research_submit\`. Cite sources only by \`[S…]\` id.

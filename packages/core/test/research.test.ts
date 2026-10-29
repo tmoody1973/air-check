@@ -114,6 +114,29 @@ describe("judgeClaim (Review Focus 1 and 2)", () => {
     expect(twoFamilies.status).toBe("confirmed"); // R5: two different aggregators
   });
 
+  it("R6: every Apple page is one publisher, apple.com, never primary, whether Apple Music or Crate's iTunes found it", () => {
+    const line = 'Apple Music: "Album A" by Artist A · released 2026-10-10 · label Label A · ℗ 2026 Label A';
+    const apple = (path: string) => ({ ...S("music.apple.com", line, path), via: "apple_music" });
+    const itunes = (host: string, path: string) => ({ ...S(host, "Released 2026-10-10", path), via: "crate:itunes_search" });
+    expect(publisherOf("music.apple.com")).toBe("apple.com");
+    expect(AGGREGATORS).toContain("apple.com");
+    // The same album via both paths (different URLs, so two ledger ids) is still one publisher.
+    const both = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: apple("us/album/album-a/1"), S2: itunes("music.apple.com", "us/album/album-a/1?uo=4") });
+    expect(both).toMatchObject({ status: "could-not-verify", check: "Only one source: apple.com" });
+    const oldStore = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: apple("a"), S2: itunes("itunes.apple.com", "b") });
+    expect(oldStore).toMatchObject({ status: "could-not-verify", check: "Only one source: apple.com" });
+    // The ℗ line is Apple's copy of the label's statement, not the label's own page: never primary.
+    expect(judgeClaim(date([{ id: "S1", primary: true }]), { S1: apple("a") }).status).toBe("could-not-verify");
+    const label: ClaimInput = { kind: "label", text: "It is on Label A.", value: "Label A", sources: [{ id: "S1", primary: true }] };
+    expect(judgeClaim(label, { S1: apple("a") }).status).toBe("could-not-verify");
+    // One other publisher makes two (R5).
+    expect(judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: apple("a"), S2: S("label.example", "Out 2026-10-10") }).status).toBe("confirmed");
+    // A year-only ℗ line never confirms a date (R7.6).
+    const yearOnly = { ...S("music.apple.com", "Apple Music: \"Album A\" · ℗ 2026 Label A", "c"), via: "apple_music" };
+    const year: ClaimInput = { ...date([{ id: "S1" }, { id: "S2" }]), value: "2026" };
+    expect(judgeClaim(year, { S1: yearOnly, S2: S("label.example", "© 2026") }).status).toBe("could-not-verify");
+  });
+
   it("counts two different bandcamp pages and two different aggregators as two publishers (R5)", () => {
     const bc = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: S("a.bandcamp.com", "2026-10-10"), S2: S("b.bandcamp.com", "2026-10-10") });
     expect(bc.status).toBe("confirmed");

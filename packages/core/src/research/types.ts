@@ -9,7 +9,7 @@ export const VALUE_KINDS: readonly ClaimKind[] = ["release", "release-date", "la
 /** `sourced` = a non-critical fact with at least one source. `[verify]` = `conflict` or `could-not-verify`. */
 export type ClaimStatus = "confirmed" | "sourced" | "conflict" | "could-not-verify";
 
-/** A source the bridge issued an id for. `via` is "tavily" or "crate:<tool>"; `text` is for matching only, never stored. */
+/** A source the bridge issued an id for. `via` is "tavily", "apple_music" or "crate:<tool>"; `text` is for matching only, never stored. */
 export interface ResolvedSource { url: string; host: string; title: string; via: string; text: string }
 /** A claim as the agent submits it: sources by id only. For a `connection`, `value` is the track key it connects to. */
 export interface ClaimInput { kind: ClaimKind; text: string; value?: string; sources: { id: string; says?: string; primary?: boolean }[] }

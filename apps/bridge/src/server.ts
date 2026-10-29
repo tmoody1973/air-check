@@ -10,6 +10,7 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { loadAppleMusic } from "./appleMusic.js";
 import { episodeMarkRerunTool, packageGetTool, packageReviseTool, packageSubmitTool, radarGetTool } from "./aircheckTools.js";
 import { bearerOk } from "./auth.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
@@ -103,9 +104,11 @@ export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   // One ledger for every route: ids Crate issues on /crate/mcp are cited on /aircheck/mcp. Shared by real and demo (R4).
   const ledger = createSourceLedger();
   const crate = createCrateProxy(config.crate, (name, result) => annotateCrateResult(ledger, name, result));
+  // Unconfigured or an unreadable key: source_search's apple_music option says so; the bridge still starts.
+  const appleMusic = loadAppleMusic(config.appleMusic);
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
     const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool, researchSubmitTool].map((make) =>
-      make({ siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey }),
+      make({ siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey, appleMusic }),
     );
     return {
       token,

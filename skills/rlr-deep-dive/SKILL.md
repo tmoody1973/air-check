@@ -11,7 +11,7 @@ Adapted from Crate's artist-deep-dive, sample-archaeology and scene-mapping work
 
 ## Steps
 1. Identify the subject with MusicBrainz (artist, label or release) so every later lookup uses the right entity. If two matches are plausible, say so in the brief's note and stop.
-2. Pull facts through Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes): discography highlights, label history, credits and collaborators, sample and influence links where the sources show them. Use `source_search` for what Crate cannot confirm.
+2. Pull facts through Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes): discography highlights, label history, credits and collaborators, sample and influence links where the sources show them. Use `source_search` for what Crate cannot confirm (the web, or `source: "apple_music"` for the Apple Music catalog: release date, label, ℗ line).
 3. Look for connections inside the current draft: other tracks, artists or labels in the same list, and what links them. Refer to tracks by key (`H1.4`).
 4. Check recent news with `source_search` (new release, tour, interview).
 5. Submit the brief as one `brief` block with `research_submit`. Cite sources only by `[S…]` id.
