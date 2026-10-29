@@ -299,6 +299,38 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
   return { text: stripped, links, bandcampPages, hosts };
 }
 
+// Listening-queue brief C: an unsubscribe or preferences link (it can carry Tarik's address and a signature) is never kept.
+// "unsub" only as a word, so a page like /album/unsubtle-days stays.
+const UNWANTED_LINK = /unsubscribe|\bunsub\b|opt-?out|preferences|email_settings|settings\/notifications|\/track\/click(?:[/?]|$)/i;
+// A query that holds an address (or names one) is personal, whatever the link is.
+const ADDRESS_QUERY = /(?:^\?|&)email=|@|%40/i;
+const CLICK_TRACKER = /(?:^|\.)list-manage\.com$/i; // Mailchimp's redirect host: the real link is hidden behind it
+const TRACKING_PARAM = (k: string) => {
+  const key = k.toLowerCase();
+  return key.startsWith("utm_") || key === "from" || key === "ref";
+};
+
+/**
+ * The links worth keeping for Tarik, in order: tracking (utm_*, from, ref, any case) and the fragment stripped (the same
+ * rule as bandcampPageUrl); unsubscribe, preference and notification-settings links, a query holding an address,
+ * click-tracking redirects and a bare site root (path "/" and no query) dropped; then duplicates removed. A value that is not a URL is left as is so the caller's own check still refuses it.
+ */
+export function tidyLinks(links: string[]): string[] {
+  const out = links.flatMap((link) => {
+    let u: URL;
+    try {
+      u = new URL(link);
+    } catch {
+      return [link];
+    }
+    for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM(k)) u.searchParams.delete(k);
+    u.hash = "";
+    if (UNWANTED_LINK.test(u.pathname + u.search) || ADDRESS_QUERY.test(u.search) || CLICK_TRACKER.test(u.hostname) || (u.pathname === "/" && !u.search)) return [];
+    return [u.href];
+  });
+  return [...new Set(out)];
+}
+
 /** At most `max` characters, cut at the last whitespace so a link is never cut in half (and then collected). */
 function cutOnSpace(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -322,7 +354,7 @@ export function cleanMail(mail: InboundMail, decision: Extract<SenderDecision, {
     ...(sender.name || sender.address ? { sender } : {}),
     subject: subject.text,
     body: body.text.slice(0, MAX_STORED_CHARS),
-    links: body.links,
+    links: tidyLinks(body.links),
     bandcampPages: body.bandcampPages,
     hosts: body.hosts,
   };

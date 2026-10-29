@@ -682,6 +682,22 @@ unset RADAR_SENDERS CONVEX_URL
 
 Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail)` / `#n failed (Convex <code>)` (for example `UNAUTHORIZED`: the `INBOX_TOKEN` does not match Convex); the last line is the counts. Exit code 1 means something failed: run it again. Kept emails then appear in the radar within a minute (the ingest worker reads them).
 
+### 7. Repair Bandcamp releases stored by the old parser (one-off, listening-queue brief B)
+
+Why: the first Bandcamp parser was written against made-up mail. On real mail it stored, for example, the artist as `Roots Records, check it out at:`. `--reparse` re-reads each kept Bandcamp email since the date with the fixed parser and asks `radar.reparse` (INBOX_TOKEN) to patch artist, title and label on the release that email made, never a field you edited. If the corrected name matches another release, both are left alone and the line says `collision`. A Bandcamp release whose player is ready but has no release date is also queued again, so the ingest worker re-reads its page for the date (3 per pass); if that read fails, the working player stays.
+
+Deploy order, in full: **Convex → ingest worker → console → `--reparse --dry-run` → `--reparse`.** Convex goes first because the new ingest worker sends `releasedOn` **and** `pageArtist` to `radar.embedResult`; an older Convex refuses the unknown field, and the page stays queued and is fetched again every pass. Convex also adds `radar.reparse`. A release whose date you set or cleared is never re-queued. Same environment as section 6; the dry run also needs `CONVEX_URL` and `INBOX_TOKEN`, because it asks Convex what it would change (and writes nothing).
+
+```sh
+export RADAR_SENDERS="$(ssh user@<the VM's static IP> "grep '^RADAR_SENDERS=' ~/.aircheck/console.env | cut -d= -f2-")"
+export CONVEX_URL=https://clever-deer-759.convex.cloud
+pnpm --filter console exec tsx scripts/radar-backfill.ts --reparse --since 2026-10-27 --dry-run   # look first
+pnpm --filter console exec tsx scripts/radar-backfill.ts --reparse --since 2026-10-27             # then repair
+unset RADAR_SENDERS CONVEX_URL
+```
+
+Each line is `#n repaired`, `#n unchanged`, `#n collision` or `#n not-found`, with ` requeued` when the page was queued again; `#n skipped (...)` for mail that is not a kept Bandcamp email or does not match the template; or a `failed` line as in section 6. It never prints a title or sender. Running it twice is safe: the second run says `unchanged`.
+
 ## Certificates and renewal dates
 
 The bridge uses a private certificate authority (CA, the signer that vouches for a certificate) made for this project, because the bridge has no public hostname.

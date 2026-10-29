@@ -68,7 +68,7 @@ async function fetchPage(http: Http, pageUrl: string): Promise<{ html: string } 
 }
 
 /**
- * The album or track id from one queued page's own player URL, plus its cover art URL, tags and about (Task 6b), all
+ * The album or track id from one queued page's own player URL, plus its cover art URL, tags, about (Task 6b) and release date, all
  * from this one request. The HTML is dropped once they are read; a page with no player keeps nothing.
  */
 export async function bandcampEmbed(http: Http, pageUrl: string): Promise<(BandcampEmbed & BandcampDetails) | { failed: EmbedFailure }> {

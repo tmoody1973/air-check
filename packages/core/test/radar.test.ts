@@ -22,6 +22,7 @@ import {
   releaseKey,
   senderDecision,
   stripLinks,
+  tidyLinks,
   unwrapForward,
   type InboundMail,
   type SenderVerdict,
@@ -317,6 +318,77 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
   });
 });
 
+// Listening-queue brief C: the links a real Bandcamp email held (2026-10-29): its page three ways, Bandcamp's home page,
+// and an unsubscribe link carrying Tarik's address and a signature. Only the page is kept, once.
+describe("tidyLinks and cleanMail's stored links (brief C)", () => {
+  const PAGE = "https://acidjazz.bandcamp.com/album/peace-love";
+  const REAL = [
+    PAGE,
+    `${PAGE}?from=fanpub_fnb`,
+    `${PAGE}?utm_source=fanpub&utm_medium=email&utm_campaign=new_release&utm_content=fnb&from=fanpub_fnb#buy`,
+    "https://bandcamp.com/",
+    "https://bandcamp.com/fan_unsubscribe?email=tarik%40radiomilwaukee.org&sig=0a1b2c3d&band_id=123",
+  ];
+  test("the real Bandcamp shapes collapse to the one page", () => {
+    expect(tidyLinks(REAL)).toEqual([PAGE]);
+  });
+  test("unsubscribe and preference links are dropped, in the path or the query, any case", () => {
+    for (const l of [
+      "https://x.example/unsubscribe",
+      "https://x.example/a?action=Unsub&id=1",
+      "https://x.example/opt-out/1",
+      "https://x.example/optout",
+      "https://x.example/manage_preferences?u=1",
+      "https://x.example/email/Preferences",
+      "https://x.example/email_settings",
+      "https://x.example/fan_unsubscribe?x=1",
+    ])
+      expect(tidyLinks([l])).toEqual([]);
+  });
+  test("a bare root is dropped; a root with a real query, or any real path, stays; tracking is stripped and duplicates go", () => {
+    expect(tidyLinks(["https://label.example/", "https://label.example/?ref=x", "https://label.example"])).toEqual([]);
+    expect(tidyLinks(["https://label.example/?id=7"])).toEqual(["https://label.example/?id=7"]);
+    expect(tidyLinks(["https://press.example/a/b?pk=1&utm_source=x&ref=y#top", "https://press.example/a/b?pk=1"])).toEqual(["https://press.example/a/b?pk=1"]);
+    expect(tidyLinks(["https://press.example/kit?from=x", "https://press.example/kit"])).toEqual(["https://press.example/kit"]);
+  });
+  test("review fix 5: unsub only as a word or 'unsubscribe' (an /album/unsubtle-… page stays)", () => {
+    expect(tidyLinks(["https://artist.bandcamp.com/album/unsubtle-days"])).toEqual(["https://artist.bandcamp.com/album/unsubtle-days"]);
+    expect(tidyLinks(["https://x.example/unsub/123", "https://x.example/a?do=unsub", "https://x.example/Unsubscribe-now"])).toEqual([]);
+  });
+
+  test("a /track/click-… release page stays; a /track/click redirect is dropped", () => {
+    expect(tidyLinks(["https://artist.bandcamp.com/track/click-clack"])).toEqual(["https://artist.bandcamp.com/track/click-clack"]);
+    expect(tidyLinks(["https://mail.example/track/click?u=1", "https://mail.example/track/click/2"])).toEqual([]);
+  });
+  test("review fix 5: a query holding an address (email=, @ or %40) is dropped", () => {
+    for (const l of ["https://x.example/a?email=someone", "https://x.example/a?u=tarik%40radiomilwaukee.org", "https://x.example/a?u=tarik@radiomilwaukee.org", "https://x.example/a?EMAIL=x"])
+      expect(tidyLinks([l])).toEqual([]);
+    expect(tidyLinks(["https://x.example/a?emailing=no"])).toEqual(["https://x.example/a?emailing=no"]);
+  });
+  test("review fix 5: tracking names are stripped in any case", () => {
+    expect(tidyLinks(["https://press.example/kit?UTM_Source=x&From=y&REF=z&pk=1"])).toEqual(["https://press.example/kit?pk=1"]);
+  });
+  test("review fix 5: click-tracking redirects and notification settings are dropped", () => {
+    for (const l of [
+      "https://label.us1.list-manage.com/track/click?u=abc&id=def",
+      "https://list-manage.com/x",
+      "https://mail.example/track/click/123",
+      "https://bandcamp.com/settings/notifications",
+    ])
+      expect(tidyLinks([l])).toEqual([]);
+  });
+  test("a link that is not a URL is left as is, so Convex can still refuse it", () => {
+    expect(tidyLinks(["not a url"])).toEqual(["not a url"]);
+  });
+  test("cleanMail stores the tidy links (and the page is still a Bandcamp page)", () => {
+    const m: InboundMail = { messageId: "x", from: "noreply@bandcamp.com", subject: "New release from Acid Jazz Records", text: "Acid Jazz Records just released it", hrefs: REAL, attachmentCount: 0, bodyMissing: false };
+    const c = cleanMail(m, { ok: true, tab: "bandcamp", address: "noreply@bandcamp.com" });
+    expect(c.links).toEqual([PAGE]);
+    expect(c.bandcampPages).toEqual([PAGE]);
+    expect(JSON.stringify(c)).not.toMatch(/unsubscribe|radiomilwaukee|sig=/);
+  });
+});
+
 describe("bandcampPageUrl (Review Focus 2)", () => {
   test("accepts public album and track pages", () => {
     expect(bandcampPageUrl("https://artist.bandcamp.com/album/some-record")).toBe("https://artist.bandcamp.com/album/some-record");
@@ -527,18 +599,47 @@ describe("parseBandcampEmail", () => {
   test("label release", () => {
     expect(parse("bandcamp-label")).toEqual({ artist: "Ferro Lane", title: "Glass Weather", label: "Pale Signal Records", releasedOn: "2026-10-24" });
   });
-  test("artist release (HTML-only mail)", () => {
+  test("artist release (HTML-only mail, curly quotes)", () => {
     expect(parse("bandcamp-artist")).toEqual({ artist: "Ferro Lane", title: "Night Rooms", releasedOn: "2026-10-27" });
   });
-  test("pre-order", () => {
-    expect(parse("bandcamp-preorder")).toEqual({ artist: "Ama Ferrell", title: "Low Tide Radio", label: "Pale Signal Records", releasedOn: "2026-11-21" });
+  test("a wording the template does not cover goes to the model (null)", () => {
+    expect(parse("bandcamp-preorder")).toBeNull();
   });
   test("hand-forwarded Bandcamp mail parses the same", () => {
-    expect(parse("bandcamp-hand-forwarded")).toMatchObject({ artist: "Ferro Lane", title: "Glass Weather" });
+    expect(parse("bandcamp-hand-forwarded")).toMatchObject({ artist: "Ferro Lane", title: "Glass Weather", label: "Pale Signal Records" });
   });
   test("a co-sign is not Bandcamp's template", () => {
     expect(parse("cosign-forwarded")).toBeNull();
     expect(parse("cosign-injection")).toBeNull();
+  });
+
+  // Real Bandcamp mail, 2026-10-29 (subject, then the body line; the link sits on the next line). Text only, no links.
+  const REAL: [string, string, Record<string, string>][] = [
+    ["New release from Mango Hill Records, who brought you Evangeline", 'Mango Hill Records just released "Bleedin\'" by Percy & Penderhughes, check it out at:', { artist: "Percy & Penderhughes", title: "Bleedin'", label: "Mango Hill Records" }],
+    ["New release from Acid Jazz Records", 'Acid Jazz Records just released "Peace & Love / Adapter Chapter" by Roots Records, check it out at:', { artist: "Roots Records", title: "Peace & Love / Adapter Chapter", label: "Acid Jazz Records" }],
+    ["New release from Hiro Ama", 'Hiro Ama just released "Cloud 9 (Live at Total Refreshment Centre", check it out at:', { artist: "Hiro Ama", title: "Cloud 9 (Live at Total Refreshment Centre" }],
+    ["New release from Lyric Jones & Ian Wallace", 'Lyric Jones & Ian Wallace just released "Way Too Long", check it out at:', { artist: "Lyric Jones & Ian Wallace", title: "Way Too Long" }],
+    ["New release from Low Key Source", 'Low Key Source just released "Warning Feat. Rubi Du & Eesah Remixes" by Chasm, check it out at:', { artist: "Chasm", title: "Warning Feat. Rubi Du & Eesah Remixes", label: "Low Key Source" }],
+    ["New release from Haich Ber Na", 'Haich Ber Na just released "Music For Making Friends", check it out at:', { artist: "Haich Ber Na", title: "Music For Making Friends" }],
+  ];
+  test.each(REAL)("real mail: %s", (subject, line, want) => {
+    const body = `Greetings Tarik,\n\n${line}\n[link]\n\nYou are receiving this because you follow them.`;
+    expect(parseBandcampEmail(subject, body)).toEqual(want);
+    // The bug this replaces stored the artist as "Roots Records, check it out at:".
+    expect(JSON.stringify(parseBandcampEmail(subject, body))).not.toMatch(/check it out/);
+  });
+  test("each real line passes checkExtraction against the text the model would see", () => {
+    for (const [subject, line, want] of REAL) {
+      const text = `Subject: ${subject}\n\n${line}\n[link]`;
+      expect(checkExtraction(parseBandcampEmail(subject, text), text, OCT29)).toMatchObject({ ok: true, release: want });
+    }
+  });
+  test("curly quotes, and a line that ends right after the closing quote", () => {
+    expect(parseBandcampEmail("s", "Hiro Ama just released \u201cWay Out\u201d by Ama Trio, check it out at:")).toEqual({ artist: "Ama Trio", title: "Way Out", label: "Hiro Ama" });
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out"')).toEqual({ artist: "Hiro Ama", title: "Way Out" });
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out" by Ama Trio')).toBeNull(); // "by" without the tail: not the template
+    expect(parseBandcampEmail("s", "Hiro Ama just released Way Out, check it out at:")).toBeNull(); // no quotes
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out", check it out at: [link]')).toBeNull(); // text after the colon
   });
 });
 
@@ -681,6 +782,8 @@ describe("no catastrophic regex time on hostile input", () => {
     senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "" }, ["a@b.example"], PASS("b.example")));
   fast("readBandcampEmbed: unclosed <meta x 100k", () => readBandcampEmbed("<meta".repeat(100_000)));
   fast("parseBandcampEmail: one 20k line of template words", () => parseBandcampEmail("s", "a just released ".repeat(1_300)));
+  fast("parseBandcampEmail: capped lines of quotes and \" by \" runs, 2,000 of them", () =>
+    parseBandcampEmail("s", `${'a just released "x" by '.repeat(21)}\n`.repeat(2_000)));
   fast("cleanMail: a 1.4 MB body and subject", () =>
     cleanMail({ ...inbound("cosign-forwarded"), subject: "a.".repeat(700_000), text: "a[".repeat(700_000) }, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" }));
 });

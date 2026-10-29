@@ -31,16 +31,18 @@ const lists: RadarLists = { bandcamp: list(BANDCAMP), cosign: list(COSIGN) };
 const noop = async () => undefined;
 const acts = (): RadarActions => ({ setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), setFavorite: vi.fn(noop) });
 
-function setup({ tab = "bandcamp" as "bandcamp" | "cosign", workspace = "real" as "real" | "demo", layout = "table" as "table" | "cards", data = lists, notAdded = [] as never[], search = "" } = {}) {
+function setup({ tab = "bandcamp" as "bandcamp" | "cosign", workspace = "real" as "real" | "demo", data = lists, notAdded = [] as never[], search = "" } = {}) {
   const onTabChange = vi.fn();
   const onSearchChange = vi.fn();
   const actions = acts();
   const view = render(
-    <RadarView lists={data} tab={tab} onTabChange={onTabChange} workspace={workspace} today="2026-10-30" actions={actions} notAdded={notAdded} layout={layout} search={search} onSearchChange={onSearchChange} />,
+    <RadarView lists={data} tab={tab} onTabChange={onTabChange} workspace={workspace} today="2026-10-30" actions={actions} notAdded={notAdded} search={search} onSearchChange={onSearchChange} />,
   );
   return { onTabChange, onSearchChange, actions, ...view };
 }
-const visibleArtists = () => screen.queryAllByText(/^Artist [bc]\d$/).map((e) => e.textContent);
+/** The artists of the release blocks on screen, in order (each block is a listitem named "Artist – Title"). */
+const visibleArtists = () =>
+  screen.queryAllByRole("listitem").flatMap((li) => /^(Artist [bc]\d) – /.exec(li.getAttribute("aria-label") ?? "")?.[1] ?? []);
 
 describe("tabs", () => {
   it("Bandcamp and Co-signs are real tabs, each with its count of new records", () => {
@@ -80,26 +82,87 @@ describe("tabs", () => {
   });
 });
 
-describe("grouping", () => {
-  it("Bandcamp groups by Label (default), Genre or Release date, with [No label] and [Date not known]", () => {
-    setup();
-    const select = screen.getByLabelText("Group by") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.text)).toEqual(["Label", "Genre", "Release date"]);
-    expect(select.value).toBe("label");
-    const groups = () => screen.getAllByRole("rowheader").map((h) => h.textContent);
-    expect(groups()).toEqual(["Alpha1", "Zed Records1", "[No label]1"]);
-    fireEvent.change(select, { target: { value: "genre" } });
-    expect(groups()).toEqual(["Jazz2", "Soul1"]);
-    fireEvent.change(select, { target: { value: "date" } });
-    expect(groups()).toEqual(["Nov 1, 20261", "Nov 14, 20261", "[Date not known]1"]);
+// Listening-queue brief D: no table header and no group headers; one Sort control instead.
+describe("sort", () => {
+  const sortBox = () => screen.getByLabelText("Sort") as HTMLSelectElement;
+  const SORTED = [
+    rel("b1", { label: "Zed Records", releasedOn: "2026-11-14", receivedAt: 3 }),
+    rel("b2", { label: "alpha", receivedAt: 5 }),
+    rel("b3", { releasedOn: "2026-11-01", receivedAt: 1 }),
+    rel("b4", { label: "Mango", releasedOn: "2026-11-01", receivedAt: 4 }),
+    rel("b5", { status: "considering", releasedOn: "2026-12-01", receivedAt: 9 }),
+    rel("b6", { status: "considering", receivedAt: 8 }),
+    rel("b7", { status: "considering", releasedOn: "2026-11-02", receivedAt: 7 }),
+  ];
+  const data: RadarLists = { bandcamp: list(SORTED), cosign: list(COSIGN) };
+
+  it("Newest received (default), Release date (soonest first, unknown last) or Label (A to Z, none last); no table or group headers", () => {
+    setup({ data });
+    expect([...sortBox().options].map((o) => o.text)).toEqual(["Newest received", "Release date", "Label"]);
+    expect(sortBox().value).toBe("received");
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryAllByRole("rowheader")).toHaveLength(0);
+    expect(screen.queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(visibleArtists()).toEqual(["Artist b2", "Artist b4", "Artist b1", "Artist b3"]);
+    fireEvent.change(sortBox(), { target: { value: "date" } });
+    expect(visibleArtists()).toEqual(["Artist b4", "Artist b3", "Artist b1", "Artist b2"]); // same day: newest email first
+    fireEvent.change(sortBox(), { target: { value: "label" } });
+    expect(visibleArtists()).toEqual(["Artist b2", "Artist b4", "Artist b1", "Artist b3"]);
   });
 
-  it("Co-signs groups by Label or Release date and shows the sender and the embargo pill", () => {
+  it("Considering defaults to Release date (the crate for the next show); Tarik's choice holds across the other chips", () => {
+    setup({ data });
+    const chip = (name: RegExp) => fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name }));
+    fireEvent.change(sortBox(), { target: { value: "label" } });
+    chip(/^Played/);
+    expect(sortBox().value).toBe("label"); // kept between non-Considering chips
+    chip(/^All/);
+    expect(sortBox().value).toBe("label");
+    chip(/^Considering/); // entering Considering resets to its default
+    expect(sortBox().value).toBe("date");
+    expect(visibleArtists()).toEqual(["Artist b7", "Artist b5", "Artist b6"]);
+    fireEvent.change(sortBox(), { target: { value: "received" } });
+    expect(visibleArtists()).toEqual(["Artist b5", "Artist b6", "Artist b7"]);
+    chip(/^New/); // leaving Considering resets too
+    expect(sortBox().value).toBe("received");
+  });
+
+  it("review fix 8: Favorites and Sort share one row (one flex row, spread apart)", () => {
+    setup({ data });
+    const row = screen.getByLabelText("Sort").closest("[data-favorites-sort]")!;
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByRole("button", { name: /Favorites/ })).toBeInTheDocument();
+    expect(row.className).toMatch(/flex/);
+    expect(row.className).toMatch(/items-center/);
+    expect(row.className).toMatch(/justify-between/);
+  });
+
+  it("All: each block names its status", () => {
+    setup({ data });
+    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: /^All/ }));
+    expect(screen.getAllByText("Considering", { selector: "span" }).length).toBe(3);
+  });
+
+  it("Co-signs show the sender and the embargo pill", () => {
     setup({ tab: "cosign" });
-    const select = screen.getByLabelText("Group by") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.text)).toEqual(["Label", "Release date"]);
-    expect(screen.getByText("Label PR Co")).toBeInTheDocument();
+    expect(screen.getByText("From Label PR Co")).toBeInTheDocument();
     expect(screen.getByText("Embargoed · date not known")).toBeInTheDocument();
+  });
+});
+
+describe("players", () => {
+  it("one open at a time: Play on another release closes the first", () => {
+    const ready = (id: string) => rel(id, { bandcampPage: `https://${id}.bandcamp.com/album/x`, embed: { kind: "album", id: id === "b1" ? "1" : "2" }, embedState: "ready" });
+    setup({ data: { bandcamp: list([ready("b1"), ready("b2")]), cosign: list([]) } });
+    const [first, second] = screen.getAllByRole("button", { name: "Play" });
+    fireEvent.click(first!);
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    fireEvent.click(second!);
+    const frames = document.querySelectorAll("iframe");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.getAttribute("src")).toContain("album=2/");
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 });
 
@@ -114,6 +177,8 @@ describe("workspaces", () => {
     const demo: RadarLists = { bandcamp: list([rel("d1", { workspace: "demo", artist: "[Artist]", title: "[Release title]", label: "[Label]" })]), cosign: list([]) };
     const { actions } = setup({ workspace: "demo", data: demo, notAdded: [{ messageId: "m" }] as never[] });
     expect(screen.getAllByText("Sample").length).toBeGreaterThan(1);
+    expect(screen.queryByText("[Bandcamp player]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
     expect(screen.getByText("[Bandcamp player]")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Not added" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Consider" }));
@@ -133,18 +198,17 @@ describe("workspaces", () => {
   });
 });
 
-describe("phone", () => {
-  it("stacked cards: no table, the same tabs, chips, controls and player", () => {
-    setup({ layout: "cards", data: { ...lists, bandcamp: list([rel("b1", { bandcampPage: "https://a.bandcamp.com/album/x", embed: { kind: "album", id: "1" }, embedState: "ready" })]) } });
+describe("phone and desk share one list", () => {
+  it("each release is one block with Play, Consider and Pass in its action row", () => {
+    setup({ data: { ...lists, bandcamp: list([rel("b1", { bandcampPage: "https://a.bandcamp.com/album/x", embed: { kind: "album", id: "1" }, embedState: "ready" })]) } });
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getAllByRole("tab")).toHaveLength(2);
-    expect(screen.getByRole("group", { name: "Status" })).toBeInTheDocument();
-    const card = screen.getByRole("listitem", { name: "Artist b1 – Title b1" });
-    for (const name of ["Consider", "Played", "Pass", "Edit", "Play on Bandcamp"]) expect(within(card).getByRole("button", { name })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Releases" })).toBeInTheDocument();
+    const block = screen.getByRole("listitem", { name: "Artist b1 – Title b1" });
+    expect(within(within(block).getByRole("group", { name: "Actions" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Play", "Consider", "Pass", "More"]);
   });
 });
 
-// Plan 8 Task 6b: one search box, a Favorites filter and tag filtering, on both tabs and both layouts.
+// Plan 8 Task 6b: one search box, a Favorites filter and tag filtering, on both tabs.
 describe("search, favorites and tags (Task 6b)", () => {
   const TAGGED = [
     rel("b1", { tags: ["deep house", "jazz"], favorite: true }),
@@ -155,8 +219,8 @@ describe("search, favorites and tags (Task 6b)", () => {
   const data: RadarLists = { bandcamp: list(TAGGED), cosign: list(COSIGN) };
   const chip = (name: RegExp) => within(screen.getByRole("group", { name: "Filters" })).getByRole("button", { name });
 
-  it.each(["table", "cards"] as const)("%s: one labelled search box; typing asks the page to search", (layout) => {
-    const { onSearchChange } = setup({ data, layout, search: "jaz" });
+  it("one labelled search box; typing asks the page to search", () => {
+    const { onSearchChange } = setup({ data, search: "jaz" });
     const box = screen.getByRole("searchbox", { name: "Search" });
     expect(box).toHaveValue("jaz");
     expect(box).toHaveAttribute("placeholder", "Artist, title, label, tag or description");
@@ -185,8 +249,8 @@ describe("search, favorites and tags (Task 6b)", () => {
     expect(visibleArtists()).toEqual(["Artist b1", "Artist b2", "Artist b3", "Artist b4"]);
   });
 
-  it.each(["table", "cards"] as const)("%s: a tag chip filters by that tag; Clear tag undoes it", (layout) => {
-    setup({ data, layout });
+  it("a tag chip filters by that tag; Clear tag undoes it", () => {
+    setup({ data });
     fireEvent.click(screen.getAllByRole("button", { name: "deep house" })[0]!);
     expect(visibleArtists()).toEqual(["Artist b1"]);
     expect(screen.getByText("Tag: deep house")).toBeInTheDocument();
@@ -198,7 +262,7 @@ describe("search, favorites and tags (Task 6b)", () => {
     const view = setup({ data });
     fireEvent.click(screen.getAllByRole("button", { name: "jazz" })[0]!);
     expect(visibleArtists()).toEqual(["Artist b1", "Artist b2"]);
-    view.rerender(<RadarView lists={data} tab="cosign" onTabChange={vi.fn()} workspace="real" today="2026-10-30" actions={acts()} notAdded={[]} layout="table" search="" onSearchChange={vi.fn()} />);
+    view.rerender(<RadarView lists={data} tab="cosign" onTabChange={vi.fn()} workspace="real" today="2026-10-30" actions={acts()} notAdded={[]} search="" onSearchChange={vi.fn()} />);
     expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument();
   });
 });

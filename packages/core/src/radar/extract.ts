@@ -88,25 +88,48 @@ export function findEmbargo(text: string, receivedAt: number): { until: string |
   return { until: dates.length ? dates.sort().at(-1)! : null };
 }
 
-const unquote = (s: string | undefined) => (s ?? "").trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, "").trim();
-// ponytail: written against SYNTHETIC fixtures (fixtures/email/bandcamp-*.json). Re-fit to real Bandcamp mail in Task 7.
+// Bandcamp's real new-release line (live mail, 2026-10-29): `<sender> just released "<title>"( by <artist>), check it out at:`
+// with the link on the next line. The brief states it as
+//   ^(?<sender>.{1,200}?) just released "(?<title>.{1,300}?)"(?: by (?<artist>.{1,200}?))?, check it out at:\s*$
+// That regex is bounded but cubic (sender x title x artist backtracking), so it is read here with literal scans instead,
+// same meaning: straight or curly quotes, the title is the shortest quoted run that the rest fits, and the
+// ", check it out at:" tail may be missing only when the line ends right after the closing quote.
 const MAX_TEMPLATE_LINE = 500;
-const BANDCAMP_LINE = /^\s*(.+?)\s+just\s+(?:released|announced)\s+(.+?)(?:\s+by\s+(.+?))?(?:,?\s+available for pre-?order)?\s*[.!]?\s*$/i;
+const RELEASED = " just released ";
+const TAIL = ", check it out at:";
+const OPEN_QUOTE = new Set(['"', "\u201c"]);
+const CLOSE_QUOTE = new Set(['"', "\u201d"]);
+
+function templateLine(line: string): { sender: string; title: string; artist?: string } | null {
+  const at = line.indexOf(RELEASED);
+  if (at < 1 || at > 200) return null;
+  const tailed = line.endsWith(TAIL);
+  const rest = line.slice(at + RELEASED.length, tailed ? -TAIL.length : undefined);
+  if (!OPEN_QUOTE.has(rest[0] ?? "")) return null;
+  for (let q = 2; q < rest.length && q <= 301; q++) {
+    if (!CLOSE_QUOTE.has(rest[q]!)) continue;
+    const title = rest.slice(1, q);
+    if (q === rest.length - 1) return { sender: line.slice(0, at), title };
+    const artistLength = rest.length - (q + 5);
+    if (tailed && rest.startsWith(" by ", q + 1) && artistLength >= 1 && artistLength <= 200) return { sender: line.slice(0, at), title, artist: rest.slice(q + 5) };
+  }
+  return null;
+}
 
 /**
- * Bandcamp's new-release template, read in code: "<actor> just released|announced <title>( by <artist>)". When a
- * "by" is present the actor is the label; otherwise the actor is the artist. Null when the template does not match.
+ * Bandcamp's new-release template, read in code. With "by", the by-part is the artist and the sender is the label;
+ * without it, the sender is the artist and there is no label. The title is the quoted text as is (it may hold an
+ * unbalanced bracket). Null when no line matches: the email then goes to the model, as any other.
  */
 export function parseBandcampEmail(_subject: string, text: string): ReleaseFields | null {
   const lines = text.split("\n");
-  for (const line of lines) {
-    if (line.length > MAX_TEMPLATE_LINE) continue; // the lazy groups are polynomial on a long line; the template's line is short
-    const m = line.match(BANDCAMP_LINE);
-    if (!m) continue;
-    const [actor, title, by] = [unquote(m[1]), unquote(m[2]), unquote(m[3])];
-    if (!actor || !title) continue;
-    const releasedOn = lines.filter((l) => /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
-    return { artist: by || actor, title, ...(by ? { label: actor } : {}), ...(releasedOn ? { releasedOn } : {}) };
+  for (const [i, raw] of lines.entries()) {
+    if (raw.length > MAX_TEMPLATE_LINE) continue;
+    const g = templateLine(raw.trim());
+    const [sender, title, by] = [g?.sender.trim(), g?.title.trim(), g?.artist?.trim()];
+    if (!sender || !title) continue;
+    const releasedOn = lines.filter((l, j) => j !== i && /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
+    return { artist: by || sender, title, ...(by ? { label: sender } : {}), ...(releasedOn ? { releasedOn } : {}) };
   }
   return null;
 }
