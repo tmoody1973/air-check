@@ -5,7 +5,7 @@ import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
 import { awaitingReviewCount, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, writeSource } from "./episodes";
 import { scannedEpisodeFields, sourceStateV } from "./schema";
-import { queueDraft } from "./tracklist";
+import { MAX_NOTES, queueDraft } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
 // INGEST_TOKEN first, in constant time, and fails closed when it is unset or shorter than 32 characters. A token equal
@@ -106,11 +106,15 @@ export const setFetch = mutation({
   },
 });
 
-/** The draft's notes: the Paper text, then Tarik's answers (R4). Both land in the instruction's untrusted-notes section. */
+/**
+ * The draft's notes: the Paper text, then Tarik's answers (R4). Both land in the instruction's untrusted-notes section.
+ * M3: held to the Tracklist page's cap; the Paper text is cut first so the answers survive.
+ */
 function draftNotes(e: Doc<"episodes">): string {
   const answered = e.questions.filter((q) => q.answer);
   const answers = answered.length ? ["Tarik's answers", ...answered.map((q) => `Q: ${q.text}\nA: ${q.answer}`)].join("\n") : "";
-  return [e.notes.text ?? "", answers].filter(Boolean).join("\n\n");
+  const room = Math.max(0, MAX_NOTES - (answers ? answers.length + 2 : 0));
+  return [(e.notes.text ?? "").slice(0, room), answers].filter(Boolean).join("\n\n").slice(0, MAX_NOTES);
 }
 
 /**

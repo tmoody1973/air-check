@@ -252,6 +252,19 @@ describe("ingest.requestDraft", () => {
     expect(await t.run((ctx) => ctx.db.query("packages").collect())).toEqual([]);
   });
 
+  test("M3: long Paper notes are cut to the Tracklist page's 20,000-character cap, keeping Tarik's answers", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode({ notes: { status: "found", docId: "p1", text: "n".repeat(60_000) }, questions: [{ id: "t1", text: "Keep it?", kind: "tracklist" }] }));
+    await t.run(async (ctx) => {
+      const r = (await ctx.db.query("episodes").first())!;
+      await ctx.db.patch(r._id, { questions: r.questions.map((q) => ({ ...q, answer: "Yes.", answeredAt: 1 })) });
+    });
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toMatchObject({ queued: true });
+    const notes = (await runs(t))[0]!.form!.notes;
+    expect(notes.length).toBe(20_000);
+    expect(notes.endsWith("\n\nTarik's answers\nQ: Keep it?\nA: Yes.")).toBe(true);
+  });
+
   // Review Focus 4: two scans in a row queue one run.
   test("is idempotent per show date: a second request while the run is open queues nothing", async () => {
     const t = convexTest(schema, modules);
