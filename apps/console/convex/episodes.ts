@@ -64,6 +64,16 @@ export async function attemptsSince(ctx: QueryCtx, showDate: string): Promise<nu
   return (await draftRunsFor(ctx, showDate)).filter((r) => !isOpenRun(r) && createdAtOf(r) >= since).length;
 }
 
+/**
+ * R4: the row still holds a scan from before Tarik's latest fix, undo or placement for this show, so drafting it now
+ * would freeze the old facts. The scanner sends the updatedAt of the correction it applied (appliedCorrectionAt).
+ */
+export async function rescanPending(ctx: QueryCtx, row: EpisodeDoc): Promise<boolean> {
+  if (((await correctionFor(ctx, row.showDate))?.updatedAt ?? 0) !== (row.appliedCorrectionAt ?? 0)) return true;
+  const placed = await ctx.db.query("placements").withIndex("by_date", (q) => q.eq("date", row.showDate)).collect();
+  return placed.some((p) => p.updatedAt > row.scannedAt);
+}
+
 /** The corrected fields in words the page can label, in a fixed order. */
 const CORRECTED = [["tracklistText", "tracklist"], ["drive", "drive"], ["paper", "paper"], ["box", "box"], ["hours", "hours"], ["folderDate", "folderDate"]] as const;
 export type CorrectedField = (typeof CORRECTED)[number][1];
@@ -103,7 +113,7 @@ export async function episodeRows(ctx: QueryCtx) {
       const corrected = c && { fields: CORRECTED.filter(([k]) => c[k] !== undefined).map(([, name]) => name), at: c.updatedAt, stale: !!correctionStale };
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
       const openRun = runs.some((r) => isOpenRun(r));
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
     }),
   );
 }

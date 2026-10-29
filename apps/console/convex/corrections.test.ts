@@ -76,6 +76,13 @@ describe("access (Hard Rule 9)", () => {
     expect(await t.run((ctx) => ctx.db.query("placements").collect())).toEqual([]);
   });
 
+  test("a bare row (marked a rerun ahead of time, not scanned yet) can't be corrected", async () => {
+    const t = convexTest(schema, modules);
+    await t.withIdentity(human).mutation(api.episodes.markRerun, { showDate: D, rerunOf: "2025-12-26" });
+    for (const c of calls(t.withIdentity(human)))
+      expect(await failure(c)).toEqual({ code: "BAD_INPUT", message: "this show hasn't been found in Box, Drive or Paper yet" });
+  });
+
   test("an unknown show is NOT_FOUND", async () => {
     const t = convexTest(schema, modules);
     for (const c of calls(t.withIdentity(human))) expect(await code(c)).toBe("NOT_FOUND");
@@ -254,5 +261,18 @@ describe("undated names", () => {
       await ctx.db.insert("packages", { packageId: draft.id, workspace: "real", status: "awaiting_review", draft });
     });
     expect(await code(t.withIdentity(human).mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-04" }))).toBe("BAD_INPUT");
+  });
+
+  test("unplacing from a drafted show is refused", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [item] });
+    await t.withIdentity(human).mutation(api.corrections.place, { source: "paper", id: "p9", date: "2026-09-04" });
+    await t.run(async (ctx) => {
+      const draft = goldenDraft({ id: "pkg-9-4-26", showDate: "2026-09-04" } as never);
+      await ctx.db.insert("packages", { packageId: draft.id, workspace: "real", status: "awaiting_review", draft });
+    });
+    expect(await failure(t.withIdentity(human).mutation(api.corrections.unplace, { source: "paper", id: "p9" })))
+      .toEqual({ code: "BAD_INPUT", message: "this show already has a package; change it on the package page" });
+    expect(await t.run((ctx) => ctx.db.query("placements").collect())).toHaveLength(1);
   });
 });

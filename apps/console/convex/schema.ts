@@ -63,6 +63,9 @@ export const scannedEpisodeFields = {
   audioOnDisk: v.optional(v.boolean()),
   // R1 (Plan 6b): the show's correction points at something no source has any more, so the scan did not use it.
   correctionStale: v.optional(v.literal(true)),
+  // R4 (Plan 6b): the updatedAt of the correction this scan applied; absent when it applied none. Until it matches the
+  // show's correction, the row still holds the pre-fix scan and the show is not drafted.
+  appliedCorrectionAt: v.optional(v.number()),
 };
 export const sourceStateV = v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected"));
 
@@ -94,7 +97,9 @@ export default defineSchema({
   // Docs and folders whose names the scanner could not date; replaced whole after each complete scan.
   unplaced: defineTable({ source: fixSourceV, id: v.string(), name: v.string(), reason: v.string(), seenAt: v.number() }).index("by_source_id", ["source", "id"]),
   // Tarik's date for one of them. Never written back as a rename.
-  placements: defineTable({ source: fixSourceV, id: v.string(), date: v.string(), updatedAt: v.number() }).index("by_source_id", ["source", "id"]),
+  placements: defineTable({ source: fixSourceV, id: v.string(), date: v.string(), updatedAt: v.number() })
+    .index("by_source_id", ["source", "id"])
+    .index("by_date", ["date"]),
   // One row: when a correction or placement was last removed. A delete leaves no updatedAt behind, so ingest.list's
   // rescanAfter counts this too and "Use Drive again" rescans as promptly as a save.
   rescanAsks: defineTable({ at: v.number() }),

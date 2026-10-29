@@ -35,6 +35,7 @@ async function editable(ctx: QueryCtx, showDate: string, audio: boolean): Promis
   await requireRealHuman(ctx);
   const row = await episodeByDate(ctx, showDate);
   if (!row) throw new ConvexError({ code: "NOT_FOUND", message: "no such show" });
+  if (row.scannedAt === 0) throw badInput("this show hasn't been found in Box, Drive or Paper yet");
   await refuseFrozen(ctx, showDate);
   if (audio && row.audioOnDisk) throw badInput(ON_DISK);
   return row;

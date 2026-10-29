@@ -3,7 +3,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { attemptsSince, awaitingReviewCount, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, writeSource } from "./episodes";
+import { attemptsSince, awaitingReviewCount, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
 import { MAX_NOTES, queueDraft } from "./tracklist";
 
@@ -63,7 +63,7 @@ export const upsert = mutation({
         return old?.answer ? { ...q, answer: old.answer, ...(old.answeredAt !== undefined && { answeredAt: old.answeredAt }) } : q;
       });
     const scanned = { ...episode, questions, scannedAt: Date.now() };
-    if (cur) await ctx.db.patch(cur._id, { ...scanned, audioOnDisk: episode.audioOnDisk, correctionStale: episode.correctionStale });
+    if (cur) await ctx.db.patch(cur._id, { ...scanned, audioOnDisk: episode.audioOnDisk, correctionStale: episode.correctionStale, appliedCorrectionAt: episode.appliedCorrectionAt });
     else await ctx.db.insert("episodes", scanned);
   },
 });
@@ -99,7 +99,10 @@ export const reportUnplaced = mutation({
     if (items.length > MAX_UNPLACED) throw new ConvexError({ code: "BAD_INPUT", message: `over ${MAX_UNPLACED} undated names` });
     for (const u of await ctx.db.query("unplaced").collect()) await ctx.db.delete(u._id);
     const seenAt = Date.now();
-    for (const item of items) await ctx.db.insert("unplaced", { ...item, seenAt });
+    // One row per source and id, so place's lookup is unique.
+    const byKey = new Map(items.map((i) => [`${i.source}\u0000${i.id}`, i]));
+    for (const { source, id, name, reason } of byKey.values())
+      await ctx.db.insert("unplaced", { source, id, name: name.slice(0, MAX_QUESTION_CHARS), reason: reason.slice(0, MAX_QUESTION_CHARS), seenAt });
   },
 });
 
@@ -151,8 +154,8 @@ function draftNotes(e: Doc<"episodes">): string {
  * Asks for the show's draft: the same draft-package run the Tracklist page queues. Idempotent per show date (Review
  * Focus 4). Whether a show may be drafted is decided here from the stored facts, never by the caller: a package in any
  * status, a rerun, an open question, unclear or missing audio, or a missing tracklist means no run; so do an open draft
- * run for the date, two finished ones that made no package since the show's latest fix (Review Focus 3), or 3 packages
- * already ahead of Tarik.
+ * run for the date, a fix not yet applied by a scan (R4, "rescan-pending"), two finished ones that made no package since
+ * the show's latest fix (Review Focus 3), or 3 packages already ahead of Tarik.
  */
 export const requestDraft = mutation({
   args: { token: v.string(), showDate: v.string() },
@@ -167,6 +170,7 @@ export const requestDraft = mutation({
       const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus));
       return { queued: false, reason: status === "ready-to-draft" ? "drafting" : status } as const;
     }
+    if (await rescanPending(ctx, row)) return { queued: false, reason: "rescan-pending" } as const;
     const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
     if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
     if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;
