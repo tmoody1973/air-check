@@ -142,6 +142,14 @@ describe("corrections (Plan 6b)", () => {
       const [big] = one(found({ drive: new Map([[D, [doc("g", "Rhythm Lab Radio 2-6-26", lots, H2)]]]) }));
       expect(big!.questions.map((q) => [q.text.match(/more than a show can hold/) !== null, q.fix])).toEqual([[true, { type: "tracklist" }]]);
     });
+    test("R2: a Drive doc that could not be read → fix the tracklist; a typed tracklist settles it", () => {
+      const unread = () => found({ drive: new Map([[D, [{ id: "g", name: "Rhythm Lab Radio 2-6-26", text: null }]]]) });
+      const [e] = one(unread());
+      expect(e!.questions.map((q) => [/could not be read from Drive/.test(q.text), q.fix])).toEqual([[true, { type: "tracklist" }]]);
+      const [typed] = fixed(unread(), { tracklistText: "HOUR 1\nA - \"One\"\nHOUR 2\nB - \"Two\"" });
+      expect(typed!.questions).toEqual([]);
+      expect(typed!.tracklist).toMatchObject({ status: "found", docId: "air-check" });
+    });
   });
 
   describe("picks apply", () => {

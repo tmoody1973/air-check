@@ -150,7 +150,8 @@ function typedTracklist(date: string, text: string, q: Question[]): { tracklist:
 function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTrack[] | null, q: Question[]): { tracklist: ScannedEpisode["tracklist"]; docTitle?: string } {
   if (!docs?.length) return { tracklist: { status: "missing" } };
   for (const d of docs.filter((x) => x.text === null))
-    q.push(ask("tracklist", `The tracklist "${d.name}" for ${date} could not be read from Drive. Check the doc.`));
+    // R2: Tarik can type the tracklist in Air Check instead; a typed tracklist replaces Drive for the date.
+    q.push(offer(ask("tracklist", `The tracklist "${d.name}" for ${date} could not be read from Drive. Check the doc.`), TRACKLIST_FIX));
   const readable = docs.filter((d): d is DriveDoc & { text: string } => d.text !== null);
   if (!readable.length) return { tracklist: { status: "missing" } };
   const parsed = readable.map((d) => ({ d, p: parseDriveTracklist(d.text) }));
