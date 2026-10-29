@@ -20,6 +20,7 @@ export default function EpisodesPage() {
   const answer = useMutation(api.episodes.answer);
   const markRerun = useMutation(api.episodes.markRerun);
   const unmarkRerun = useMutation(api.episodes.unmarkRerun);
+  const retryDraft = useMutation(api.episodes.retryDraft);
   // Plan 6b: fixes saved in Air Check (decision 017). Each runs as the signed-in person; Convex refuses anyone else.
   const unplaced = useQuery(api.episodes.unplaced, {});
   const setTracklist = useMutation(api.corrections.setTracklist);
@@ -45,7 +46,7 @@ export default function EpisodesPage() {
         sources={sources}
         workspace={workspace}
         today={today}
-        actions={{ answer, markRerun, unmarkRerun, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText }}
+        actions={{ answer, markRerun, unmarkRerun, retryDraft, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText }}
         added={added}
         addActions={{ addShowDate, removeShowDate, postedShows }}
       />

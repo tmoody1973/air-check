@@ -12,7 +12,7 @@ import type { SourceStatus } from "./SourceConnections";
 afterEach(cleanup);
 
 const noop = async () => undefined;
-const episodeActions = { answer: noop, markRerun: noop, unmarkRerun: noop, setTracklist: noop, pick: noop, setHours: noop, useFolderDate: noop, clearCorrection: noop, place: noop, unplace: noop, tracklistText: async () => "" } as EpisodeActions;
+const episodeActions = { answer: noop, markRerun: noop, unmarkRerun: noop, retryDraft: noop, setTracklist: noop, pick: noop, setHours: noop, useFolderDate: noop, clearCorrection: noop, place: noop, unplace: noop, tracklistText: async () => "" } as EpisodeActions;
 const connected: SourceStatus[] = (["box", "google", "dropbox"] as const).map((source) => ({ source, state: "connected" }));
 const row = (showDate: string): EpisodeRow => ({
   showDate, audio: { status: "ready" }, tracklist: { status: "found" }, notes: { status: "found" }, questions: [], status: "ready-to-draft", gaps: [], packageId: "pkg-x", packageStatus: "none", draftAttempts: 0,

@@ -81,6 +81,7 @@ export default defineSchema({
     rerunOf: v.optional(v.string()),
     rerunSource: v.optional(v.union(v.literal("chat"), v.literal("episodes"), v.literal("detected"))),
     rerunDeclined: v.optional(v.literal(true)), // Tarik answered No to "is this a rerun?"; never asked again
+    retryAt: v.optional(v.number()), // R9: Tarik's "Try again" on a draft-failed show; draft runs before it stop counting
   }).index("by_showDate", ["showDate"]),
   // Plan 6b (decision 017): Tarik's fixes for one show, used by the scanner instead of what Drive, Paper or Box say.
   // Written only by a signed-in real human (corrections.ts); never written back to a source.

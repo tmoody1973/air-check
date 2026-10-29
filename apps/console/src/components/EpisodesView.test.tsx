@@ -25,7 +25,7 @@ const ep = (showDate: string, over: Partial<EpisodeRow> = {}): EpisodeRow => ({
 const connected: SourceStatus[] = (["box", "google", "dropbox"] as const).map((source) => ({ source, state: "connected" }));
 const noop = async () => undefined;
 const actions = (over: Partial<EpisodeActions> = {}): EpisodeActions => ({
-  answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop),
+  answer: vi.fn(noop), markRerun: vi.fn(noop), unmarkRerun: vi.fn(noop), retryDraft: vi.fn(noop),
   setTracklist: vi.fn(noop), pick: vi.fn(noop), setHours: vi.fn(noop), useFolderDate: vi.fn(noop), clearCorrection: vi.fn(noop),
   place: vi.fn(noop), unplace: vi.fn(noop), tracklistText: vi.fn(async () => ""),
   ...over,
@@ -92,8 +92,8 @@ describe("EpisodesView table", () => {
       ep("2026-01-09", { status: "question", audio: { status: "ask" }, gaps: ["audio"] }),
       ep("2026-01-16", { fetch: { status: "failed", error: "http_404" } }),
     ], { today: "2026-01-16" });
-    expect(rowOf("2026-01-02")).toHaveTextContent("The agent couldn't draft this show twice — open Chat to try, or check the tracklist");
-    expect(within(rowOf("2026-01-02")).getByRole("link", { name: "open Chat" })).toHaveAttribute("href", "/chat");
+    expect(rowOf("2026-01-02")).toHaveTextContent("The agent couldn't draft this show twice. Try again, or check the tracklist.");
+    expect(within(rowOf("2026-01-02")).queryByRole("link", { name: "open Chat" })).not.toBeInTheDocument();
     expect(within(rowOf("2026-01-09")).getByText(/Audio folder unclear — copy the two hour files to the inbox by hand/)).toBeInTheDocument();
     expect(within(rowOf("2026-01-09")).getByText(/aircheck-audio\/inbox\/2026-01-09/)).toBeInTheDocument();
     expect(rowOf("2026-01-09")).toHaveTextContent("then draft it from the Tracklist page"); // I4: not a dead end
@@ -249,6 +249,31 @@ describe("EpisodesView reruns", () => {
   it("no Mark control once a show has a package", () => {
     setup([ep("2026-01-02"), ep("2026-01-09", { status: "awaiting-review", packageStatus: "awaiting_review" })], { today: "2026-01-09" });
     expect(within(rowOf("2026-01-09")).queryByRole("button", { name: "Mark as rerun of…" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EpisodesView draft failed (R9)", () => {
+  it("Try again calls retryDraft and says so for screen readers", async () => {
+    const acts = setup([ep("2026-01-02", { status: "draft-failed", draftAttempts: 2 })], { today: "2026-01-02" });
+    await act(async () => fireEvent.click(within(rowOf("2026-01-02")).getByRole("button", { name: "Try again" })));
+    expect(acts.retryDraft).toHaveBeenCalledWith({ showDate: "2026-01-02" });
+    expect(screen.getByRole("status")).toHaveTextContent("Trying Jan 2, 2026 again");
+  });
+
+  it("a refused Try again shows Convex's plain reason", async () => {
+    const acts = actions({ retryDraft: vi.fn(async () => { throw new ConvexError({ code: "BAD_INPUT", message: "only a show whose draft failed can be tried again" }); }) });
+    setup([ep("2026-01-02", { status: "draft-failed", draftAttempts: 2 })], { today: "2026-01-02", acts });
+    await act(async () => fireEvent.click(within(rowOf("2026-01-02")).getByRole("button", { name: "Try again" })));
+    expect(within(rowOf("2026-01-02")).getByRole("alert")).toHaveTextContent("only a show whose draft failed can be tried again");
+  });
+
+  it("the phone card has the same words and button", async () => {
+    const acts = actions();
+    render(<ul><EpisodeItem layout="card" showDate="2026-01-02" e={ep("2026-01-02", { status: "draft-failed", draftAttempts: 2 })} sources={{}} ctx={{ actions: acts, announce: vi.fn(), choices: [] }} /></ul>);
+    const card = rowOf("2026-01-02");
+    expect(card).toHaveTextContent("The agent couldn't draft this show twice. Try again, or check the tracklist.");
+    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Try again" })));
+    expect(acts.retryDraft).toHaveBeenCalledWith({ showDate: "2026-01-02" });
   });
 });
 

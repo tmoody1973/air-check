@@ -56,11 +56,11 @@ export const correctionFor = (ctx: QueryCtx, showDate: string) =>
   ctx.db.query("corrections").withIndex("by_showDate", (q) => q.eq("showDate", showDate)).unique();
 
 /**
- * Review Focus 3: the finished draft runs that count against a show are those made after its latest fix, so a fix
- * earns two fresh attempts. Corrections are refused while a run is open, so none straddles a fix.
+ * Review Focus 3: the finished draft runs that count against a show are those made after its latest fix or "Try again"
+ * (R9), so either earns two fresh attempts. Corrections are refused while a run is open, so none straddles a fix.
  */
 export async function attemptsSince(ctx: QueryCtx, showDate: string): Promise<number> {
-  const since = (await correctionFor(ctx, showDate))?.updatedAt ?? 0;
+  const since = Math.max((await correctionFor(ctx, showDate))?.updatedAt ?? 0, (await episodeByDate(ctx, showDate))?.retryAt ?? 0);
   return (await draftRunsFor(ctx, showDate)).filter((r) => !isOpenRun(r) && createdAtOf(r) >= since).length;
 }
 
@@ -144,6 +144,23 @@ export async function askRescan(ctx: MutationCtx): Promise<void> {
   if (row) await ctx.db.patch(row._id, { at: Date.now() });
   else await ctx.db.insert("rescanAsks", { at: Date.now() });
 }
+
+/**
+ * R9: "Try again" on a draft-failed show. Draft runs before now stop counting (attemptsSince), so the scanner, asked to
+ * rescan, may queue two fresh attempts. It queues nothing itself (Hard Rule 1: it never reaches a package).
+ */
+export const retryDraft = mutation({
+  args: { showDate: v.string() },
+  handler: async (ctx, { showDate }) => {
+    await requireRealHuman(ctx);
+    const row = await episodeByDate(ctx, showDate);
+    if (!row) throw notFound("no such show");
+    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
+    if (status !== "draft-failed") throw badInput("only a show whose draft failed can be tried again");
+    await ctx.db.patch(row._id, { retryAt: Date.now() });
+    await askRescan(ctx);
+  },
+});
 
 export const isFriday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
 
