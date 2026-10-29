@@ -167,9 +167,9 @@ describe("deepDiveMarkdown", () => {
     );
   });
 
-  it("says when no past shows were found, and marks an embargoed subject", () => {
+  it("never asserts zero past shows (R10: a zero cannot be known), and marks an embargoed subject", () => {
     const md = deepDiveMarkdown({ ...base, pastShows: { count: 0, year: 2026 }, embargo: { until: null } });
-    expect(md).toContain("No past shows found");
+    expect(md).not.toMatch(/No past shows|On Rhythm Lab/);
     expect(md).toContain("# Deep dive: [Label A]\n\n**PRIVATE · embargoed (date not known)**\n");
   });
 });

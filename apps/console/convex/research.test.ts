@@ -558,13 +558,23 @@ describe("past shows (deep dive, I3)", () => {
     });
     await t.run(async (ctx) => {
       await ctx.db.insert("episodes", played("2026-10-02", "ALFA MIST") as never);
-      await ctx.db.insert("episodes", played("2026-03-06", "Alfa Mist") as never);
+      await ctx.db.insert("episodes", played("2026-03-06", "Alfa Mist & Jordan Rakei") as never); // a collaboration credit
+      await ctx.db.insert("episodes", played("2026-02-06", "Kokoroko x Alfa Mist") as never);
       await ctx.db.insert("episodes", played("2026-09-04", "Kokoroko") as never);
       await ctx.db.insert("episodes", played("2025-12-05", "Alfa Mist") as never); // another year
+      await ctx.db.insert("episodes", played("2026-05-01", "The Comet Is Coming") as never);
+      await ctx.db.insert("episodes", played("2026-06-05", "Ama Ferrell") as never);
     });
     const { jobId } = await as.mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist", showDate: DATE });
-    expect((await as.query(api.research.get, { jobId }))!.pastShows).toEqual({ count: 2, year: 2026, last: "2026-10-02" });
-    expect(await as.query(api.research.exportMarkdown, { jobId })).toMatch(/On Rhythm Lab: 2 shows in 2026, last Oct 2, 2026/);
+    expect((await as.query(api.research.get, { jobId }))!.pastShows).toEqual({ count: 3, year: 2026, last: "2026-10-02" });
+    expect(await as.query(api.research.exportMarkdown, { jobId })).toMatch(/On Rhythm Lab: 3 shows in 2026, last Oct 2, 2026/);
+    // A leading "The" is ignored on both sides.
+    const comet = await as.mutation(api.research.startDeepDive, { type: "artist", name: "Comet Is Coming", showDate: DATE });
+    expect((await as.query(api.research.get, { jobId: comet.jobId }))!.pastShows).toEqual({ count: 1, year: 2026, last: "2026-05-01" });
+    // No short-name match: "Ama" is not "Ama Ferrell". A zero is never asserted in the export (R10).
+    const ama = await as.mutation(api.research.startDeepDive, { type: "artist", name: "Ama", showDate: DATE });
+    expect((await as.query(api.research.get, { jobId: ama.jobId }))!.pastShows).toEqual({ count: 0, year: 2026 });
+    expect(await as.query(api.research.exportMarkdown, { jobId: ama.jobId })).not.toMatch(/On Rhythm Lab|No past shows/);
   });
 
   test("the demo reads no episodes: no past-shows line at all", async () => {

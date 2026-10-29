@@ -222,7 +222,8 @@ export function deepDiveMarkdown(view: DeepDiveView): string {
     .map((c) => `- **${trackLabel(tracks.get(c.value!)!)}:** ${withLinks(c.text, matched(c))}`);
   const unverified = claims.filter(isVerify).map(verifyBullet);
   const p = view.pastShows;
-  const past = !p ? [] : [p.count ? `On Rhythm Lab: ${p.count} show${p.count === 1 ? "" : "s"} in ${p.year}${p.last ? `, last ${paperDate(p.last)}` : ""}` : "No past shows found"];
+  // R10 (Hard Rule 10): a zero cannot be known (missing tracklists, the year's first weeks), so only a count is said.
+  const past = p && p.count > 0 ? [`On Rhythm Lab: ${p.count} show${p.count === 1 ? "" : "s"} in ${p.year}${p.last ? `, last ${paperDate(p.last)}` : ""}`] : [];
   const chunks = [
     `# Deep dive: ${view.subject.name}`,
     ...(mark ? [mark] : []),

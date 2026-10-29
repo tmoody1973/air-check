@@ -2,6 +2,7 @@ import {
   type ActiveEmbargo,
   chicagoDayKey,
   checkResearchText,
+  credits,
   deepDiveMarkdown,
   embargoedSearch,
   embargoMatches,
@@ -261,16 +262,20 @@ function verifyMarkdown(job: Job, entries: Entry[], active: ActiveEmbargo[]): st
 
 /**
  * R9/I3: a deep dive on an artist, from Tarik's real episodes: the shows in the year (of the job's show date, else
- * today) before that date whose tracklist credits the artist (normalized), and the newest. Undefined (no line at all)
- * in the demo, which never reads episodes (Hard Rule 9), and for a label or release subject.
+ * today) before that date whose tracklist credits the artist, and the newest. The export says only a count of 1 or more
+ * (R10: a zero cannot be known). Undefined in the demo, which never reads episodes (Hard Rule 9), and for a label or
+ * release subject.
  */
 async function pastShows(ctx: QueryCtx, job: Job, today: string): Promise<{ count: number; year: number; last?: string } | undefined> {
   if (job.workspace !== "real" || job.subject?.type !== "artist") return undefined;
   const before = job.showDate ?? today;
   const year = before.slice(0, 4);
   const rows = await ctx.db.query("episodes").withIndex("by_showDate", (q) => q.gte("showDate", `${year}-01-01`).lt("showDate", before)).collect();
-  const name = normalize(job.subject.name);
-  const played = rows.filter((r) => (r.tracklist.tracks ?? []).some((t) => normalize(t.artist) === name || (t.feat !== undefined && normalize(t.feat) === name)));
+  // R10: each credited artist (Plan 8's credits(): &, comma, x, and, with, feat.) by whole equality, a leading "The" ignored.
+  const bare = (s: string) => s.replace(/^the /, "");
+  const name = bare(normalize(job.subject.name));
+  const credit = (t: { artist: string; feat?: string }) => [...credits(t.artist), ...(t.feat ? credits(t.feat) : [])].some((c) => bare(c) === name);
+  const played = rows.filter((r) => (r.tracklist.tracks ?? []).some(credit));
   return { count: played.length, year: Number(year), ...(played.length && { last: played.at(-1)!.showDate }) };
 }
 

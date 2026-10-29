@@ -45,7 +45,7 @@ export interface ResearchEntry {
 export interface ShowNotesView { showDate: string; angles: boolean; tracks: ViewTrack[]; entries: ResearchEntry[]; embargoes?: ActiveEmbargo[] }
 /** `tracks` with their embargo marks are for the card's pills; verifyReport reads lines and entries. */
 export interface VerifyView { lines: NoteLine[]; entries: ResearchEntry[]; tracks?: ViewTrack[] }
-/** `pastShows` comes from code (play history): "On Rhythm Lab: N shows in <year>, last <date>"; absent = unknown, no line. */
+/** `pastShows` comes from code (play history): "On Rhythm Lab: N shows in <year>, last <date>"; absent or 0 = no line (R10). */
 export interface DeepDiveView {
   subject: { type: "artist" | "label" | "release"; name: string };
   embargo?: EmbargoMark;
