@@ -3,7 +3,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
+import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
 import { MAX_NOTES, queueDraft } from "./tracklist";
 
@@ -87,6 +87,8 @@ export const list = query({
     return {
       episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx),
       corrections, placements: placed.map(({ source, id, date }) => ({ source, id, date })), rescanAfter,
+      // The 2025 Fridays Tarik added: in scope for the scanner alongside 2026.
+      extraDates: await extraDateList(ctx),
     };
   },
 });
