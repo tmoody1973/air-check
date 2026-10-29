@@ -104,6 +104,47 @@ describe("readBandcampDetails", () => {
   });
 });
 
+// Hand-written snippets of the two shapes a real page carries (no Bandcamp page is committed).
+describe("readBandcampDetails: releasedOn (yyyy-mm-dd) from the same page", () => {
+  const ld = (date: string) => `<script type="application/ld+json">{"@type":"MusicRecording","datePublished":"${date}","name":"x"}</script>`;
+  const visible = (text: string) => `<div class="tralbumData tralbum-credits">\n    ${text}\n</div>`;
+  const released = (html: string) => readBandcampDetails(html).releasedOn;
+
+  test("JSON-LD datePublished", () => {
+    expect(released(ld("29 Oct 2026 00:00:00 GMT"))).toBe("2026-10-29");
+    expect(released(ld("1 Feb 2024 00:00:00 GMT"))).toBe("2024-02-01");
+    expect(released('{"datePublished" : "29 Feb 2024 00:00:00 GMT"}')).toBe("2024-02-29");
+  });
+
+  test("the visible 'released Month D, YYYY' when there is no JSON-LD date", () => {
+    expect(released(visible("released October 29, 2026"))).toBe("2026-10-29");
+    expect(released(visible("released May 3, 1999"))).toBe("1999-05-03");
+  });
+
+  test("JSON-LD wins over the visible text", () => {
+    expect(released(ld("2 Jan 2025 00:00:00 GMT") + visible("released March 9, 2020"))).toBe("2025-01-02");
+  });
+
+  test("a bad month, an impossible day or a year out of 1950-2100 is no date", () => {
+    expect(released(ld("29 Okt 2026 00:00:00 GMT"))).toBeUndefined();
+    expect(released(visible("released Octember 29, 2026"))).toBeUndefined();
+    expect(released(ld("31 Apr 2026 00:00:00 GMT"))).toBeUndefined();
+    expect(released(ld("29 Feb 2025 00:00:00 GMT"))).toBeUndefined();
+    expect(released(visible("released February 30, 2026"))).toBeUndefined();
+    expect(released(ld("0 Jan 2026 00:00:00 GMT"))).toBeUndefined();
+    expect(released(ld("1 Jan 1949 00:00:00 GMT"))).toBeUndefined();
+    expect(released(visible("released January 1, 2101"))).toBeUndefined();
+    expect(released(ld("1 Jan 1950 00:00:00 GMT"))).toBe("1950-01-01");
+    expect(released(visible("released December 31, 2100"))).toBe("2100-12-31");
+  });
+
+  test("absent: no date shape, or only the entity-encoded data-tralbum one", () => {
+    expect(released("<html>nothing here</html>")).toBeUndefined();
+    expect(released('<div data-tralbum="{&quot;release_date&quot;:&quot;29 Oct 2026 00:00:00 GMT&quot;}">')).toBeUndefined();
+    expect(Object.keys(readBandcampDetails(ld("29 Oct 2026 00:00:00 GMT")))).toEqual(["releasedOn"]);
+  });
+});
+
 describe("page parsing stays linear on a hostile 200k-character page", () => {
   const fast = (label: string, run: () => unknown) =>
     // The budget is the 200 ms; the 30 s timeout only gives a loaded machine time to run three tries.
@@ -126,6 +167,9 @@ describe("page parsing stays linear on a hostile 200k-character page", () => {
   fast("tralbum-about x 15k", () => readBandcampDetails('class="tralbum-about"'.repeat(N / 21)));
   fast("an unclosed about block with 200k of text and <br>", () => readBandcampDetails(`<div class="tralbum-about">${"a<br>".repeat(N / 5)}`));
   fast("an about block of 200k dotted words", () => readBandcampDetails(`<div class="tralbum-about">${"a.".repeat(N / 2)}</div>`));
-  fast("bandcampTag on 200k characters", () => bandcampTag("a.".repeat(N / 2)));
+  fast('"datePublished":"1 Jan  x 8k, never a year', () => readBandcampDetails('"datePublished":"1 Jan '.repeat(N / 23)));
+  fast("released October 1,  x 9k, never a year", () => readBandcampDetails("released October 1, ".repeat(N / 21)));
+  fast("200k digits after a released month", () => readBandcampDetails(`released October ${"1".repeat(N)}`));
+  fast("bandcampTag on 200k characters",() => bandcampTag("a.".repeat(N / 2)));
   fast("bandcampArtUrl on 200k characters", () => bandcampArtUrl(`https://f4.bcbits.com/img/${"a".repeat(N)}.jpg`));
 });

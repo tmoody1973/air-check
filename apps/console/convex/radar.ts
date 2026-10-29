@@ -367,6 +367,7 @@ export const embedResult = mutation({
         art: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
         about: v.optional(v.string()),
+        releasedOn: v.optional(v.string()),
       }),
       v.object({ failed: v.string() }),
     ),
@@ -385,7 +386,17 @@ export const embedResult = mutation({
       await ctx.db.insert("activity", { ...row, title: blocked ? "Bandcamp page not read" : "Read a Bandcamp page for its player", result: blocked ? "blocked" : "allowed", reason: result.failed });
     } else {
       const details = pageDetails(result);
-      await ctx.db.patch(releaseId, { embedState: "ready", embed: { kind: result.kind, id: result.id }, embedError: undefined, ...details, searchText: searchTextOf({ ...rel, ...details }) });
+      // The page's release date fills an empty one only, never one Tarik set or cleared (as a merge fill). A bad date is
+      // dropped, not thrown. Not part of searchText.
+      const fillDate = result.releasedOn !== undefined && isShowDate(result.releasedOn) && rel.releasedOn === undefined && !(rel.editedFields ?? []).includes("releasedOn");
+      await ctx.db.patch(releaseId, {
+        embedState: "ready",
+        embed: { kind: result.kind, id: result.id },
+        embedError: undefined,
+        ...details,
+        ...(fillDate && { releasedOn: result.releasedOn }),
+        searchText: searchTextOf({ ...rel, ...details }),
+      });
       await ctx.db.insert("activity", { ...row, title: "Read a Bandcamp page for its player", result: "allowed" });
     }
     return null;

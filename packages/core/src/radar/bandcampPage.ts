@@ -1,9 +1,10 @@
+import { isShowDate } from "../episode/dates";
 import { metaTags } from "./bandcamp";
 import { htmlToText, stripLinks } from "./email";
 
 // Plan 8 Task 6b: what the ingest worker keeps from the one Bandcamp page it already reads for the player id (no new
-// fetch): cover art, tags and the album description. Everything else on the page is discarded. The about is untrusted
-// page text, display-only: it never reaches the agent. Tags are checked short words and may.
+// fetch): cover art, tags, the album description and the release date. Everything else on the page is discarded. The
+// about is untrusted page text, display-only: it never reaches the agent. Tags are checked short words and may.
 
 export const MAX_TAGS = 12;
 export const MAX_TAG_CHARS = 40;
@@ -12,7 +13,7 @@ const MAX_ART_CHARS = 500;
 const MAX_ABOUT_HTML = 20_000; // the about block is cut to this before it is read
 const MAX_TAG_LINKS = 200; // tag-class links looked at, at most (the scan itself is linear)
 
-export type BandcampDetails = { art?: string; tags?: string[]; about?: string };
+export type BandcampDetails = { art?: string; tags?: string[]; about?: string; releasedOn?: string };
 
 const ART_HOST = /^(?:[a-z0-9-]{1,63}\.){1,4}bcbits\.com$/;
 const ART_PATH = /^\/img\/[A-Za-z0-9_-]{1,100}\.(?:jpe?g|png|gif|webp)$/i;
@@ -20,6 +21,11 @@ const TAG_CHARS = /^[\p{L}\p{N} &'\-/.]+$/u;
 // Bounded repeats: each "<a" scans at most ~1,200 characters, so a page of them stays linear.
 const TAG_LINK = /<a\b([^<>]{0,1000})>([^<>]{0,200})<\/a\s{0,20}>/gi;
 const TAG_CLASS = /\bclass\s{0,20}=\s{0,20}["']tag["']/i;
+// The release date, in the page's two shapes: the JSON-LD "29 Oct 2026 00:00:00 GMT" first, else the visible
+// "released October 29, 2026". Bounded and anchored on a literal, so a page of near-misses stays linear.
+const DATE_PUBLISHED = /"datePublished"\s{0,5}:\s{0,5}"(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})/;
+const RELEASED_TEXT = /released ([A-Z][a-z]{2,8}) (\d{1,2}), (\d{4})/;
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const ABOUT_OPEN = /class\s{0,20}=\s{0,20}"[^"<>]{0,200}\btralbum-about\b[^"<>]{0,200}"[^<>]{0,500}>/i;
 
 /** Cover art: an https image on a *.bcbits.com host (no query, port or credentials), else null. The URL only, never the image. */
@@ -54,6 +60,24 @@ function plainAbout(html: string): string | undefined {
   return text ? text.slice(0, MAX_ABOUT_CHARS).trimEnd() : undefined;
 }
 
+/** "yyyy-mm-dd" from a day, a month name (full or its first three letters) and a year, or undefined. No Date parsing. */
+function isoDate(day: string, month: string, year: string): string | undefined {
+  const m = MONTHS.findIndex((name) => name === month || name.slice(0, 3) === month) + 1;
+  const y = Number(year);
+  if (!m || y < 1950 || y > 2100) return undefined;
+  const iso = `${year}-${String(m).padStart(2, "0")}-${day.padStart(2, "0")}`;
+  return isShowDate(iso) ? iso : undefined; // a real calendar day (Feb 29 only in a leap year)
+}
+
+/** The release date as yyyy-mm-dd: the JSON-LD datePublished, else the visible "released ..." line, else undefined. */
+function releaseDate(html: string): string | undefined {
+  const ld = DATE_PUBLISHED.exec(html);
+  const fromLd = ld ? isoDate(ld[1]!, ld[2]!, ld[3]!) : undefined;
+  if (fromLd) return fromLd;
+  const text = RELEASED_TEXT.exec(html);
+  return text ? isoDate(text[2]!, text[1]!, text[3]!) : undefined;
+}
+
 /** The about block's inner HTML (up to the next `</div>`), or null. */
 function aboutBlock(html: string): string | null {
   const open = ABOUT_OPEN.exec(html);
@@ -63,7 +87,7 @@ function aboutBlock(html: string): string | null {
   return html.slice(start, end < 0 ? start + MAX_ABOUT_HTML : Math.min(end, start + MAX_ABOUT_HTML));
 }
 
-/** Cover art, tags and the album description from a Bandcamp album or track page. Missing ones are left out. */
+/** Cover art, tags, the album description and the release date from a Bandcamp album or track page. Missing ones are left out. */
 export function readBandcampDetails(html: string): BandcampDetails {
   const meta = metaTags(html);
   const content = (key: string) => meta.find((m) => m.key === key)?.content;
@@ -83,5 +107,7 @@ export function readBandcampDetails(html: string): BandcampDetails {
   const block = aboutBlock(html);
   const about = block !== null ? plainAbout(block) : plainAbout(content("og:description") ?? "");
 
-  return { ...(art && { art }), ...(tags.length && { tags }), ...(about && { about }) };
+  const releasedOn = releaseDate(html);
+
+  return { ...(art && { art }), ...(tags.length && { tags }), ...(about && { about }), ...(releasedOn && { releasedOn }) };
 }
