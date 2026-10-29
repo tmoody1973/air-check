@@ -53,3 +53,40 @@ test("unreadable lines become questions", () => {
   ]);
   expect(r.questions.some((q) => q.includes("C–Three"))).toBe(true);
 });
+
+test("Paper's spelling wins only to restore accents or up to 2 dropped characters; never case, punctuation style or added words (4-17-26)", () => {
+  const d = parseTracklist([
+    "HOUR 1",
+    'Roy Ayers - "Red, Black & Green"',
+    'Leikeli 47 - "starlight"',
+    'Funk Factory - "Rien Ne Va Plus"',
+    'Jalen Ngonda - "Hang it On The Shelf"',
+    'Saigon Soul Revival - "Ly Qua Dub"',
+    'Hermanos Gutierrez - "Los Ojos Del Cndor"',
+    'Closer - "End"',
+    "HOUR 2",
+    'Lisa Lisa & Cult Jam - "Let The Beat Hit ‘Em"',
+    'Closer - "Two"',
+  ].join("\n"));
+  const p = [
+    { hour: 1 as const, artist: "ROY AYERS", title: "Red, Black & Green" },
+    { hour: 1 as const, artist: "LEIKELI47", title: "starlight" },
+    { hour: 1 as const, artist: "Funk Factory (Michał Urbaniak)", title: "Rien Ne Va Plus" },
+    { hour: 1 as const, artist: "JALEN NGONDA", title: "Hang It On The Shelf" },
+    { hour: 1 as const, artist: "Saigon Soul Revival", title: "Lý Qua Dub" },
+    { hour: 1 as const, artist: "Hermanos Gutiérrez", title: "Los Ojos Del Cóndor" },
+    { hour: 2 as const, artist: "LISA LISA & CULT JAM", title: "Let The Beat Hit 'Em" },
+  ];
+  const r = reconcile(d, p);
+  expect(r.tracks.map((t) => [formatTrack(t), t.status])).toEqual([
+    ['Roy Ayers - "Red, Black & Green"', "confirmed"],
+    ['Leikeli 47 - "starlight"', "confirmed"],
+    ['Funk Factory - "Rien Ne Va Plus"', "confirmed"],
+    ['Jalen Ngonda - "Hang it On The Shelf"', "confirmed"],
+    ['Saigon Soul Revival - "Lý Qua Dub"', "spelling-fixed"],
+    ['Hermanos Gutiérrez - "Los Ojos Del Cóndor"', "spelling-fixed"],
+    ['Closer - "End"', "closing-track"],
+    ['Lisa Lisa & Cult Jam - "Let The Beat Hit ‘Em"', "confirmed"],
+    ['Closer - "Two"', "closing-track"],
+  ]);
+});

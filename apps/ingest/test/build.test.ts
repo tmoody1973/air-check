@@ -44,15 +44,11 @@ describe("buildEpisodes: questions instead of guesses", () => {
   });
 
   test("at most 20 questions of at most 1,000 characters (Convex's limits), the 20th summing up the rest", () => {
-    const many = Array.from({ length: 30 }, (_, i) => `Artist ${i} - "${"Long title ".repeat(i === 0 ? 120 : 1)}${i}"`);
-    const notes = { kind: "ok" as const, text: "# Hour 1\n## 1. Nobody – \"Matches\"\n# Hour 2\n## 1. Still – \"Nothing\"" };
-    const [e] = one(found({
-      drive: new Map([["2026-02-06", [doc("g", "Rhythm Lab Radio 2-6-26", many, many)]]]),
-      paper: new Map([["2026-02-06", [{ id: "p", name: "Rhythm Lab Radio 2-6-26.paper", export: notes }]]]),
-    }));
+    const many = Array.from({ length: 30 }, (_, i) => `${"no dash in this long line ".repeat(i === 0 ? 60 : 1)}${i}`);
+    const [e] = one(found({ drive: new Map([["2026-02-06", [doc("g", "Rhythm Lab Radio 2-6-26", ["A - \"One\"", ...many], H2)]]]) }));
     expect(e!.questions).toHaveLength(20);
     expect(e!.questions.every((q) => q.text.length <= 1000)).toBe(true);
-    expect(e!.questions[19]!.text).toMatch(/^…and \d+ more differences/);
+    expect(e!.questions[19]!.text).toMatch(/^…and \d+ more problems with the docs for 2026-02-06/);
     expect(new Set(e!.questions.map((q) => q.id)).size).toBe(20);
   });
 
@@ -67,10 +63,22 @@ describe("buildEpisodes: questions instead of guesses", () => {
     const [broken] = one(found({ drive: new Map([["2026-02-13", [doc("g", "Rhythm Lab Radio 2-13-26", ["A - \"One\"", "no dash here at all"], [])]]]) }));
     expect(broken!.questions.length).toBeGreaterThan(0);
     expect(broken!.questions.every((q) => q.action === true)).toBe(true);
-    const notes = { kind: "ok" as const, text: "# Hour 1\n## 1. Other – \"Song\"\n# Hour 2\n## 1. D – \"Four\"" };
-    const [plain] = one(found({ drive: new Map([["2026-02-20", [doc("g", "Rhythm Lab Radio 2-20-26", H1, H2)]]]), paper: new Map([["2026-02-20", [{ id: "p", name: "n.paper", export: notes }]]]) }));
-    expect(plain!.questions.length).toBeGreaterThan(0);
-    expect(plain!.questions.some((q) => q.action)).toBe(false);
+    const [stamped] = one(found({ box: new Map([["2026-02-06", [folder("1", "2-6-26", [wav("a", "9125_013026.wav"), wav("b", "9126_013026.wav")])]]]) }));
+    expect(stamped!.questions.length).toBeGreaterThan(0);
+    expect(stamped!.questions.some((q) => q.action)).toBe(false);
+  });
+
+  test("Drive decides (Tarik, Oct 28): notes that differ from the tracklist raise no questions; Drive's order and count stand; Paper only fixes spelling", () => {
+    const notes = { kind: "ok" as const, text: "# Hour 1\n## 1. Ä – \"Öne\"\nSome words about artist C.\n# Hour 2\n## 1. Nobody – \"Else\"" };
+    const [e] = one(found({ drive: new Map([["2026-02-20", [doc("g", "Rhythm Lab Radio 2-20-26", H1, H2)]]]), paper: new Map([["2026-02-20", [{ id: "p", name: "n.paper", export: notes }]]]) }));
+    expect(e!.questions).toEqual([]);
+    const tracks = e!.tracklist.status === "found" ? e!.tracklist.tracks! : [];
+    expect(tracks.map((t) => [t.hour, t.artist, t.title, t.status])).toEqual([
+      [1, "Ä", "Öne", "spelling-fixed"], [1, "B", "Two", "unverified-in-notes"], [1, "C", "Three", "closing-track"],
+      [2, "D", "Four", "unverified-in-notes"], [2, "E", "Five", "unverified-in-notes"], [2, "F", "Six", "closing-track"],
+    ]);
+    const [broken] = one(found({ drive: new Map([["2026-02-27", [doc("g", "Rhythm Lab Radio 2-27-26", ["A - \"One\"", "no dash here at all"], H2)]]]), paper: new Map([["2026-02-27", [{ id: "p", name: "n.paper", export: notes }]]]) }));
+    expect(broken!.questions.map((q) => q.text)).toEqual([expect.stringMatching(/^Line \d+ "no dash here at all" could not be read/)]);
   });
 
   test("notes over 64 KB are not sent; a question says why", () => {
@@ -79,9 +87,9 @@ describe("buildEpisodes: questions instead of guesses", () => {
     expect(e!.questions[0]!.text).toMatch(/over 64 KB/);
   });
 
-  test("a non-empty Paper doc with no track lines is a question, but its text still goes to the draft (R2)", () => {
+  test("a Paper doc about the artists with no track lines raises no question; its text still goes to the draft (R2)", () => {
     const [e] = one(found({ paper: new Map([["2026-02-06", [{ id: "p", name: "n.paper", export: { kind: "ok", text: "Just prose about the show." } }]]]) }));
     expect(e!.notes).toEqual({ status: "found", docId: "p", text: "Just prose about the show." });
-    expect(e!.questions[0]!.text).toMatch(/could not be read as a track list/);
+    expect(e!.questions).toEqual([]);
   });
 });
