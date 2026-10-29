@@ -27,12 +27,40 @@ PROBES=(
   "Agent skills|for s in airc aircdemo; do XDG_RUNTIME_DIR=/run/user/1001 ${HOME}/.local/bin/nemohermes \"\$s\" skill list 2>/dev/null | grep -q rlr-description-safety || exit 1; done"
 )
 
+# The host port forward to a sandbox sometimes stops listening while the sandbox and its gateway
+# keep running (Oct 29, twice). `recover` restores it, so try that once before calling it down.
+# Prints nothing but the probe name and time (Hard Rule 8).
+heal() {
+  local box="$1"
+  if (( DRY_RUN )); then
+    echo "would run: nemohermes ${box} recover (skipped in dry run)"
+    return 1
+  fi
+  XDG_RUNTIME_DIR=/run/user/1001 timeout 120 "${HOME}/.local/bin/nemohermes" "${box}" recover >/dev/null 2>&1
+  sleep "${HEAL_WAIT:-10}"
+}
+
 down=()
+healed=()
 for probe in "${PROBES[@]}"; do
   name="${probe%%|*}"
   cmd="${probe#*|}"
-  bash -c "${cmd}" >/dev/null 2>&1 || down+=("${name}")
+  if ! bash -c "${cmd}" >/dev/null 2>&1; then
+    box=""
+    [[ "${name}" == "Hermes" ]] && box="airc"
+    [[ "${name}" == "Demo Hermes" ]] && box="aircdemo"
+    if [[ -n "${box}" ]] && heal "${box}" && bash -c "${cmd}" >/dev/null 2>&1; then
+      healed+=("${name}")
+      echo "watchdog: ${name} link dropped, reconnected at $(date +%H:%M)"
+    else
+      down+=("${name}")
+    fi
+  fi
 done
+if (( ${#healed[@]} > 0 )); then
+  # One line per run, queued so it goes out with any state message and survives a Telegram outage.
+  { cat "${PENDING}" 2>/dev/null; echo "Air Check: agent link dropped and was reconnected at $(date +%H:%M)."; } | tail -n 20 > "${PENDING}.tmp" && mv "${PENDING}.tmp" "${PENDING}"
+fi
 
 now="ok"
 (( ${#down[@]} > 0 )) && now="down:$(IFS=,; echo "${down[*]}")"
