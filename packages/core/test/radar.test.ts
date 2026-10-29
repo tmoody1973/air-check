@@ -634,11 +634,30 @@ describe("parseBandcampEmail", () => {
       expect(checkExtraction(parseBandcampEmail(subject, text), text, OCT29)).toMatchObject({ ok: true, release: want });
     }
   });
+  // Real Bandcamp-tab mail the first dry run skipped (2026-10-29): "just announced", no quotes, wrapped hand-forwards.
+  const ANNOUNCED: [string, string, Record<string, string>][] = [
+    ["Fwd: New release from LEAVING RECORDS", "LEAVING RECORDS just announced Under the Covers: Live from 2220 by Black\nFlute Brigade, check it out here", { artist: "Black Flute Brigade", title: "Under the Covers: Live from 2220", label: "LEAVING RECORDS" }],
+    ["Fwd: New release from Atjazz Record Company", "Atjazz Record Company just released Bye Bye Granada (feat. Marcel) (Oscar P\nRemixes) by Abel, check it out here", { artist: "Abel", title: "Bye Bye Granada (feat. Marcel) (Oscar P Remixes)", label: "Atjazz Record Company" }],
+    ["New release from Strut", 'Strut just announced "The Melt Goes On Forever: The Art And Times of David Hammons" by Ramachandra Borcar, check it out at:', { artist: "Ramachandra Borcar", title: "The Melt Goes On Forever: The Art And Times of David Hammons", label: "Strut" }],
+    ["New release from Anti- Records", 'Anti- Records just announced "Gauzy" by Sam Akpro, check it out at:', { artist: "Sam Akpro", title: "Gauzy", label: "Anti- Records" }],
+  ];
+  test.each(ANNOUNCED)("announced mail: %s", (subject, line, want) => {
+    const body = `Greetings Tarik,\n\n${line}\n[link]\n\nYou are receiving this because you follow them.`;
+    expect(parseBandcampEmail(subject, body)).toEqual(want);
+    const text = `Subject: ${subject}\n\n${body}`;
+    expect(checkExtraction(parseBandcampEmail(subject, body), text, OCT29)).toMatchObject({ ok: true, release: want });
+  });
+  test("tails: here with : or ., a last-by split, and the join limit", () => {
+    expect(parseBandcampEmail("s", "A Label just announced Foo by Bar by Baz, check it out here.")).toEqual({ artist: "Baz", title: "Foo by Bar", label: "A Label" });
+    expect(parseBandcampEmail("s", "A Label just announced Foo, check it out here:")).toEqual({ artist: "A Label", title: "Foo" });
+    expect(parseBandcampEmail("s", "A Label just announced Foo\nby\nBar\nbaz, check it out here")).toBeNull(); // 4 lines: past the join limit
+  });
   test("curly quotes, and a line that ends right after the closing quote", () => {
     expect(parseBandcampEmail("s", "Hiro Ama just released \u201cWay Out\u201d by Ama Trio, check it out at:")).toEqual({ artist: "Ama Trio", title: "Way Out", label: "Hiro Ama" });
     expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out"')).toEqual({ artist: "Hiro Ama", title: "Way Out" });
     expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out" by Ama Trio')).toBeNull(); // "by" without the tail: not the template
-    expect(parseBandcampEmail("s", "Hiro Ama just released Way Out, check it out at:")).toBeNull(); // no quotes
+    expect(parseBandcampEmail("s", "Hiro Ama just released Way Out, check it out at:")).toEqual({ artist: "Hiro Ama", title: "Way Out" }); // no quotes, no by
+    expect(parseBandcampEmail("s", "Hiro Ama just released Way Out")).toBeNull(); // no quotes needs the tail
     expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out", check it out at: [link]')).toBeNull(); // text after the colon
   });
 });
@@ -781,6 +800,9 @@ describe("no catastrophic regex time on hostile input", () => {
   fast("senderDecision: a 200k From with quotes", () =>
     senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "" }, ["a@b.example"], PASS("b.example")));
   fast("readBandcampEmbed: unclosed <meta x 100k", () => readBandcampEmbed("<meta".repeat(100_000)));
+  fast("parseBandcampEmail: 200k of announced/by runs over many short lines", () =>
+    parseBandcampEmail("s", "a just announced b by c by d\n".repeat(7_000)));
+  fast("parseBandcampEmail: one 200k line of announced and by", () => parseBandcampEmail("s", "a just announced b by ".repeat(9_000)));
   fast("parseBandcampEmail: one 20k line of template words", () => parseBandcampEmail("s", "a just released ".repeat(1_300)));
   fast("parseBandcampEmail: capped lines of quotes and \" by \" runs, 2,000 of them", () =>
     parseBandcampEmail("s", `${'a just released "x" by '.repeat(21)}\n`.repeat(2_000)));
