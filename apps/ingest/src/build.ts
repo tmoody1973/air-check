@@ -30,6 +30,9 @@ function ask(kind: QuestionKind, text: string, rerunOf?: string): Question {
   return { id: `${kind}-${sha(t)}`, text: t, kind, ...(rerunOf !== undefined && { rerunOf }) };
 }
 
+/** M6: a question only a fix in Box, Drive or Paper settles. No answer box; it clears when the scan stops raising it. */
+const fix = (kind: QuestionKind, text: string): Question => ({ ...ask(kind, text), action: true });
+
 /** Drive's text export, read by core. A title or byline above HOUR 1 is not a track; a track-like line there still is. */
 function parseDrive(text: string): ParsedTracklist {
   const p = parseTracklist(text);
@@ -44,7 +47,7 @@ const scannedTrack = (t: Track, status: TrackStatus): ScannedTrack => ({
 function audioOf(date: string, folders: BoxFolder[] | undefined, q: Question[]): { audio: ScannedEpisode["audio"]; stampDate?: string } {
   if (!folders?.length) return { audio: { status: "none", flags: [] } };
   if (folders.length > 1) {
-    q.push(ask("audio", `Box has ${folders.length} folders dated ${date} (${folders.map((f) => `"${f.name}"`).join(", ")}). Which one is the show? Until one is removed or renamed, its audio is not used automatically.`));
+    q.push(fix("audio", `Box has ${folders.length} folders dated ${date} (${folders.map((f) => `"${f.name}"`).join(", ")}). Which one is the show? Until one is removed or renamed, its audio is not used automatically.`));
     return { audio: { status: "ask", flags: ["more than one Box folder for this date"] } };
   }
   const [{ id, name, assembly: a }] = folders as [BoxFolder];
@@ -64,7 +67,7 @@ function audioOf(date: string, folders: BoxFolder[] | undefined, q: Question[]):
 function notesOf(date: string, docs: PaperDoc[] | undefined, q: Question[]): { notes: ScannedEpisode["notes"]; paper: PaperTrack[] | null } {
   if (!docs?.length) return { notes: { status: "missing" }, paper: null }; // a gap, never a blocker (skill: notes for new shows)
   if (docs.length > 1) {
-    q.push(ask("tracklist", `Dropbox has ${docs.length} Paper docs for ${date} (${docs.map((d) => `"${d.name}"`).join(", ")}). Trash or rename the extra one so the right notes are used.`));
+    q.push(fix("tracklist", `Dropbox has ${docs.length} Paper docs for ${date} (${docs.map((d) => `"${d.name}"`).join(", ")}). Trash or rename the extra one so the right notes are used.`));
     return { notes: { status: "found" }, paper: null };
   }
   const [doc] = docs as [PaperDoc];
@@ -93,7 +96,7 @@ function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTra
   const structured = parsed.filter((x) => hasBothHours(x.p));
   const pick = structured.length === 1 ? structured[0] : parsed.length === 1 ? parsed[0] : undefined;
   if (!pick) {
-    q.push(ask("tracklist", `Drive has ${docs.length} tracklists for ${date} (${docs.map((d) => `"${d.name}"`).join(", ")}) and the right one is unclear. Trash or rename the extra one.`));
+    q.push(fix("tracklist", `Drive has ${docs.length} tracklists for ${date} (${docs.map((d) => `"${d.name}"`).join(", ")}) and the right one is unclear. Trash or rename the extra one.`));
     return { tracklist: { status: "missing" } };
   }
   let tracks: ScannedTrack[];
@@ -104,12 +107,12 @@ function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTra
   } else {
     // No usable notes: nothing confirms the tracks, and that alone is not a question per track.
     tracks = pick.p.tracks.map((t) => scannedTrack(t, t.closing ? "closing-track" : "unverified-in-notes"));
-    q.push(...pick.p.bad.map((b) => ask("tracklist", `Line ${b.line} "${b.raw}" could not be read (${b.reason}). Fix it so no track is missed.`)));
+    q.push(...pick.p.bad.map((b) => fix("tracklist", `Line ${b.line} "${b.raw}" could not be read (${b.reason}). Fix it so no track is missed.`)));
   }
   for (const h of [1, 2] as const)
-    if (!tracks.some((t) => t.hour === h)) q.push(ask("tracklist", `The tracklist for ${date} has no Hour ${h} tracks. Check the Drive doc "${pick.d.name}".`));
+    if (!tracks.some((t) => t.hour === h)) q.push(fix("tracklist", `The tracklist for ${date} has no Hour ${h} tracks. Check the Drive doc "${pick.d.name}".`));
   if (tracks.length > MAX_TRACKS) {
-    q.push(ask("tracklist", `The tracklist for ${date} has ${tracks.length} tracks, more than a show can hold. Check the Drive doc "${pick.d.name}".`));
+    q.push(fix("tracklist", `The tracklist for ${date} has ${tracks.length} tracks, more than a show can hold. Check the Drive doc "${pick.d.name}".`));
     return { tracklist: { status: "found", docId: pick.d.id }, docTitle: pick.d.name };
   }
   return { tracklist: { status: "found", docId: pick.d.id, tracks }, docTitle: pick.d.name };
@@ -119,7 +122,7 @@ function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTra
 function capped(date: string, q: Question[]): Question[] {
   if (q.length <= MAX_QUESTIONS) return q;
   const more = q.length - (MAX_QUESTIONS - 1);
-  return [...q.slice(0, MAX_QUESTIONS - 1), ask("tracklist", `…and ${more} more differences between the tracklist and the notes for ${date}. Fix the docs and they will be checked again.`)];
+  return [...q.slice(0, MAX_QUESTIONS - 1), fix("tracklist", `…and ${more} more differences between the tracklist and the notes for ${date}. Fix the docs and they will be checked again.`)];
 }
 
 /** One episode per show date found in any source. `stored` carries the rerun marks; `onDisk` the local audio. */

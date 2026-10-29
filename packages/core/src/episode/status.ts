@@ -15,7 +15,8 @@ export interface EpisodeFacts {
   audio: { status: "ready" | "incomplete" | "ask" | "none" };
   tracklist: { status: "found" | "missing" };
   notes: { status: "found" | "missing" };
-  questions: { id: string; text: string; answer?: string }[];
+  /** `action`: settled only by fixing the source (M6); it blocks until the scan stops raising it, answered or not. */
+  questions: { id: string; text: string; answer?: string; action?: true }[];
   packageStatus: LinkedPackageStatus;
   /** Set by the ingest service once the WAVs are local. */
   audioOnDisk?: boolean;
@@ -79,7 +80,7 @@ export function episodeStatus(e: EpisodeFacts): EpisodeStatusResult {
   if (e.rerunOf) return { status: "rerun", gaps };
 
   // An answered question no longer blocks; an unanswered one, or an audio "ask" nobody has answered, does.
-  const unresolved = e.questions.some((q) => !q.answer);
+  const unresolved = e.questions.some((q) => q.action || !q.answer);
   const audioAsk = e.audio.status === "ask" && e.questions.length === 0;
   if (unresolved || audioAsk) return { status: "question", gaps };
   if (e.audio.status !== "ready") return { status: "missing-audio", gaps };

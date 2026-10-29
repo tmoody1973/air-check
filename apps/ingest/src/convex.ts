@@ -15,7 +15,8 @@ export interface ScannedEpisode {
   tracklist: { status: "found" | "missing"; docId?: string; tracks?: ScannedTrack[] };
   /** `text` is Paper text: sent only here, for the draft's untrusted-notes input (Hard Rule 12). */
   notes: { status: "found" | "missing"; docId?: string; text?: string };
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string }[];
+  /** `action`: only fixing the source settles it (M6); Episodes shows no answer box. */
+  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true }[];
   audioOnDisk?: boolean;
 }
 
@@ -26,7 +27,7 @@ export interface IngestRow {
   tracklist: { status: "found" | "missing"; docId?: string };
   notes: { status: "found" | "missing"; docId?: string };
   tracks?: ScannedTrack[];
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; answer?: string }[];
+  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true; answer?: string }[];
   audioOnDisk?: boolean;
   rerunOf?: string;
   rerunSource?: "chat" | "episodes" | "detected";

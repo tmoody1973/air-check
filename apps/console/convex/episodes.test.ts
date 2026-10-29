@@ -25,7 +25,7 @@ const TRACKS = [
   { hour: 1 as const, position: 1, artist: "A", title: "B", raw: "A - B", closing: true, status: "closing-track" as const },
   { hour: 2 as const, position: 1, artist: "C", title: "D", raw: "C - D", closing: true, status: "closing-track" as const },
 ];
-type Q = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string };
+type Q = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string; action?: true };
 const episode = (showDate = "2026-07-17", questions: Q[] = []) => ({
   showDate,
   audio: { status: "ready" as const, flags: [] },
@@ -72,6 +72,14 @@ describe("episodes.answer", () => {
     await t.withIdentity(human).mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "t1", answer: "  Yes, keep it  " });
     expect((await row(t))!.questions[0]).toMatchObject({ answer: "Yes, keep it", answeredAt: expect.any(Number) });
     expect(await statusOf(t)).toBe("ready-to-draft");
+  });
+
+  test("M6: an action question (fix it in the doc) can't be answered, and keeps blocking", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode("2026-07-17", [{ id: "dup", text: "Trash or rename the extra one.", kind: "tracklist", action: true }]));
+    expect(await errorCode(t.withIdentity(human).mutation(api.episodes.answer, { showDate: "2026-07-17", questionId: "dup", answer: "Done" }))).toBe("BAD_INPUT");
+    expect((await row(t))!.questions[0]!.answer).toBeUndefined();
+    expect(await statusOf(t)).toBe("question");
   });
 
   test("an empty or oversized answer, an unknown episode or question are refused", async () => {

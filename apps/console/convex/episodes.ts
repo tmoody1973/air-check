@@ -190,6 +190,7 @@ export const answer = mutation({
     const q = row?.questions.find((x) => x.id === args.questionId);
     if (!row || !q) throw notFound("no such question");
     const text = args.answer.trim();
+    if (q.action) throw badInput("this is fixed in the doc or folder, not answered here; it clears on the next scan");
     if (!text || text.length > MAX_ANSWER) throw badInput(`the answer must be 1 to ${MAX_ANSWER} characters`);
     if (q.kind !== "rerun") {
       await ctx.db.patch(row._id, { questions: row.questions.map((x) => (x.id === q.id ? { ...x, answer: text, answeredAt: Date.now() } : x)) });

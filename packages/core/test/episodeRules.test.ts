@@ -252,6 +252,13 @@ test("assemble exposes the MMDDYY stamp date", () => {
   expect(m.stampDate).toBe("2026-03-06");
 });
 
+test("M6: an action question blocks until the scan stops raising it, even with an answer", () => {
+  const fix = { id: "t", text: "Trash or rename the extra one.", action: true as const };
+  expect(episodeStatus(ep("2026-01-02", { questions: [fix] })).status).toBe("question");
+  expect(episodeStatus(ep("2026-01-02", { questions: [{ ...fix, answer: "done" }] })).status).toBe("question");
+  expect(episodeStatus(ep("2026-01-02", { questions: [] })).status).toBe("ready-to-draft");
+});
+
 test("R10: two finished drafts with no package is draft-failed, never picked again; a package still wins", () => {
   expect(episodeStatus(ep("2026-01-02", { draftAttempts: 1 })).status).toBe("ready-to-draft");
   expect(episodeStatus(ep("2026-01-02", { draftAttempts: 2 })).status).toBe("draft-failed");

@@ -7,7 +7,7 @@ import { BTN } from "./MixcloudConnection";
 // The Episodes page's controls, shared by the table and the phone cards (EpisodeItem): answer boxes, rerun questions,
 // the rerun line with Undo, Mark as rerun of…, and the R5 how-to. Each calls an injected action, never the model.
 
-type Question = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string; answer?: string };
+type Question = { id: string; text: string; kind: "audio" | "date" | "tracklist" | "rerun"; rerunOf?: string; action?: true; answer?: string };
 export type EpisodeRow = {
   showDate: string;
   audio: { status: "ready" | "incomplete" | "ask" | "none" };

@@ -45,8 +45,9 @@ export const scannedEpisodeFields = {
   }),
   tracklist: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), tracks: v.optional(v.array(episodeTrackV)) }),
   notes: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), text: v.optional(v.string()) }),
-  // `rerunOf` on a rerun question is the candidate original; "" means unknown (R8).
-  questions: v.array(v.object({ id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()) })),
+  // `rerunOf` on a rerun question is the candidate original; "" means unknown (R8). `action`: fixed in the source, never
+  // answered (M6).
+  questions: v.array(v.object({ id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)) })),
   audioOnDisk: v.optional(v.boolean()),
 };
 export const sourceStateV = v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected"));
@@ -55,7 +56,7 @@ export default defineSchema({
   episodes: defineTable({
     ...scannedEpisodeFields,
     questions: v.array(v.object({
-      id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()),
+      id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)),
       answer: v.optional(v.string()), answeredAt: v.optional(v.number()),
     })),
     scannedAt: v.number(), // 0 for a row a person created before the scan found the show (a rerun marked ahead of time)

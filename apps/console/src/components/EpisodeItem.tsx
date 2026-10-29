@@ -89,7 +89,13 @@ function detailsOf(e: EpisodeRow, ctx: RowCtx): ReactNode[] {
   if (e.fetch?.status === "failed") parts.push(<p key="fetch" className="text-problem-text">Download failed ({fetchErrorText(e.fetch.error)})</p>);
   for (const q of e.questions)
     parts.push(
-      q.answer ? (
+      // M6: fixed in Box, Drive or Paper, not here, so no answer box.
+      q.action ? (
+        <p key={q.id} className="flex flex-col [overflow-wrap:anywhere]">
+          <span className="font-medium">{q.text}</span>
+          <span className="text-ink-soft">This clears on the next scan after you fix it.</span>
+        </p>
+      ) : q.answer ? (
         <p key={q.id} className="flex flex-col [overflow-wrap:anywhere]">
           <span className="font-medium">{q.text}</span>
           <span className="text-ink-soft">You answered: {q.answer}</span>

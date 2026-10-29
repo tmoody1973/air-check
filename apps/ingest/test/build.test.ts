@@ -56,6 +56,23 @@ describe("buildEpisodes: questions instead of guesses", () => {
     expect(new Set(e!.questions.map((q) => q.id)).size).toBe(20);
   });
 
+  test("M6: questions only a fix in the source settles (duplicates, an unreadable or one-hour tracklist) are actions; others are not", () => {
+    const paper = (id: string) => ({ id, name: `Rhythm Lab Radio 2-6-26 ${id}.paper`, export: { kind: "ok" as const, text: "" } });
+    const [dupes] = one(found({
+      box: new Map([["2026-02-06", [folder("1", "2-6-26", [wav("a", "9125.wav"), wav("b", "9126.wav")]), folder("2", "2-06-26", [wav("c", "9125.wav"), wav("d", "9126.wav")])]]]),
+      drive: new Map([["2026-02-06", [doc("g1", "Rhythm Lab Radio 2-6-26", H1, H2), doc("g2", "Rhythm Lab Radio 2-6-26 (copy)", H1, H2)]]]),
+      paper: new Map([["2026-02-06", [paper("p1"), paper("p2")]]]),
+    }));
+    expect(dupes!.questions.map((q) => q.action)).toEqual([true, true, true]);
+    const [broken] = one(found({ drive: new Map([["2026-02-13", [doc("g", "Rhythm Lab Radio 2-13-26", ["A - \"One\"", "no dash here at all"], [])]]]) }));
+    expect(broken!.questions.length).toBeGreaterThan(0);
+    expect(broken!.questions.every((q) => q.action === true)).toBe(true);
+    const notes = { kind: "ok" as const, text: "# Hour 1\n## 1. Other – \"Song\"\n# Hour 2\n## 1. D – \"Four\"" };
+    const [plain] = one(found({ drive: new Map([["2026-02-20", [doc("g", "Rhythm Lab Radio 2-20-26", H1, H2)]]]), paper: new Map([["2026-02-20", [{ id: "p", name: "n.paper", export: notes }]]]) }));
+    expect(plain!.questions.length).toBeGreaterThan(0);
+    expect(plain!.questions.some((q) => q.action)).toBe(false);
+  });
+
   test("notes over 64 KB are not sent; a question says why", () => {
     const [e] = one(found({ paper: new Map([["2026-02-06", [{ id: "p", name: "n.paper", export: { kind: "ok", text: "x".repeat(70_000) } }]]]) }));
     expect(e!.notes).toEqual({ status: "found", docId: "p" });

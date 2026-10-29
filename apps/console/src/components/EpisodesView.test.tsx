@@ -109,6 +109,15 @@ describe("M4: an unreadable saved sign-in", () => {
 });
 
 describe("EpisodesView questions", () => {
+  it("M6: an action question shows the instruction with no answer box", () => {
+    setup([ep("2026-01-02", { status: "question", questions: [{ id: "dup", text: "Dropbox has 2 Paper docs for 2026-01-02. Trash or rename the extra one.", kind: "tracklist", action: true }] })], { today: "2026-01-02" });
+    const r = rowOf("2026-01-02");
+    expect(r).toHaveTextContent("Trash or rename the extra one.");
+    expect(r).toHaveTextContent("This clears on the next scan after you fix it");
+    expect(within(r).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(r).queryByRole("button", { name: "Save answer" })).not.toBeInTheDocument();
+  });
+
   it("answers a question inline, announces the save, and shows answered ones", async () => {
     const acts = setup([
       ep("2026-01-09", { status: "question", questions: [{ id: "t1", kind: "tracklist", text: "Keep track 3?" }, { id: "t2", kind: "date", text: "Which date?", answer: "Jan 9" }] }),
