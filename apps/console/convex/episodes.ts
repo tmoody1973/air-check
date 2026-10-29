@@ -80,8 +80,11 @@ export async function episodeRows(ctx: QueryCtx) {
       const { _id, _creationTime, notes: { text, ...notes }, tracklist: { tracks, ...tracklist }, ...rest } = e;
       void _id, _creationTime, text;
       const pkg = await linkedPackage(ctx, e.showDate);
-      const draftAttempts = (await draftRunsFor(ctx, e.showDate)).filter((r) => !isOpenRun(r)).length;
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
+      const runs = await draftRunsFor(ctx, e.showDate);
+      const draftAttempts = runs.filter((r) => !isOpenRun(r)).length;
+      // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
+      const openRun = runs.some((r) => isOpenRun(r));
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
     }),
   );
 }

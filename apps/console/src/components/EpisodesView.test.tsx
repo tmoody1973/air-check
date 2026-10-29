@@ -211,6 +211,16 @@ describe("EpisodesView reruns", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Jan 16, 2026 marked as a rerun of Jan 9, 2026");
   });
 
+  it("M2: an open draft run with no package says Drafting and hides Mark; a package waiting for its MP3 says Preparing audio", () => {
+    setup([ep("2026-01-02", { openRun: true }), ep("2026-01-09", { status: "drafting", packageStatus: "preparing_audio" }), ep("2026-01-16")], { today: "2026-01-16" });
+    expect(within(rowOf("2026-01-02")).getByText("Drafting")).toBeInTheDocument();
+    expect(within(rowOf("2026-01-02")).queryByRole("button", { name: "Mark as rerun of…" })).not.toBeInTheDocument();
+    expect(within(rowOf("2026-01-09")).getByText("Preparing audio")).toBeInTheDocument();
+    expect(within(rowOf("2026-01-09")).queryByText("Drafting")).not.toBeInTheDocument();
+    expect(within(rowOf("2026-01-16")).getByText("Waiting to draft")).toBeInTheDocument();
+    expect(within(rowOf("2026-01-16")).getByRole("button", { name: "Mark as rerun of…" })).toBeInTheDocument();
+  });
+
   it("no Mark control once a show has a package", () => {
     setup([ep("2026-01-02"), ep("2026-01-09", { status: "awaiting-review", packageStatus: "awaiting_review" })], { today: "2026-01-09" });
     expect(within(rowOf("2026-01-09")).queryByRole("button", { name: "Mark as rerun of…" })).not.toBeInTheDocument();

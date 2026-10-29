@@ -18,7 +18,8 @@ const STATUS: Record<string, [PillTone, string]> = {
   "missing-tracklist": ["caution", "No tracklist"],
   question: ["caution", "Question for you"],
   "ready-to-draft": ["neutral", "Waiting to draft"],
-  drafting: ["neutral", "Drafting"],
+  // Core's "drafting" is a package waiting for its MP3 (M2); a draft run with no package yet is DRAFTING below.
+  drafting: ["neutral", "Preparing audio"],
   "awaiting-review": ["ready", "Ready for review"],
   approved: ["ready", "Approved"],
   published: ["ready", "Published"],
@@ -28,7 +29,8 @@ const STATUS: Record<string, [PillTone, string]> = {
   rerun: ["neutral", "Rerun"],
   "draft-failed": ["problem", "Draft failed"],
 };
-/** Before a package exists, a week can still be declared a rerun (R7). */
+const DRAFTING: [PillTone, string] = ["neutral", "Drafting"];
+/** Before a package exists, a week can still be declared a rerun (R7); not while a draft run is open (M2). */
 const MARKABLE = new Set(["missing-audio", "missing-tracklist", "question", "ready-to-draft", "draft-failed"]);
 export const COLUMN_SOURCE = { audio: "box", tracklist: "google", notes: "dropbox" } as const;
 
@@ -111,8 +113,8 @@ const BLANK = "No show folder or tracklist found";
 /** A show (`e`) or a blank Friday (`e` null) at `showDate`. */
 export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeRow | null; showDate: string; sources: SourceStates; ctx: RowCtx; layout: Layout }) {
   const [marking, setMarking] = useState(false);
-  const canMark = (e ? MARKABLE.has(e.status) : true) && ctx.choices.length > 0;
-  const [tone, word] = e ? (STATUS[e.status] ?? ["neutral", e.status]) : (["neutral", "Blank Friday"] as const);
+  const canMark = (e ? MARKABLE.has(e.status) && !e.openRun : true) && ctx.choices.length > 0;
+  const [tone, word] = !e ? (["neutral", "Blank Friday"] as const) : e.openRun && e.packageStatus === "none" ? DRAFTING : (STATUS[e.status] ?? ["neutral", e.status]);
   const cells = e && cellsOf(e, sources);
   const link = e && statusLink(e);
   const onMark = canMark && !marking ? () => setMarking(true) : undefined;

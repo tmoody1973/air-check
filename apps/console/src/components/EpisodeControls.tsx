@@ -20,6 +20,8 @@ export type EpisodeRow = {
   packageStatus: string;
   receiptUrl?: string;
   draftAttempts: number;
+  /** A draft run is open for this show (M2). */
+  openRun?: boolean;
   audioOnDisk?: boolean;
   fetch?: { status: "fetching" | "fetched" | "failed"; error?: string };
   rerunOf?: string;
