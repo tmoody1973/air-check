@@ -184,8 +184,8 @@ const inboxByMessageId = (ctx: QueryCtx, messageId: string) =>
   ctx.db.query("inbox").withIndex("by_messageId", (q) => q.eq("messageId", messageId)).first();
 
 /**
- * The console's one call (Plan 8 Task 3's inbound route). Stores a cleaned email once per message id; `mail: null` is an
- * ignored sender, stored with its reason and no body. Links the email held are kept for Tarik and never fetched; one
+ * The console's one call (Plan 8 Task 3's inbound route). Stores a cleaned email once per message id, except that an
+ * ignored row gives way to a kept one (R12); `mail: null` is an ignored sender, stored with its reason and no body. Links the email held are kept for Tarik and never fetched; one
  * activity row says so, with host names only.
  */
 export const received = mutation({
@@ -207,7 +207,11 @@ export const received = mutation({
     const tidy = a.mail && tidyMail(a.mail);
     const problem = tidy && mailProblem(tidy);
     if (problem) throw badInput(problem);
-    if (await inboxByMessageId(ctx, a.messageId)) return { fresh: false };
+    const existing = await inboxByMessageId(ctx, a.messageId);
+    // Ruling R12's catch-up: an email ignored before (the sender check could never pass) is stored again once it is kept.
+    // A kept row is never replaced, and an ignored one is never re-ignored.
+    if (existing && (existing.state !== "ignored" || !tidy)) return { fresh: false };
+    if (existing) await ctx.db.delete(existing._id);
 
     const base = { messageId: a.messageId, receivedAt: a.receivedAt, from: a.from, subject: a.subject.slice(0, MAX_SUBJECT) };
     const m = tidy;

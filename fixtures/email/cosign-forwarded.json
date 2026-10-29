@@ -5,8 +5,17 @@
   "subject": "Fwd: New single: [Artist Name] - [Song Title]",
   "text": "Worth a spin Friday. My cell is in my signature, ignore it.\n\n---------- Forwarded message ---------\nFrom: [Publicist] <press@label.example.invalid>\nDate: Tue, Oct 28, 2026 at 11:40 AM\nSubject: New single: [Artist Name] - [Song Title]\nTo: <tarik@radiomilwaukee.org>\n\n\nHi Tarik,\n\nSharing [Song Title], the new single from [Artist Name], out November 14, 2026 on [Label Name].\n\nPress release: https://example.invalid/press/one\nPrivate stream: https://stream.example.invalid/private/abc\nBandcamp: https://artistname.bandcamp.com/album/song-title\nMore at www.example.invalid/more\n\nQuestions? Write press@label.example.invalid or reply here.\n",
   "html": "<div dir=\"ltr\">Worth a spin Friday.</div><div class=\"gmail_quote\"><p>Sharing [Song Title], the new single from [Artist Name].</p><a href=\"https://example.invalid/press/one\">Press release</a><a href=\"https://stream.example.invalid/private/abc\">Private stream</a><a href=\"https://artistname.bandcamp.com/album/song-title\">Bandcamp</a><a href=\"https://video.example.invalid/watch/1\">Video</a><a href='https://social.example.invalid/artist'>Social</a><a href=\"https://example.invalid/press/two?a=1&amp;b=2\">Photos</a><a href=\"https://tickets.example.invalid/show\">Tickets</a><a href=\"javascript:alert(1)\">Click</a><a href=\"mailto:press@label.example.invalid\">Email us</a></div>",
-  "headers": {
-    "Authentication-Results": "mx.agentmail.invalid; dkim=pass header.i=@radiomilwaukee.org header.s=google header.b=XyZ123; spf=pass smtp.mailfrom=radiomilwaukee.org; dmarc=pass header.from=radiomilwaukee.org"
+  "authentication_results": {
+    "spf": "pass",
+    "dkim": "pass",
+    "dmarc": "pass",
+    "spf_domain": "radiomilwaukee.org",
+    "dkim_domain": "radiomilwaukee.org",
+    "dmarc_domain": "radiomilwaukee.org"
   },
+  "labels": [
+    "received",
+    "unread"
+  ],
   "attachments": []
 }

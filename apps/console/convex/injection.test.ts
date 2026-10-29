@@ -1,5 +1,5 @@
 // @vitest-environment edge-runtime
-import { checkExtraction, cleanMail, parseAllowlist, pickInbound, senderDecision, type InboundMail } from "@aircheck/core";
+import { checkExtraction, cleanMail, parseAllowlist, pickInbound, readVerdict, senderDecision, type InboundMail } from "@aircheck/core";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { readFixture } from "../../../packages/core/test/helpers/fixtures";
@@ -24,8 +24,9 @@ afterEach(() => vi.unstubAllEnvs());
 const counts = (t: T) => t.run(async (ctx) => Object.fromEntries(await Promise.all(TABLES.map(async (n) => [n, (await ctx.db.query(n).collect()).length]))));
 
 async function storeInjection(t: T) {
-  const raw: InboundMail = pickInbound(JSON.parse(readFixture("email/cosign-injection.json")))!;
-  const decision = senderDecision(raw, parseAllowlist("tarik@radiomilwaukee.org"), "mx.agentmail.invalid");
+  const fixture: unknown = JSON.parse(readFixture("email/cosign-injection.json"));
+  const raw: InboundMail = pickInbound(fixture)!;
+  const decision = senderDecision(raw, parseAllowlist("tarik@radiomilwaukee.org"), readVerdict(fixture));
   if (!decision.ok) throw new Error(decision.reason);
   const mail = cleanMail(raw, decision);
   // Some unrelated state that must not move: a package, a run, a conversation.

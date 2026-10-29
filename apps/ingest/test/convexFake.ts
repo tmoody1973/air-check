@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
-import { cleanMail, episodeStatus, parseAllowlist, pickInbound, senderDecision, type LinkedPackageStatus } from "@aircheck/core";
+import { cleanMail, episodeStatus, parseAllowlist, pickInbound, readVerdict, senderDecision, type LinkedPackageStatus } from "@aircheck/core";
 import type { Correction, DraftOutcome, EmbedOutcome, IngestConvex, IngestRow, PendingEmail, Placement, RadarConvex, RadarOutcome, ScannedEpisode, SourceReport, Unplaced } from "../src/convex.js";
 
 export const RECEIVED_AT = Date.UTC(2026, 9, 29, 15);
 
 /** A fixture email exactly as the console stores it (pickInbound, senderDecision, cleanMail), as radar.pending returns it. */
 export function pendingFromFixture(name: string, messageId = `<${name}@test.invalid>`): PendingEmail {
-  const raw = pickInbound(JSON.parse(readFileSync(new URL(`../../../fixtures/email/${name}.json`, import.meta.url), "utf8")))!;
-  const decision = senderDecision(raw, parseAllowlist("tarik@radiomilwaukee.org,noreply@bandcamp.com"), "mx.agentmail.invalid");
+  const fixture: unknown = JSON.parse(readFileSync(new URL(`../../../fixtures/email/${name}.json`, import.meta.url), "utf8"));
+  const raw = pickInbound(fixture)!;
+  const decision = senderDecision(raw, parseAllowlist("tarik@radiomilwaukee.org,noreply@bandcamp.com"), readVerdict(fixture));
   if (!decision.ok) throw new Error(decision.reason);
   const mail = cleanMail(raw, decision);
   return { messageId, tab: mail.tab, subject: mail.subject, body: mail.body, receivedAt: RECEIVED_AT };

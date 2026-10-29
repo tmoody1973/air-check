@@ -4,8 +4,17 @@
   "from_": "Tarik Moody <tarik@radiomilwaukee.org>",
   "subject": "Fwd: EMBARGOED: [Artist Name] - [Album Title]",
   "text": "Hold this one.\n\nBegin forwarded message:\n\nFrom: [Publicist] <press@label.example.invalid>\nSubject: EMBARGOED: [Artist Name] - [Album Title]\nDate: October 28, 2026 at 9:14:02 AM CDT\nTo: Tarik Moody <tarik@radiomilwaukee.org>\n\nHi Tarik,\n\nHere is [Album Title], the new album by [Artist Name] on [Label Name]. It comes out November 7.\nEmbargoed until November 7, so please do not play before then.\n\nThanks,\n[Publicist]\n",
-  "headers": {
-    "Authentication-Results": "mx.agentmail.invalid; dkim=pass header.i=@radiomilwaukee.org header.s=google header.b=XyZ123; spf=pass smtp.mailfrom=radiomilwaukee.org; dmarc=pass header.from=radiomilwaukee.org"
+  "authentication_results": {
+    "spf": "pass",
+    "dkim": "pass",
+    "dmarc": "pass",
+    "spf_domain": "radiomilwaukee.org",
+    "dkim_domain": "radiomilwaukee.org",
+    "dmarc_domain": "radiomilwaukee.org"
   },
+  "labels": [
+    "received",
+    "unread"
+  ],
   "attachments": []
 }
