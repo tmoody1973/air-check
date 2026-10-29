@@ -368,6 +368,7 @@ export const embedResult = mutation({
         tags: v.optional(v.array(v.string())),
         about: v.optional(v.string()),
         releasedOn: v.optional(v.string()),
+        pageArtist: v.optional(v.string()),
       }),
       v.object({ failed: v.string() }),
     ),
@@ -389,19 +390,38 @@ export const embedResult = mutation({
       // The page's release date fills an empty one only, never one Tarik set or cleared (as a merge fill). A bad date is
       // dropped, not thrown. Not part of searchText.
       const fillDate = result.releasedOn !== undefined && isShowDate(result.releasedOn) && rel.releasedOn === undefined && !(rel.editedFields ?? []).includes("releasedOn");
+      const artist = await pageArtistFill(ctx, rel, result.pageArtist);
       await ctx.db.patch(releaseId, {
         embedState: "ready",
         embed: { kind: result.kind, id: result.id },
         embedError: undefined,
         ...details,
         ...(fillDate && { releasedOn: result.releasedOn }),
-        searchText: searchTextOf({ ...rel, ...details }),
+        ...artist,
+        searchText: searchTextOf({ ...rel, ...details, ...artist }),
       });
       await ctx.db.insert("activity", { ...row, title: "Read a Bandcamp page for its player", result: "allowed" });
     }
     return null;
   },
 });
+
+/** True when no other real release holds this key (a key change must never make two records one). */
+async function keyFree(ctx: QueryCtx, key: string, self: Id<"releases">): Promise<boolean> {
+  const other = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
+  return !other || other._id === self;
+}
+
+/**
+ * Listening-queue brief A: the page's JSON-LD artist fills an EMPTY artist only (never one already set, never one Tarik
+ * edited), with its key, and only when that key is free. Anything else is dropped, never thrown.
+ */
+async function pageArtistFill(ctx: MutationCtx, rel: Doc<"releases">, name: string | undefined): Promise<{ artist: string; key: string } | Record<string, never>> {
+  const artist = name?.trim();
+  if (!artist || rel.artist.trim() || (rel.editedFields ?? []).includes("artist") || tooLong(artist, MAX_FIELD) || LINKISH.test(artist)) return {};
+  const key = releaseKey(artist, rel.title);
+  return (await keyFree(ctx, key, rel._id)) ? { artist, key } : {};
+}
 
 /** A release the caller may change: a real human on a real row, the demo actor on a demo row (Hard Rule 9). */
 async function ownRelease(ctx: MutationCtx, releaseId: Id<"releases">): Promise<Doc<"releases">> {

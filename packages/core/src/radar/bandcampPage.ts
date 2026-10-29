@@ -13,7 +13,7 @@ const MAX_ART_CHARS = 500;
 const MAX_ABOUT_HTML = 20_000; // the about block is cut to this before it is read
 const MAX_TAG_LINKS = 200; // tag-class links looked at, at most (the scan itself is linear)
 
-export type BandcampDetails = { art?: string; tags?: string[]; about?: string; releasedOn?: string };
+export type BandcampDetails = { art?: string; tags?: string[]; about?: string; releasedOn?: string; pageArtist?: string };
 
 const ART_HOST = /^(?:[a-z0-9-]{1,63}\.){1,4}bcbits\.com$/;
 const ART_PATH = /^\/img\/[A-Za-z0-9_-]{1,100}\.(?:jpe?g|png|gif|webp)$/i;
@@ -25,6 +25,11 @@ const TAG_CLASS = /\bclass\s{0,20}=\s{0,20}["']tag["']/i;
 // "released October 29, 2026". Bounded and anchored on a literal, so a page of near-misses stays linear.
 const DATE_PUBLISHED = /"datePublished"\s{0,5}:\s{0,5}"(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})/;
 const RELEASED_TEXT = /released ([A-Z][a-z]{2,8}) (\d{1,2}), (\d{4})/;
+// The page's artist: JSON-LD "byArtist": { ..., "name": "..." }. Bounded; a name holding an escape is skipped, not decoded.
+const BY_ARTIST = /"byArtist"\s{0,5}:\s{0,5}\{([^{}]{0,1000})\}/;
+const ARTIST_NAME = /"name"\s{0,5}:\s{0,5}"([^"\\]{0,300})"/;
+const LINKISH = /:\/\/|@|\bwww\.|[a-z0-9-]\.[a-z]{2,}\//i;
+const MAX_ARTIST_CHARS = 200; // radar's field limit
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const ABOUT_OPEN = /class\s{0,20}=\s{0,20}"[^"<>]{0,200}\btralbum-about\b[^"<>]{0,200}"[^<>]{0,500}>/i;
 
@@ -78,6 +83,12 @@ function releaseDate(html: string): string | undefined {
   return text ? isoDate(text[2]!, text[1]!, text[3]!) : undefined;
 }
 
+/** The artist the page names in its JSON-LD, or undefined (missing, empty, over 200 characters or link-shaped). */
+function pageArtistOf(html: string): string | undefined {
+  const name = ARTIST_NAME.exec(BY_ARTIST.exec(html)?.[1] ?? "")?.[1]?.trim();
+  return name && name.length <= MAX_ARTIST_CHARS && !LINKISH.test(name) ? name : undefined;
+}
+
 /** The about block's inner HTML (up to the next `</div>`), or null. */
 function aboutBlock(html: string): string | null {
   const open = ABOUT_OPEN.exec(html);
@@ -87,7 +98,7 @@ function aboutBlock(html: string): string | null {
   return html.slice(start, end < 0 ? start + MAX_ABOUT_HTML : Math.min(end, start + MAX_ABOUT_HTML));
 }
 
-/** Cover art, tags, the album description and the release date from a Bandcamp album or track page. Missing ones are left out. */
+/** Cover art, tags, the album description, the release date and the artist's name from a Bandcamp album or track page. Missing ones are left out. */
 export function readBandcampDetails(html: string): BandcampDetails {
   const meta = metaTags(html);
   const content = (key: string) => meta.find((m) => m.key === key)?.content;
@@ -108,6 +119,7 @@ export function readBandcampDetails(html: string): BandcampDetails {
   const about = block !== null ? plainAbout(block) : plainAbout(content("og:description") ?? "");
 
   const releasedOn = releaseDate(html);
+  const pageArtist = pageArtistOf(html);
 
-  return { ...(art && { art }), ...(tags.length && { tags }), ...(about && { about }), ...(releasedOn && { releasedOn }) };
+  return { ...(art && { art }), ...(tags.length && { tags }), ...(about && { about }), ...(releasedOn && { releasedOn }), ...(pageArtist && { pageArtist }) };
 }

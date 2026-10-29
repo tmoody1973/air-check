@@ -88,25 +88,26 @@ export function findEmbargo(text: string, receivedAt: number): { until: string |
   return { until: dates.length ? dates.sort().at(-1)! : null };
 }
 
-const unquote = (s: string | undefined) => (s ?? "").trim().replace(/^["“”'‘’]+|["“”'‘’]+$/g, "").trim();
-// ponytail: written against SYNTHETIC fixtures (fixtures/email/bandcamp-*.json). Re-fit to real Bandcamp mail in Task 7.
+// Bandcamp's real new-release line (live mail, 2026-10-29): `<sender> just released "<title>"( by <artist>), check it out at:`
+// with the link on the next line. Straight or curly quotes; the ", check it out at:" tail may be missing only when the
+// line ends right after the closing quote. Every repeat is bounded and the line is capped, so a hostile line stays cheap.
 const MAX_TEMPLATE_LINE = 500;
-const BANDCAMP_LINE = /^\s*(.+?)\s+just\s+(?:released|announced)\s+(.+?)(?:\s+by\s+(.+?))?(?:,?\s+available for pre-?order)?\s*[.!]?\s*$/i;
+const BANDCAMP_LINE = /^(?<sender>.{1,200}?) just released ["\u201c](?<title>.{1,300}?)["\u201d](?:(?: by (?<artist>.{1,200}?))?, check it out at:)?\s*$/;
 
 /**
- * Bandcamp's new-release template, read in code: "<actor> just released|announced <title>( by <artist>)". When a
- * "by" is present the actor is the label; otherwise the actor is the artist. Null when the template does not match.
+ * Bandcamp's new-release template, read in code. With "by", the by-part is the artist and the sender is the label;
+ * without it, the sender is the artist and there is no label. The title is the quoted text as is (it may hold an
+ * unbalanced bracket). Null when no line matches: the email then goes to the model, as any other.
  */
 export function parseBandcampEmail(_subject: string, text: string): ReleaseFields | null {
   const lines = text.split("\n");
-  for (const line of lines) {
-    if (line.length > MAX_TEMPLATE_LINE) continue; // the lazy groups are polynomial on a long line; the template's line is short
-    const m = line.match(BANDCAMP_LINE);
-    if (!m) continue;
-    const [actor, title, by] = [unquote(m[1]), unquote(m[2]), unquote(m[3])];
-    if (!actor || !title) continue;
-    const releasedOn = lines.filter((l) => /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
-    return { artist: by || actor, title, ...(by ? { label: actor } : {}), ...(releasedOn ? { releasedOn } : {}) };
+  for (const [i, raw] of lines.entries()) {
+    if (raw.length > MAX_TEMPLATE_LINE) continue;
+    const g = raw.trim().match(BANDCAMP_LINE)?.groups;
+    const [sender, title, by] = [g?.sender?.trim(), g?.title?.trim(), g?.artist?.trim()];
+    if (!sender || !title) continue;
+    const releasedOn = lines.filter((l, j) => j !== i && /releas/i.test(l)).flatMap((l) => datesIn(l))[0];
+    return { artist: by || sender, title, ...(by ? { label: sender } : {}), ...(releasedOn ? { releasedOn } : {}) };
   }
   return null;
 }

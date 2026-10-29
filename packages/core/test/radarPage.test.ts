@@ -145,6 +145,26 @@ describe("readBandcampDetails: releasedOn (yyyy-mm-dd) from the same page", () =
   });
 });
 
+// Listening-queue brief A: the page's own artist, from JSON-LD "byArtist": { "name": ... }. Convex uses it only to fill an empty artist.
+describe("readBandcampDetails: pageArtist from the JSON-LD byArtist name", () => {
+  const ld = (by: string) => `<script type="application/ld+json">{"@type":"MusicAlbum","name":"Bleedin'","byArtist":${by},"datePublished":"29 Oct 2026 00:00:00 GMT"}</script>`;
+  const artist = (html: string) => readBandcampDetails(html).pageArtist;
+
+  test("the name inside byArtist, trimmed", () => {
+    expect(artist(ld('{"@type":"MusicGroup","name":" Percy & Penderhughes ","@id":"https://x.bandcamp.com"}'))).toBe("Percy & Penderhughes");
+    expect(artist(ld('{ "name" : "Chasm" }'))).toBe("Chasm");
+  });
+
+  test("absent, empty, escaped, too long or link-shaped: no pageArtist", () => {
+    expect(artist("<html>nothing</html>")).toBeUndefined();
+    expect(artist('{"name":"Not the artist"}')).toBeUndefined();
+    expect(artist(ld('{"name":""}'))).toBeUndefined();
+    expect(artist(ld('{"name":"Percy \\u0026 Pen"}'))).toBeUndefined();
+    expect(artist(ld(`{"name":"${"a".repeat(201)}"}`))).toBeUndefined();
+    for (const bad of ["https://evil.example", "x@evil.example", "www.evil.example", "evil.example/a"]) expect(artist(ld(`{"name":"${bad}"}`))).toBeUndefined();
+  });
+});
+
 describe("page parsing stays linear on a hostile 200k-character page", () => {
   const fast = (label: string, run: () => unknown) =>
     // The budget is the 200 ms; the 30 s timeout only gives a loaded machine time to run three tries.
@@ -170,6 +190,7 @@ describe("page parsing stays linear on a hostile 200k-character page", () => {
   fast('"datePublished":"1 Jan  x 8k, never a year', () => readBandcampDetails('"datePublished":"1 Jan '.repeat(N / 23)));
   fast("released October 1,  x 9k, never a year", () => readBandcampDetails("released October 1, ".repeat(N / 21)));
   fast("200k digits after a released month", () => readBandcampDetails(`released October ${"1".repeat(N)}`));
+  fast('"byArtist":{ x 9k, never a name', () => readBandcampDetails('"byArtist":{"a":1,'.repeat(N / 18)));
   fast("bandcampTag on 200k characters",() => bandcampTag("a.".repeat(N / 2)));
   fast("bandcampArtUrl on 200k characters", () => bandcampArtUrl(`https://f4.bcbits.com/img/${"a".repeat(N)}.jpg`));
 });

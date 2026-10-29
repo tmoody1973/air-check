@@ -527,18 +527,47 @@ describe("parseBandcampEmail", () => {
   test("label release", () => {
     expect(parse("bandcamp-label")).toEqual({ artist: "Ferro Lane", title: "Glass Weather", label: "Pale Signal Records", releasedOn: "2026-10-24" });
   });
-  test("artist release (HTML-only mail)", () => {
+  test("artist release (HTML-only mail, curly quotes)", () => {
     expect(parse("bandcamp-artist")).toEqual({ artist: "Ferro Lane", title: "Night Rooms", releasedOn: "2026-10-27" });
   });
-  test("pre-order", () => {
-    expect(parse("bandcamp-preorder")).toEqual({ artist: "Ama Ferrell", title: "Low Tide Radio", label: "Pale Signal Records", releasedOn: "2026-11-21" });
+  test("a wording the template does not cover goes to the model (null)", () => {
+    expect(parse("bandcamp-preorder")).toBeNull();
   });
   test("hand-forwarded Bandcamp mail parses the same", () => {
-    expect(parse("bandcamp-hand-forwarded")).toMatchObject({ artist: "Ferro Lane", title: "Glass Weather" });
+    expect(parse("bandcamp-hand-forwarded")).toMatchObject({ artist: "Ferro Lane", title: "Glass Weather", label: "Pale Signal Records" });
   });
   test("a co-sign is not Bandcamp's template", () => {
     expect(parse("cosign-forwarded")).toBeNull();
     expect(parse("cosign-injection")).toBeNull();
+  });
+
+  // Real Bandcamp mail, 2026-10-29 (subject, then the body line; the link sits on the next line). Text only, no links.
+  const REAL: [string, string, Record<string, string>][] = [
+    ["New release from Mango Hill Records, who brought you Evangeline", 'Mango Hill Records just released "Bleedin\'" by Percy & Penderhughes, check it out at:', { artist: "Percy & Penderhughes", title: "Bleedin'", label: "Mango Hill Records" }],
+    ["New release from Acid Jazz Records", 'Acid Jazz Records just released "Peace & Love / Adapter Chapter" by Roots Records, check it out at:', { artist: "Roots Records", title: "Peace & Love / Adapter Chapter", label: "Acid Jazz Records" }],
+    ["New release from Hiro Ama", 'Hiro Ama just released "Cloud 9 (Live at Total Refreshment Centre", check it out at:', { artist: "Hiro Ama", title: "Cloud 9 (Live at Total Refreshment Centre" }],
+    ["New release from Lyric Jones & Ian Wallace", 'Lyric Jones & Ian Wallace just released "Way Too Long", check it out at:', { artist: "Lyric Jones & Ian Wallace", title: "Way Too Long" }],
+    ["New release from Low Key Source", 'Low Key Source just released "Warning Feat. Rubi Du & Eesah Remixes" by Chasm, check it out at:', { artist: "Chasm", title: "Warning Feat. Rubi Du & Eesah Remixes", label: "Low Key Source" }],
+    ["New release from Haich Ber Na", 'Haich Ber Na just released "Music For Making Friends", check it out at:', { artist: "Haich Ber Na", title: "Music For Making Friends" }],
+  ];
+  test.each(REAL)("real mail: %s", (subject, line, want) => {
+    const body = `Greetings Tarik,\n\n${line}\n[link]\n\nYou are receiving this because you follow them.`;
+    expect(parseBandcampEmail(subject, body)).toEqual(want);
+    // The bug this replaces stored the artist as "Roots Records, check it out at:".
+    expect(JSON.stringify(parseBandcampEmail(subject, body))).not.toMatch(/check it out/);
+  });
+  test("each real line passes checkExtraction against the text the model would see", () => {
+    for (const [subject, line, want] of REAL) {
+      const text = `Subject: ${subject}\n\n${line}\n[link]`;
+      expect(checkExtraction(parseBandcampEmail(subject, text), text, OCT29)).toMatchObject({ ok: true, release: want });
+    }
+  });
+  test("curly quotes, and a line that ends right after the closing quote", () => {
+    expect(parseBandcampEmail("s", "Hiro Ama just released \u201cWay Out\u201d by Ama Trio, check it out at:")).toEqual({ artist: "Ama Trio", title: "Way Out", label: "Hiro Ama" });
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out"')).toEqual({ artist: "Hiro Ama", title: "Way Out" });
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out" by Ama Trio')).toBeNull(); // "by" without the tail: not the template
+    expect(parseBandcampEmail("s", "Hiro Ama just released Way Out, check it out at:")).toBeNull(); // no quotes
+    expect(parseBandcampEmail("s", 'Hiro Ama just released "Way Out", check it out at: [link]')).toBeNull(); // text after the colon
   });
 });
 
@@ -681,6 +710,8 @@ describe("no catastrophic regex time on hostile input", () => {
     senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "" }, ["a@b.example"], PASS("b.example")));
   fast("readBandcampEmbed: unclosed <meta x 100k", () => readBandcampEmbed("<meta".repeat(100_000)));
   fast("parseBandcampEmail: one 20k line of template words", () => parseBandcampEmail("s", "a just released ".repeat(1_300)));
+  fast("parseBandcampEmail: capped lines of quotes and \" by \" runs, 2,000 of them", () =>
+    parseBandcampEmail("s", `${'a just released "x" by '.repeat(21)}\n`.repeat(2_000)));
   fast("cleanMail: a 1.4 MB body and subject", () =>
     cleanMail({ ...inbound("cosign-forwarded"), subject: "a.".repeat(700_000), text: "a[".repeat(700_000) }, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" }));
 });

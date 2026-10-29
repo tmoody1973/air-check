@@ -47,13 +47,13 @@ describe("bandcampEmbed: the one allowlisted page fetch (Hard Rule 5's exception
     expect(JSON.stringify(result)).not.toMatch(/:\/\/[^"]*bandcamp|@|merch/);
   });
 
-  test("the release date from the same request is carried through to embedResult", async () => {
+  test("the release date and the page artist from the same request are carried through to embedResult", async () => {
     const cv = fakeRadar([], [{ releaseId: "r1", pageUrl: ALBUM }]);
-    const dated = html("album-page").replace("</head>", '<script type="application/ld+json">{"datePublished":"29 Oct 2026 00:00:00 GMT"}</script></head>');
+    const dated = html("album-page").replace("</head>", '<script type="application/ld+json">{"datePublished":"29 Oct 2026 00:00:00 GMT","byArtist":{"@type":"MusicGroup","name":"Ferro Lane"}}</script></head>');
     const s = stubHttp(() => page(dated));
     await embedPass({ convex: cv.convex, log: () => {}, http: s.http, sleep: async () => {} });
     expect(s.sent).toHaveLength(1);
-    expect(cv.results[0]!.result).toMatchObject({ kind: "album", id: "1234567890", releasedOn: "2026-10-29" });
+    expect(cv.results[0]!.result).toMatchObject({ kind: "album", id: "1234567890", releasedOn: "2026-10-29", pageArtist: "Ferro Lane" });
   });
 
   test("Task 6b: a page with no player still gives no_player, and its details are dropped with it", async () => {
