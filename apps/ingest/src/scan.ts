@@ -4,7 +4,7 @@ import type { BoxClient } from "./box.js";
 import { buildEpisodes, type BoxFolder, type DriveDoc, type PaperDoc } from "./build.js";
 import type { IngestConvex, SourceReport } from "./convex.js";
 import { onDisk } from "./disk.js";
-import type { DriveClient } from "./drive.js";
+import { RATE_LIMITED, type DriveClient } from "./drive.js";
 import type { DropboxClient } from "./dropbox.js";
 import { AuthRefused, HttpError } from "./http.js";
 import { readTokenFile, refusalKey } from "./tokens.js";
@@ -47,10 +47,10 @@ const push = <T>(m: Map<string, T[]>, k: string, v: T) => void m.set(k, [...(m.g
 /**
  * One doc that can't be read (Drive export 403, a doc over 1 MB, a Dropbox metadata 400) is that doc's question, not a
  * failed source: only the token and list calls fail a source. 429 is retried in `call`; 401 is the access token, not
- * the doc, so it still fails the source.
+ * the doc, so it still fails the source; so does Drive's throttling 403 (M5), which says nothing about the doc.
  */
 const docError = (e: unknown) =>
-  e instanceof HttpError && (e.message === "too_large" || (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429));
+  e instanceof HttpError && e.message !== RATE_LIMITED && (e.message === "too_large" || (e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429));
 const orUnread = <T, U>(p: Promise<T>, unread: U): Promise<T | U> => p.catch((e: unknown) => (docError(e) ? unread : Promise.reject(e)));
 
 /** Hard Rule 8: a short code, never a message that could carry a URL or a token. */

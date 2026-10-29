@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
 import { newMemory, runScan } from "../src/scan.js";
 import { json } from "./fakes.js";
-import { NOTES_SECRET, PAPER_DOCS, world } from "./world.js";
+import { DRIVE_DOCS, NOTES_SECRET, PAPER_DOCS, world } from "./world.js";
 
 let close: (() => Promise<void>) | null = null;
 afterEach(async () => {
@@ -251,6 +251,26 @@ describe("one unreadable doc is that show's question, not a failed source (fix r
     for (const p of ["box", "google", "dropbox"] as const) expect(w.cv.lastSource(p)!.state).toBe("connected");
     await draftPass(draftDeps(w));
     expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-30", true]]);
+  });
+
+  test.each(["rateLimitExceeded", "userRateLimitExceeded"])("M5: a Drive export 403 %s is throttling: the source fails this pass, previous facts kept, no question", async (reason) => {
+    let limited = false;
+    const w = await make({ googleRoutes: { "GET /drive/v3/files/g1/export": (_: unknown, res: Parameters<typeof json>[0]) => {
+      if (limited) return json(res, 403, { error: { code: 403, message: "secret-ish text", errors: [{ domain: "usageLimits", reason }] } });
+      res.writeHead(200);
+      res.end(DRIVE_DOCS.g1!.text);
+    } } });
+    await runScan(w.deps);
+    w.cv.upserts.length = 0;
+    limited = true;
+    await runScan(w.deps);
+    expect(w.deps.memory.lastScanComplete).toBe(false);
+    const jan2 = byDate(w)["2026-01-02"]!;
+    expect(jan2.questions.filter((q) => /could not be read/.test(q.text))).toEqual([]);
+    expect(jan2.tracklist.status).toBe("found");
+    expect(w.cv.lastSource("google")!.state).toBe("connected");
+    expect(w.logs).toContain("ingest step=scan source=google ok=false error=rate_limited");
+    expect(w.logs.join("\n")).not.toContain("secret-ish");
   });
 
   test("a Drive list call failing still fails the source (R14: previous facts kept, no draft)", async () => {

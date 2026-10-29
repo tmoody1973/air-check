@@ -11,6 +11,20 @@ export const DRIVE_QUERY = "name contains 'Rhythm Lab Radio' and mimeType = 'app
 const MAX_EXPORT_BYTES = 1024 ** 2;
 const EXPORT_TIMEOUT_MS = 60_000;
 
+/** M5: Google's throttling is a 403 with one of these reasons; it is transient like a 429, not a problem with the doc. */
+const THROTTLE_REASONS = new Set(["rateLimitExceeded", "userRateLimitExceeded"]);
+export const RATE_LIMITED = "rate_limited";
+
+/** Reads only the error reasons from the body (never logged); a body that isn't Google's error JSON is not throttling. */
+async function throttled(res: Response): Promise<boolean> {
+  try {
+    const j = JSON.parse(await readText(res, 64 * 1024)) as { error?: { errors?: { reason?: unknown }[] } };
+    return (j.error?.errors ?? []).some((e) => THROTTLE_REASONS.has(e.reason as string));
+  } catch {
+    return false;
+  }
+}
+
 export interface DocRef { id: string; name: string }
 export interface DriveClient { listDocs(): Promise<DocRef[]>; exportText(id: string): Promise<string> }
 export interface DriveOptions { tokenUrl?: string; api?: string }
@@ -39,6 +53,7 @@ export function driveClient(http: Http, app: AppCreds, refreshToken: string, opt
     },
     async exportText(id) {
       const res = await call(http, `${api}/files/${encodeURIComponent(id)}/export?mimeType=text/plain`, { headers: await auth() }, EXPORT_TIMEOUT_MS);
+      if (res.status === 403) throw new HttpError(403, (await throttled(res)) ? RATE_LIMITED : undefined);
       if (!res.ok) {
         await res.body?.cancel();
         throw new HttpError(res.status);
