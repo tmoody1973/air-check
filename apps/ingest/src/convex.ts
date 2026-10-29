@@ -9,15 +9,36 @@ export interface ScannedTrack {
   hour: 1 | 2; position: number; artist: string; title: string; feat?: string; raw: string; closing: boolean;
   status: "confirmed" | "spelling-fixed" | "unverified-in-notes" | "closing-track";
 }
+export interface Choice { id: string; name: string }
+/** Plan 6b: what the console can offer to settle a question. Convex accepts only ids a question offered. */
+export type Fix =
+  | { type: "tracklist" }
+  | { type: "pick"; source: "box" | "drive" | "paper"; choices: Choice[] }
+  | { type: "hours"; choices: Choice[] }
+  | { type: "stamp"; folderDate: string; stampDate: string };
+export interface Question { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true; fix?: Fix }
+/** Plan 6b: a fix Tarik saved in Air Check for one show (decision 017). Written only by a signed-in person. */
+export interface Correction {
+  showDate: string;
+  /** Used exactly as typed: Paper never changes its spelling. */
+  tracklistText?: string;
+  drive?: string; paper?: string; box?: string;
+  hours?: { hour1: string; hour2: string };
+  folderDate?: true;
+  updatedAt: number;
+}
 export interface ScannedEpisode {
   showDate: string;
   audio: { status: "ready" | "incomplete" | "ask" | "none"; folderId?: string; hour1?: FileRef; hour2?: FileRef; pattern?: string; flags: string[] };
-  tracklist: { status: "found" | "missing"; docId?: string; tracks?: ScannedTrack[] };
+  /** `text`: the chosen Drive doc's text (at most 20,000 characters), for the console's tracklist editor; kept private. */
+  tracklist: { status: "found" | "missing"; docId?: string; tracks?: ScannedTrack[]; text?: string };
   /** `text` is Paper text: sent only here, for the draft's untrusted-notes input (Hard Rule 12). */
   notes: { status: "found" | "missing"; docId?: string; text?: string };
   /** `action`: only fixing the source settles it (M6); Episodes shows no answer box. */
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true }[];
+  questions: Question[];
   audioOnDisk?: boolean;
+  /** R1 (Plan 6b): this show's correction points at something no source has any more, so it was not used. */
+  correctionStale?: true;
 }
 
 /** One row of ingest.list: the scanned facts without the notes text, plus what Convex knows. */
@@ -27,7 +48,7 @@ export interface IngestRow {
   tracklist: { status: "found" | "missing"; docId?: string };
   notes: { status: "found" | "missing"; docId?: string };
   tracks?: ScannedTrack[];
-  questions: { id: string; text: string; kind: QuestionKind; rerunOf?: string; action?: true; answer?: string }[];
+  questions: (Question & { answer?: string })[];
   audioOnDisk?: boolean;
   rerunOf?: string;
   rerunSource?: "chat" | "episodes" | "detected";

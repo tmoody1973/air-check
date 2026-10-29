@@ -2,7 +2,7 @@ import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
-import { newMemory, runScan } from "../src/scan.js";
+import { dated, newMemory, readBox, readDrive, readPaper, runScan, type Names } from "../src/scan.js";
 import { json } from "./fakes.js";
 import { DRIVE_DOCS, NOTES_SECRET, PAPER_DOCS, world } from "./world.js";
 
@@ -323,5 +323,59 @@ describe("I3: rows for dates no source has any more are pruned, only after a com
     await runScan(w.deps);
     expect(w.cv.rows.has("2026-02-27")).toBe(true);
     expect(w.logs).toContain("ingest step=prune skipped=true count=4");
+  });
+});
+
+describe("Plan 6b: names that can't be dated are listed, and a placement dates them", () => {
+  const MB = 1_000_000;
+  const extra = {
+    box: { "9-4-226": { id: "209", files: [{ type: "file", id: "1091", name: "9125.wav", size: 600 * MB }] }, "Rhythm Lab Radio 11": { id: "210", files: [] } },
+    drive: { g9: { name: "Rhythm Lab Radio 9-4-226", text: "HOUR 1\nA - \"One\"\nHOUR 2\nB - \"Two\"\n" }, g11: { name: "Rhythm Lab Radio 11", text: "old" } },
+    paper: { "id:p9": { name: "Rhythm Lab Radio 9-4-226.paper", options: ["markdown"], text: "notes" }, "id:p11": { name: "Rhythm Lab Radio 11.paper", options: ["markdown"], text: "old" } },
+  };
+  const names = (placements: Names["placements"] = []): Names => ({ placements, unplaced: [] });
+  const cases = [
+    ["paper", "id:p9", "Rhythm Lab Radio 9-4-226.paper", readPaper],
+    ["drive", "g9", "Rhythm Lab Radio 9-4-226", readDrive],
+    ["box", "209", "9-4-226", readBox],
+  ] as const;
+
+  test.each(cases)("%s: an undated name is reported (not 'no date at all'); placed, it becomes that show's", async (source, id, name, read) => {
+    const w = await make({ extra });
+    const n = names();
+    const before = await read(w.deps, n);
+    expect(n.unplaced).toEqual([{ source, id, name, reason: expect.stringMatching(/year "226" is not 2 or 4 digits/) }]);
+    expect(before instanceof Map && [...before.values()].flat().some((x) => x.id === id)).toBe(false);
+
+    const placed = names([{ source, id, date: "2026-09-04" }]);
+    const after = await read(w.deps, placed);
+    expect(placed.unplaced).toEqual([]);
+    expect(after instanceof Map && (after.get("2026-09-04") as { id: string }[]).map((x) => x.id)).toEqual([id]);
+  });
+
+  test("a placement for another source's id is not used", async () => {
+    const w = await make({ extra });
+    const n = names([{ source: "drive", id: "id:p9", date: "2026-09-04" }]);
+    const r = await readPaper(w.deps, n);
+    expect(r instanceof Map && r.has("2026-09-04")).toBe(false);
+    expect(n.unplaced.map((u) => u.id)).toEqual(["id:p9"]);
+  });
+
+  test("a Box folder placed on a date keeps its WAVs for the hours choice", async () => {
+    const w = await make({ extra });
+    const r = await readBox(w.deps, names([{ source: "box", id: "209", date: "2026-09-04" }]));
+    expect(r instanceof Map && r.get("2026-09-04")![0]!.wavs.map((f) => f.id)).toEqual(["1091"]);
+    expect(r instanceof Map && r.get("2026-01-02")![0]!.wavs.map((f) => f.name)).toEqual(["9125.wav", "9126.wav", "9101.wav"]);
+  });
+
+  test("at most 50 are listed per scan; a datable name and an older year are not listed", () => {
+    const n = names();
+    for (let i = 0; i < 60; i++) dated("drive", `Rhythm Lab Radio 9-4-${100 + i}`, `d${i}`, n);
+    expect(n.unplaced).toHaveLength(50);
+    const m = names();
+    expect(dated("drive", "Rhythm Lab Radio 9-4-26", "a", m)).toBe("2026-09-04");
+    expect(dated("drive", "Rhythm Lab Radio 9-4-25", "b", m)).toBeNull();
+    expect(dated("drive", "Rhythm Lab Radio 11", "c", m)).toBeNull();
+    expect(m.unplaced).toEqual([]);
   });
 });

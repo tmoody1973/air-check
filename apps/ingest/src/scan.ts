@@ -37,12 +37,29 @@ export interface ScanDeps {
   dropbox: ((refreshToken: string) => DropboxClient) | null;
 }
 
+/** Plan 6b: Tarik put a doc or folder whose name can't be dated on a show date, in the console. Never written back. */
+export interface Placement { source: "box" | "drive" | "paper"; id: string; date: string }
+/** Plan 6b: a doc or folder whose name holds a date the scanner can't read (e.g. "9-4-226"), listed on Episodes. */
+export interface Unplaced { source: Placement["source"]; id: string; name: string; reason: string }
+/** One scan's placements in, and the names it could not date out. */
+export interface Names { placements: Placement[]; unplaced: Unplaced[] }
+const MAX_UNPLACED = 50;
+const NO_DATE = "No date found in the title.";
+
 /** R3: 2026 dates only. */
 const is2026 = (date: string) => date.startsWith("2026-");
-const dated = (name: string) => {
+/**
+ * A doc's or folder's show date: Tarik's placement first, then its name. A name with something date-like the rules
+ * refuse is listed in `names.unplaced` (at most 50); one with no date at all (old one-offs) or an older year is not.
+ */
+export function dated(source: Placement["source"], name: string, id: string, names: Names): string | null {
+  const placed = names.placements.find((p) => p.source === source && p.id === id);
+  if (placed && is2026(placed.date)) return placed.date;
   const d = showDateFromTitle(name);
-  return d.ok && is2026(d.date) ? d.date : null;
-};
+  if (d.ok) return is2026(d.date) ? d.date : null;
+  if (d.reason !== NO_DATE && names.unplaced.length < MAX_UNPLACED) names.unplaced.push({ source, id, name, reason: d.reason });
+  return null;
+}
 const push = <T>(m: Map<string, T[]>, k: string, v: T) => void m.set(k, [...(m.get(k) ?? []), v]);
 /**
  * One doc that can't be read (Drive export 403, a doc over 1 MB, a Dropbox metadata 400) is that doc's question, not a
@@ -106,7 +123,7 @@ async function tokenFor(deps: ScanDeps, source: "google" | "dropbox", configured
   return { ...t, key: refusalKey(source, t.refreshToken, t.connectedAt ?? null) };
 }
 
-async function readBox(deps: ScanDeps): Promise<Read<BoxFolder>> {
+export async function readBox(deps: ScanDeps, names: Names): Promise<Read<BoxFolder>> {
   if (!deps.box) {
     await report(deps, { source: "box", state: "not_connected", lastError: "not_configured" });
     return ABSENT;
@@ -117,30 +134,30 @@ async function readBox(deps: ScanDeps): Promise<Read<BoxFolder>> {
   return guarded(deps, "box", null, undefined, async () => {
     const byDate = new Map<string, BoxFolder[]>();
     for (const f of await client.items(folderId)) {
-      const date = f.type === "folder" ? dated(f.name) : null;
+      const date = f.type === "folder" ? dated("box", f.name, f.id, names) : null;
       if (!date) continue; // older years, and folders with no date at all (nothing to attach them to)
       const files = (await client.items(f.id)).filter((x) => x.type === "file").map(({ id, name, size }) => ({ id, name, size }));
-      push(byDate, date, { id: f.id, name: f.name, assembly: assembleEpisode(f.name, files) });
+      push(byDate, date, { id: f.id, name: f.name, assembly: assembleEpisode(f.name, files), wavs: files.filter((x) => /\.wav$/i.test(x.name)) });
     }
     return { value: byDate, count: byDate.size };
   });
 }
 
-async function readDrive(deps: ScanDeps): Promise<Read<DriveDoc>> {
+export async function readDrive(deps: ScanDeps, names: Names): Promise<Read<DriveDoc>> {
   const t = await tokenFor(deps, "google", !!deps.google);
   if (t === ABSENT || t === null) return t;
   return guarded(deps, "google", t.key, t.account, async () => {
     const drive = deps.google!(t.refreshToken);
     const byDate = new Map<string, DriveDoc[]>();
     for (const d of await drive.listDocs()) {
-      const date = dated(d.name);
+      const date = dated("drive", d.name, d.id, names);
       if (date) push(byDate, date, { id: d.id, name: d.name, text: await orUnread(drive.exportText(d.id), null) });
     }
     return { value: byDate, count: byDate.size };
   });
 }
 
-async function readPaper(deps: ScanDeps): Promise<Read<PaperDoc>> {
+export async function readPaper(deps: ScanDeps, names: Names): Promise<Read<PaperDoc>> {
   const t = await tokenFor(deps, "dropbox", !!deps.dropbox);
   if (t === ABSENT || t === null) return t;
   return guarded(deps, "dropbox", t.key, t.account, async () => {
@@ -148,7 +165,7 @@ async function readPaper(deps: ScanDeps): Promise<Read<PaperDoc>> {
     const byDate = new Map<string, PaperDoc[]>();
     // R3: .paper files named for a 2026 show that mention Rhythm Lab, anywhere in the Dropbox.
     for (const f of await dbx.listFiles()) {
-      const date = /\.paper$/i.test(f.name) && /rhythm lab/i.test(f.name) ? dated(f.name) : null;
+      const date = /\.paper$/i.test(f.name) && /rhythm lab/i.test(f.name) ? dated("paper", f.name, f.id, names) : null;
       if (date) push(byDate, date, { id: f.id, name: f.name, export: await orUnread(dbx.exportText(f.id), { kind: "unreadable" as const }) });
     }
     return { value: byDate, count: byDate.size };
@@ -183,9 +200,11 @@ export async function runScan(deps: ScanDeps): Promise<void> {
     if (!prev) uncached = true;
     return prev ?? new Map();
   };
-  const box = use("box", "box", await readBox(deps));
-  const drive = use("google", "drive", await readDrive(deps));
-  const paper = use("dropbox", "paper", await readPaper(deps));
+  // ponytail: Task 3 of Plan 6b fills placements from ingest.list and reports `unplaced` after a complete scan.
+  const names: Names = { placements: [], unplaced: [] };
+  const box = use("box", "box", await readBox(deps, names));
+  const drive = use("google", "drive", await readDrive(deps, names));
+  const paper = use("dropbox", "paper", await readPaper(deps, names));
   deps.memory.lastScanComplete = failed.length === 0;
 
   const [{ episodes: stored }, disk] = await Promise.all([deps.convex.list(), onDisk(deps.inboxDir, deps.preparedDir)]);

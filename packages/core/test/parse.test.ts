@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatTrack, formatTracklist, parseTracklist } from "../src/index";
+import { formatTrack, formatTracklist, parseDriveTracklist, parseTracklist } from "../src/index";
 import { readFixture } from "./helpers/fixtures";
 
 test("golden 10-2-26 parses to 15 + 16 with closing tracks", () => {
@@ -74,4 +74,9 @@ test("formatTracklist writes both hours under Hour headings and parses back to t
   const back = parseTracklist(text);
   expect(back.bad).toEqual([]);
   expect(back.tracks.map((t) => [t.hour, t.artist, t.title, t.feat, t.closing])).toEqual(p.tracks.map((t) => [t.hour, t.artist, t.title, t.feat, t.closing]));
+});
+
+test("parseDriveTracklist: a title line above HOUR 1 is not bad; a track-like line there still is", () => {
+  expect(parseDriveTracklist('Rhythm Lab Radio\nHOUR 1\nA - "One"\nHOUR 2\nB - "Two"').bad).toEqual([]);
+  expect(parseDriveTracklist('X - "Early"\nHOUR 1\nA - "One"').bad.map((b) => b.reason)).toEqual(["before-hour-marker"]);
 });

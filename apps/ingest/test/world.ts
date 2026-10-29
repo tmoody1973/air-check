@@ -44,9 +44,14 @@ export const PAPER_DOCS: Record<string, { name: string; options: string[]; text:
   "id:px": { name: "Shopping list 1-2-26.paper", options: ["markdown"], text: "milk" },
 };
 
-export interface WorldOptions { googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler>; dropboxList?: () => boolean; googleRoutes?: Record<string, Handler>; dropboxRoutes?: Record<string, Handler> }
+/** Extra Box folders, Drive docs and Paper docs, merged over the defaults (Plan 6b: names that can't be dated). */
+export interface Extra { box?: typeof BOX_FOLDERS; drive?: typeof DRIVE_DOCS; paper?: typeof PAPER_DOCS }
+export interface WorldOptions { extra?: Extra; googleToken?: unknown; dropboxToken?: unknown; box?: boolean; boxToken?: Handler; googleTokenRoute?: Handler; dropboxTokenRoute?: Handler; download?: Record<string, Handler>; dropboxList?: () => boolean; googleRoutes?: Record<string, Handler>; dropboxRoutes?: Record<string, Handler> }
 
 export async function world(o: WorldOptions = {}) {
+  const BOX = { ...BOX_FOLDERS, ...o.extra?.box };
+  const DRIVE = { ...DRIVE_DOCS, ...o.extra?.drive };
+  const PAPER = { ...PAPER_DOCS, ...o.extra?.paper };
   const dir = await mkdtemp(join(tmpdir(), "ingest-"));
   const tokenDir = join(dir, "tokens");
   const inboxDir = join(dir, "inbox");
@@ -64,13 +69,13 @@ export async function world(o: WorldOptions = {}) {
     },
     ...o.download,
   });
-  const byId = new Map(Object.entries(BOX_FOLDERS).flatMap(([, f]) => f.files.map((x) => [x.id, x] as const)));
+  const byId = new Map(Object.entries(BOX).flatMap(([, f]) => f.files.map((x) => [x.id, x] as const)));
   const boxRoutes: Record<string, Handler | Handler[]> = {
     "POST /oauth2/token": o.boxToken ?? ((_, res) => json(res, 200, { access_token: "box-access", expires_in: 3600 })),
     "GET /2.0/folders/123/items": (_, res) =>
-      json(res, 200, { total_count: Object.keys(BOX_FOLDERS).length + 1, entries: [...Object.entries(BOX_FOLDERS).map(([name, f]) => ({ type: "folder", id: f.id, name })), { type: "file", id: "9", name: "readme.txt", size: 1 }] }),
+      json(res, 200, { total_count: Object.keys(BOX).length + 1, entries: [...Object.entries(BOX).map(([name, f]) => ({ type: "folder", id: f.id, name })), { type: "file", id: "9", name: "readme.txt", size: 1 }] }),
   };
-  for (const f of Object.values(BOX_FOLDERS)) boxRoutes[`GET /2.0/folders/${f.id}/items`] = (_, res) => json(res, 200, { total_count: f.files.length, entries: f.files });
+  for (const f of Object.values(BOX)) boxRoutes[`GET /2.0/folders/${f.id}/items`] = (_, res) => json(res, 200, { total_count: f.files.length, entries: f.files });
   for (const id of byId.keys())
     // ponytail: the fake serves a small body; the test's Box listing sizes are what the download is checked against.
     boxRoutes[`GET /2.0/files/${id}/content`] = (_, res) => { res.writeHead(302, { location: `${dl.base}/d?size=${byId.get(id)!.size / MB}` }); res.end(); };
@@ -78,16 +83,16 @@ export async function world(o: WorldOptions = {}) {
 
   const google = await fakeServer({
     "POST /token": o.googleTokenRoute ?? ((_, res) => json(res, 200, { access_token: "g-access", expires_in: 3599 })),
-    "GET /drive/v3/files": (_, res) => json(res, 200, { files: Object.entries(DRIVE_DOCS).map(([id, d]) => ({ id, name: d.name })) }),
-    ...Object.fromEntries(Object.entries(DRIVE_DOCS).map(([id, d]) => [`GET /drive/v3/files/${id}/export`, (_: unknown, res: Parameters<typeof json>[0]) => { res.writeHead(200); res.end(d.text); }])),
+    "GET /drive/v3/files": (_, res) => json(res, 200, { files: Object.entries(DRIVE).map(([id, d]) => ({ id, name: d.name })) }),
+    ...Object.fromEntries(Object.entries(DRIVE).map(([id, d]) => [`GET /drive/v3/files/${id}/export`, (_: unknown, res: Parameters<typeof json>[0]) => { res.writeHead(200); res.end(d.text); }])),
     ...o.googleRoutes,
   });
   const dropbox = await fakeServer({
     "POST /oauth2/token": o.dropboxTokenRoute ?? ((_, res) => json(res, 200, { access_token: "d-access", expires_in: 14400 })),
     "POST /2/files/list_folder": (_, res) => (o.dropboxList && !o.dropboxList()) ? json(res, 500, {}) :
-      json(res, 200, { entries: [...Object.entries(PAPER_DOCS).map(([id, d]) => ({ ".tag": "file", id, name: d.name })), { ".tag": "folder", id: "id:f", name: "Show notes" }], has_more: false, cursor: "c" }),
-    "POST /2/files/get_metadata": (req, res) => json(res, 200, { id: JSON.parse(req.body).path, export_info: { export_options: PAPER_DOCS[JSON.parse(req.body).path]!.options } }),
-    "POST /2/files/export": (req, res) => { res.writeHead(200); res.end(PAPER_DOCS[JSON.parse(String(req.headers["dropbox-api-arg"])).path]!.text); },
+      json(res, 200, { entries: [...Object.entries(PAPER).map(([id, d]) => ({ ".tag": "file", id, name: d.name })), { ".tag": "folder", id: "id:f", name: "Show notes" }], has_more: false, cursor: "c" }),
+    "POST /2/files/get_metadata": (req, res) => json(res, 200, { id: JSON.parse(req.body).path, export_info: { export_options: PAPER[JSON.parse(req.body).path]!.options } }),
+    "POST /2/files/export": (req, res) => { res.writeHead(200); res.end(PAPER[JSON.parse(String(req.headers["dropbox-api-arg"])).path]!.text); },
     ...o.dropboxRoutes,
   });
 
