@@ -1,8 +1,12 @@
 import type { BadLine, Hour, ParsedTracklist, Track } from "../types";
 
 const HOUR_MARKER = /^hour\s*(1|2|one|two)\b[\s:–—-]*$/i;
-const SPACED_DASH = /\s[-–—]\s/;
-const OPEN_QUOTE = /^["“]/;
+// A spaced dash, or a dash pressed against an opening quote (`James Blake –”Title”`, `Artist -"Title"`). A hyphen
+// inside a word (`Jay-Z`, `Lo-Fi`) has no space before it, so it never splits. Single quotes are left out: `’` is
+// also the apostrophe, so `-‘Don’t’` would close early.
+const SPACED_DASH = /\s[-–—](?:\s|(?=["“”]))/;
+// `”` too: hand-typed lines open with it after a pressed dash (`–”Doesn’t Just Happen”`).
+const OPEN_QUOTE = /^["“”]/;
 const CLOSE_QUOTE = /["”]/;
 const FEAT_PREFIX = /^(?:feat\.|ft\.|featuring)\s+(.+)$/i;
 const TRAILING_FEAT = /^(.*?)\s+(?:feat\.|ft\.|featuring)\s+(.+)$/i;

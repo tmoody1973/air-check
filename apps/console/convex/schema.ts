@@ -104,6 +104,9 @@ export default defineSchema({
   // One row: when a placement was last removed. A delete leaves no updatedAt behind, so ingest.list's rescanAfter
   // counts this too and Undo rescans as promptly as a save. (A removed fix keeps its row and updatedAt, I2.)
   rescanAsks: defineTable({ at: v.number() }),
+  // The 2025 Fridays Tarik added on Episodes, one by one: the scanner reads these dates as well as 2026 (the backlog is
+  // otherwise 2026 only). Written only by a signed-in real human (episodes.addShowDate / removeShowDate).
+  extraDates: defineTable({ date: v.string(), addedAt: v.number() }).index("by_date", ["date"]),
   // One row per source the ingest service reads. Hard Rule 2: state and account only, never a credential.
   ingestSources: defineTable({
     source: v.union(v.literal("box"), v.literal("google"), v.literal("dropbox")),

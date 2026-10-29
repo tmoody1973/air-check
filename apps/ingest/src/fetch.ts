@@ -2,7 +2,7 @@ import { mkdir, rm, rmdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { nextAudioToFetch } from "@aircheck/core";
 import { MAX_DOWNLOAD_BYTES, type BoxClient } from "./box.js";
-import type { IngestConvex } from "./convex.js";
+import { inBacklog, type IngestConvex } from "./convex.js";
 import { factsOf, onDisk, removeStaleParts } from "./disk.js";
 import { AuthRefused, HttpError } from "./http.js";
 
@@ -34,12 +34,13 @@ export async function fetchPass(deps: FetchDeps): Promise<void> {
   if (!deps.box) return;
   const now = deps.now ?? Date.now;
   await removeStaleParts(deps.inboxDir);
-  const [{ episodes }, disk] = await Promise.all([deps.convex.list(), onDisk(deps.inboxDir, deps.preparedDir)]);
+  const [{ episodes, extraDates }, disk] = await Promise.all([deps.convex.list(), onDisk(deps.inboxDir, deps.preparedDir)]);
   const backingOff = (d: string) => {
     const f = deps.failures.get(d);
     return !!f && (f.count >= MAX_FETCH_FAILURES || now() - f.at < RETRY_BACKOFF_MS);
   };
-  const facts = episodes.filter((r) => !backingOff(r.showDate)).map((r) => factsOf(r, disk.complete.has(r.showDate)));
+  // Only backlog dates: a removed 2025 date's leftover row is never downloaded.
+  const facts = episodes.filter((r) => inBacklog(r.showDate, extraDates) && !backingOff(r.showDate)).map((r) => factsOf(r, disk.complete.has(r.showDate)));
   // A show half on disk (a failed or interrupted download) already holds its space: finish it first.
   const half = facts.filter((f) => disk.held.has(f.showDate));
   const next = nextAudioToFetch(half, 0, MAX_ON_DISK) ?? nextAudioToFetch(facts, disk.held.size, MAX_ON_DISK);

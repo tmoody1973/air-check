@@ -36,7 +36,7 @@ Jobs A, B, and C are the demo. D shows the station-data angle. E is what makes i
 
 Important data rules:
 - The Convex station `rhythmlab` is the 24/7 stream, **not** the weekly show. It is never queried.
-- Scope is 2026-01-01 forward. As of today: 35 shows have a Drive tracklist, 31 have Box audio, 29 have audio, tracklist and Paper notes.
+- Scope is 2026-01-01 forward, plus any 2025 Friday Tarik adds on Episodes (decision 018; the console warns when Mixcloud already has a show for that date). As of today: 35 shows have a Drive tracklist, 31 have Box audio, 29 have audio, tracklist and Paper notes.
 - Mixcloud's newest posted cloudcast is the 10.24.25 episode (posted Nov 12, 2025), so the backlog is about 35 to 40 shows. Confirm against the live account.
 
 ## 3. Components

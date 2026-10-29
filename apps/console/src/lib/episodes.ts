@@ -3,8 +3,8 @@
 
 type Countable = { status: string; gaps: readonly string[]; questions: readonly { answer?: string }[] };
 
-const DONE = new Set(["published", "rerun", "skipped"]);
-/** Still to clear: not on Mixcloud, not a rerun (reruns are never posted), not skipped. */
+const DONE = new Set(["published", "rerun", "skipped", "not-in-backlog"]);
+/** Still to clear: not on Mixcloud, not a rerun (reruns are never posted), not skipped, not a removed 2025 date. */
 export const inBacklog = (r: { status: string }) => !DONE.has(r.status);
 export const backlogCount = (rows: readonly { status: string }[]) => rows.filter(inBacklog).length;
 
@@ -45,8 +45,9 @@ export function summaryLine(rows: readonly Countable[], blanks: number, notConne
   const gap = (g: Column, words: (n: number) => string) => (notConnected.includes(g) ? NOT_CONNECTED[g] : count(g) && words(count(g)));
   const questions = open.reduce((n, r) => n + r.questions.filter((q) => !q.answer).length, 0);
   const reruns = rows.filter((r) => r.status === "rerun").length;
+  const removed = rows.filter((r) => r.status === "not-in-backlog").length;
   const parts = [
-    plural(rows.length - reruns, "show"),
+    plural(rows.length - reruns - removed, "show"),
     gap("audio", (n) => `${n} missing audio`),
     gap("tracklist", (n) => plural(n, "missing tracklist")),
     gap("notes", (n) => `${n} missing notes`),

@@ -2,7 +2,7 @@ import { formatTracklist, isShowDate, parseDriveTracklist } from "@aircheck/core
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { correctionFor, draftRunsFor, episodeByDate, isOpenRun, linkedPackage, requireRealHuman } from "./episodes";
+import { askRescan, correctionFor, episodeByDate, inScope, isFriday, refuseFrozen, requireRealHuman } from "./episodes";
 import { actorOf, workspaceOf } from "./gate";
 import { fixSourceV } from "./schema";
 import { MAX_NOTES } from "./tracklist";
@@ -19,16 +19,10 @@ type Episode = Doc<"episodes">;
 type Fix = NonNullable<Episode["questions"][number]["fix"]>;
 
 const MAX_TRACKS = 100;
-const FROZEN = "this show already has a package; change it on the package page";
 const ON_DISK = "this show's audio is already downloaded";
 const REASONS = { "no-separator": "needs “Artist - Title”", "before-hour-marker": "add a HOUR 1 or HOUR 2 line above it" } as const;
 
 const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
-
-async function refuseFrozen(ctx: QueryCtx, showDate: string): Promise<void> {
-  if ((await linkedPackage(ctx, showDate)).packageStatus !== "none") throw badInput(FROZEN);
-  if ((await draftRunsFor(ctx, showDate)).some((r) => isOpenRun(r))) throw badInput(FROZEN);
-}
 
 /** The checks every show correction shares: a real human, a known show, not frozen, and (for audio) not downloaded. */
 async function editable(ctx: QueryCtx, showDate: string, audio: boolean): Promise<Episode> {
@@ -52,12 +46,6 @@ async function save(ctx: MutationCtx, showDate: string, field: Partial<Omit<Corr
 /** The fixes the show's current questions offer. */
 const offers = (row: Episode): Fix[] => row.questions.flatMap((q) => (q.fix ? [q.fix] : []));
 
-/** Undo deletes a placement, which leaves no updatedAt behind, so the scanner is told to rescan here. */
-async function askRescan(ctx: MutationCtx): Promise<void> {
-  const row = await ctx.db.query("rescanAsks").first();
-  if (row) await ctx.db.patch(row._id, { at: Date.now() });
-  else await ctx.db.insert("rescanAsks", { at: Date.now() });
-}
 
 /** Why a typed tracklist can't be used, in the page's plain words; null when it can. Same rule as the scanner's for Drive. */
 function tracklistProblem(text: string): string | null {
@@ -146,8 +134,6 @@ export const tracklistText = query({
 const placementBy = (ctx: QueryCtx, source: Doc<"placements">["source"], id: string) =>
   ctx.db.query("placements").withIndex("by_source_id", (q) => q.eq("source", source).eq("id", id)).unique();
 
-const isFriday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
-
 /**
  * "This is the show for…": dates a doc or folder whose name the scanner could not read. Never a rename. I1: "Move"
  * re-dates an existing placement even after a scan dropped it from the undated list; a new one needs a listed name.
@@ -156,7 +142,7 @@ export const place = mutation({
   args: { source: fixSourceV, id: v.string(), date: v.string() },
   handler: async (ctx, { source, id, date }) => {
     await requireRealHuman(ctx);
-    if (!isShowDate(date) || !date.startsWith("2026-")) throw badInput("the date must be a real 2026 date, yyyy-mm-dd");
+    if (!isShowDate(date) || !(await inScope(ctx, date))) throw badInput("the date must be a real 2026 date or a 2025 show added above, yyyy-mm-dd");
     if (!isFriday(date)) throw badInput("Rhythm Lab airs Fridays — pick a Friday");
     const cur = await placementBy(ctx, source, id);
     const listed = await ctx.db.query("unplaced").withIndex("by_source_id", (q) => q.eq("source", source).eq("id", id)).unique();

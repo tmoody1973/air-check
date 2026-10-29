@@ -1,3 +1,4 @@
+import { showDateFromTitle } from "@aircheck/core";
 import { appOrigin } from "./app-origin";
 import { writeTokenFile as writeAnyTokenFile } from "./oauth";
 
@@ -84,3 +85,63 @@ export const writeTokenFile = (path: string, data: TokenFile) => writeAnyTokenFi
 
 /** The only log line this flow writes. Never the token, code, secret or upstream text. */
 export const logStep = (step: string, ok: boolean) => console.info(`mixcloud step=${step} ok=${ok}`);
+
+// Add a 2025 show: which dates already have a show on Tarik's Mixcloud, read from the PUBLIC cloudcasts list (no
+// token, never a write). Names are untrusted text: returned as data, shown as plain text, never logged.
+const POSTED_FIRST = "https://api.mixcloud.com/rhythmlab/cloudcasts/?limit=100";
+const POSTED_PAGES = 10;
+/** One deadline for the whole paging loop, not per page. */
+const POSTED_DEADLINE_MS = 15_000;
+/** A page of 100 shows is well under this; anything bigger is not the list. */
+const MAX_PAGE_BYTES = 2_000_000;
+
+/** The body as text, or null once it passes `max` bytes (read in chunks, so a huge reply is never held whole). */
+async function readCapped(res: Response, max: number): Promise<string | null> {
+  if (Number(res.headers.get("content-length") ?? 0) > max) return null;
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    size += r.value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(r.value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+const MAX_NAME = 300;
+export type Posted = { date: string; name: string };
+
+/** `year`'s shows already on Mixcloud, dated from their names, oldest first; null when Mixcloud can't be read. */
+export async function postedShows(year: string, deadlineMs = POSTED_DEADLINE_MS): Promise<Posted[] | null> {
+  const out: Posted[] = [];
+  const signal = AbortSignal.timeout(deadlineMs);
+  let url: string | undefined = POSTED_FIRST;
+  try {
+    for (let i = 0; i < POSTED_PAGES && url; i++) {
+      const res = await fetch(url, { signal, cache: "no-store" });
+      if (!res.ok) return null;
+      const text = await readCapped(res, MAX_PAGE_BYTES);
+      if (text === null) return null;
+      const body = JSON.parse(text) as { data?: unknown; paging?: { next?: unknown } } | null;
+      if (!Array.isArray(body?.data)) return null;
+      let older = false;
+      for (const c of body.data as { name?: unknown; created_time?: unknown }[]) {
+        if (typeof c?.name !== "string") continue;
+        const d = showDateFromTitle(c.name);
+        if (d.ok && d.date.startsWith(`${year}-`)) out.push({ date: d.date, name: c.name.slice(0, MAX_NAME) });
+        // Newest uploads first: one from before the year means every later page is older too.
+        if (typeof c.created_time === "string" && c.created_time < year) older = true;
+      }
+      const next = body.paging?.next;
+      // Only Mixcloud's own API is followed, never a link the response points elsewhere.
+      url = !older && typeof next === "string" && next.startsWith("https://api.mixcloud.com/") ? next : undefined;
+    }
+  } catch {
+    return null;
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}

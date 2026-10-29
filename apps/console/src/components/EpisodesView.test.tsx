@@ -298,7 +298,7 @@ describe("EpisodeItem as a card (R15: phone width, no sideways scroll)", () => {
       <EpisodesView layout="cards" data={{ episodes: [ep("2026-01-09")], awaitingReview: 0 }} sources={[{ source: "box", state: "connected" }, { source: "dropbox", state: "connected" }]} workspace="real" today="2026-01-09" actions={actions()} />,
     );
     expect(screen.getByText("1 show · tracklists not connected · 1 blank Friday")).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: /2026 shows/ })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: /Shows, oldest first/ })).toBeInTheDocument();
     expect(rowOf("2026-01-02")).toHaveTextContent("No show folder or tracklist found");
     expect(screen.getByRole("link", { name: "Connect Google in Settings" })).toHaveAttribute("href", "/settings");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

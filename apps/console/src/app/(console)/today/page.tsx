@@ -60,7 +60,7 @@ export default function TodayPage() {
           {episodes && (
             <p className="-mt-2 text-sm">
               <Link href="/episodes" className="font-medium underline underline-offset-2 hover:text-signal-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal">
-                2026 backlog: {plural(backlogCount(episodes.episodes), "show")} to go
+                Backlog: {plural(backlogCount(episodes.episodes), "show")} to go
               </Link>
             </p>
           )}

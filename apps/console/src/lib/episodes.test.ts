@@ -51,6 +51,11 @@ describe("backlogCount", () => {
   it("shows still to clear: not published, not a rerun, not skipped", () => {
     expect(backlogCount([row("published"), row("rerun"), row("skipped"), row("question"), row("awaiting-review"), row("failed")])).toBe(3);
   });
+
+  it("a removed 2025 date whose row stays is not backlog, nor a show in the summary", () => {
+    expect(backlogCount([row("not-in-backlog", ["audio"]), row("question")])).toBe(1);
+    expect(summaryLine([row("not-in-backlog", ["audio"]), row("question")], 0)).toBe("1 show");
+  });
 });
 
 describe("fetchErrorText", () => {

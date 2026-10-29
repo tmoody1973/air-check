@@ -219,3 +219,40 @@ describe("draft: one show at a time (Review Focus 4)", () => {
   });
 });
 
+
+describe("a removed 2025 date whose row stays is never fetched or drafted (review fix 1)", () => {
+  const D25 = "2025-12-26";
+  const scannedThenRemoved = async () => {
+    const w = await world();
+    close = w.close;
+    w.cv.extraDates.push(D25);
+    await runScan(w.deps);
+    expect(w.cv.rows.has(D25)).toBe(true);
+    w.cv.extraDates.length = 0; // removed; its row stays (a correction, or prune's cap)
+    return w;
+  };
+
+  test("draft passes over it to a 2026 show", async () => {
+    const w = await scannedThenRemoved();
+    await draftPass({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+    // (01-02 shares its tracks with the 12-26-25 fixture, so it asks "is this a rerun?" and 01-30 is next.)
+    expect(w.cv.draftCalls.map((c) => c.showDate)).toEqual(["2026-01-30"]);
+  });
+
+  test("fetch skips it even with a package", async () => {
+    const w = await scannedThenRemoved();
+    w.cv.packages.set(D25, "preparing_audio");
+    await fetchPass(fetchDeps(w));
+    expect(downloads(w)).toEqual([]);
+    expect(w.cv.fetches).toEqual([]);
+  });
+
+  test("while it is added, it is drafted first like any oldest show", async () => {
+    const w = await world();
+    close = w.close;
+    w.cv.extraDates.push(D25);
+    await runScan(w.deps);
+    await draftPass({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+    expect(w.cv.draftCalls.map((c) => c.showDate)).toEqual([D25]);
+  });
+});

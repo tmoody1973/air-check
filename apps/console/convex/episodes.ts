@@ -117,7 +117,10 @@ export async function episodeRows(ctx: QueryCtx) {
       const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
       const openRun = runs.some((r) => isOpenRun(r));
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
+      const derived = episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts));
+      // A removed 2025 date whose row stays (a correction, a package, prune's cap) is not backlog: never drafted or counted.
+      const status = (await inScope(ctx, e.showDate)) ? derived.status : "not-in-backlog";
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...derived, status };
     }),
   );
 }
@@ -127,6 +130,68 @@ export async function requireRealHuman(ctx: QueryCtx): Promise<void> {
 }
 const badInput = (message: string) => new ConvexError({ code: "BAD_INPUT", message });
 const notFound = (message: string) => new ConvexError({ code: "NOT_FOUND", message });
+
+const FROZEN = "this show already has a package; change it on the package page";
+/** A show with a package (any status) or an open draft run is frozen: it is changed on the package page. */
+export async function refuseFrozen(ctx: QueryCtx, showDate: string): Promise<void> {
+  if ((await linkedPackage(ctx, showDate)).packageStatus !== "none") throw badInput(FROZEN);
+  if ((await draftRunsFor(ctx, showDate)).some((r) => isOpenRun(r))) throw badInput(FROZEN);
+}
+
+/** A delete leaves no updatedAt behind, so the scanner is told to rescan here (ingest.list's rescanAfter counts it). */
+export async function askRescan(ctx: MutationCtx): Promise<void> {
+  const row = await ctx.db.query("rescanAsks").first();
+  if (row) await ctx.db.patch(row._id, { at: Date.now() });
+  else await ctx.db.insert("rescanAsks", { at: Date.now() });
+}
+
+export const isFriday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
+
+const extraDateRow = (ctx: QueryCtx, date: string) => ctx.db.query("extraDates").withIndex("by_date", (q) => q.eq("date", date)).unique();
+/** The backlog's dates: 2026, plus the 2025 Fridays Tarik added. */
+export const inScope = async (ctx: QueryCtx, date: string) => date.startsWith("2026-") || !!(await extraDateRow(ctx, date));
+/** The added 2025 dates, oldest first. */
+export const extraDateList = async (ctx: QueryCtx) => (await ctx.db.query("extraDates").withIndex("by_date").collect()).map((r) => r.date);
+
+/**
+ * "Add a 2025 show": a 2025 Friday joins the backlog, so the scanner reads its Box folder, Drive doc and Paper doc like
+ * a 2026 one. Only the dates added here, so nothing already on Mixcloud is drafted again. Idempotent.
+ */
+export const addShowDate = mutation({
+  args: { date: v.string() },
+  handler: async (ctx, { date }) => {
+    await requireRealHuman(ctx);
+    if (!isShowDate(date) || !date.startsWith("2025-")) throw badInput("the date must be a real 2025 date, yyyy-mm-dd");
+    if (!isFriday(date)) throw badInput("Rhythm Lab airs Fridays — pick a Friday");
+    if (await extraDateRow(ctx, date)) return;
+    await ctx.db.insert("extraDates", { date, addedAt: Date.now() });
+    await askRescan(ctx);
+  },
+});
+
+/** Takes an added 2025 date back out; its plain row goes at the next complete scan (ingest.prune). Not once drafted. */
+export const removeShowDate = mutation({
+  args: { date: v.string() },
+  handler: async (ctx, { date }) => {
+    await requireRealHuman(ctx);
+    const row = await extraDateRow(ctx, date);
+    if (!row) return;
+    await refuseFrozen(ctx, date);
+    // R3: downloaded audio is on its way to a draft; taking the date out now would strand it.
+    if ((await episodeByDate(ctx, date))?.audioOnDisk) throw badInput("this show's audio is already downloaded");
+    await ctx.db.delete(row._id);
+    await askRescan(ctx);
+  },
+});
+
+/** The added 2025 dates for Episodes. Real human only. */
+export const extraDates = query({
+  args: {},
+  handler: async (ctx) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") return null;
+    return extraDateList(ctx);
+  },
+});
 
 /**
  * Why a rerun mark is refused, in plain words; [] when it is fine. Every path that sets rerunOf (the Episodes row, the

@@ -2,9 +2,16 @@
 
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import type { Posted } from "@/components/AddShowDate";
 import { EpisodesView } from "@/components/EpisodesView";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { useChicagoDayKey } from "@/lib/date";
+
+/** The console's own route (signed-in session cookie); null when it or Mixcloud couldn't answer. */
+async function postedShows(): Promise<Posted[] | null> {
+  const res = await fetch("/api/mixcloud/posted?year=2025", { cache: "no-store" });
+  return res.ok ? ((await res.json()) as Posted[]) : null;
+}
 
 export default function EpisodesPage() {
   const workspace = useWorkspace();
@@ -22,6 +29,10 @@ export default function EpisodesPage() {
   const clearCorrection = useMutation(api.corrections.clear);
   const place = useMutation(api.corrections.place);
   const unplace = useMutation(api.corrections.unplace);
+  // Add a 2025 show: only the 2025 Fridays added here join the backlog.
+  const added = useQuery(api.episodes.extraDates, {});
+  const addShowDate = useMutation(api.episodes.addShowDate);
+  const removeShowDate = useMutation(api.episodes.removeShowDate);
   const convex = useConvex();
   // Read once when the editor opens, not subscribed: a rescan must not replace what Tarik is typing.
   const tracklistText = async (showDate: string) => (await convex.query(api.corrections.tracklistText, { showDate }))?.text ?? "";
@@ -35,6 +46,8 @@ export default function EpisodesPage() {
         workspace={workspace}
         today={today}
         actions={{ answer, markRerun, unmarkRerun, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText }}
+        added={added}
+        addActions={{ addShowDate, removeShowDate, postedShows }}
       />
     </Shell>
   );

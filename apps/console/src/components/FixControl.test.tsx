@@ -249,16 +249,18 @@ describe("undated names", () => {
     { source: "box", id: "b1", name: "RLR spring special", reason: "no date in the name", seenAt: 1 },
   ];
 
-  it("lists each item with its source and name, and places it on a 2026 show", async () => {
+  it("lists each item with its source and name, and places it on a show (2026, or a 2025 one Convex knows was added)", async () => {
     const { acts } = setup([ep("2026-01-09")], { unplaced: names(items) });
     const section = screen.getByRole("region", { name: "Couldn't tell the date of these" });
     const first = within(section).getByText("Rhythm Lab playlist (final)").closest("li")!;
     expect(first).toHaveTextContent("Google Drive");
     const date = within(first).getByLabelText("This is the show for…");
     expect(date).toHaveAttribute("type", "date");
-    expect(date).toHaveAttribute("min", "2026-01-01");
+    expect(date).toHaveAttribute("min", "2025-01-01");
     expect(date).toHaveAttribute("max", "2026-12-31");
     expect(within(first).getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(date, { target: { value: "2025-12-26" } });
+    expect(within(first).getByRole("button", { name: "Save" })).toBeEnabled();
     fireEvent.change(date, { target: { value: "2026-01-09" } });
     await click(within(first).getByRole("button", { name: "Save" }));
     expect(acts.place).toHaveBeenCalledWith({ source: "drive", id: "d1", date: "2026-01-09" });

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { assembleEpisode, showDateFromTitle } from "@aircheck/core";
 import type { BoxClient } from "./box.js";
 import { buildEpisodes, type BoxFolder, type DriveDoc, type PaperDoc } from "./build.js";
-import type { IngestConvex, Placement, SourceReport, Unplaced } from "./convex.js";
+import { inBacklog, type IngestConvex, type Placement, type SourceReport, type Unplaced } from "./convex.js";
 import { onDisk } from "./disk.js";
 import { RATE_LIMITED, type DriveClient } from "./drive.js";
 import type { DropboxClient } from "./dropbox.js";
@@ -44,22 +44,22 @@ export interface ScanDeps {
   dropbox: ((refreshToken: string) => DropboxClient) | null;
 }
 
-/** One scan's placements in, and the names it could not date out. */
-export interface Names { placements: Placement[]; unplaced: Unplaced[] }
+/** One scan's placements and added 2025 dates in, and the names it could not date out. */
+export interface Names { placements: Placement[]; unplaced: Unplaced[]; extraDates?: readonly string[] }
 const MAX_UNPLACED = 50;
 const NO_DATE = "No date found in the title.";
 
-/** R3: 2026 dates only. */
-const is2026 = (date: string) => date.startsWith("2026-");
+/** R3: 2026 dates, plus the 2025 Fridays Tarik added on Episodes (so nothing already posted is drafted again). */
+const inScope = (date: string, names: Names) => inBacklog(date, names.extraDates);
 /**
  * A doc's or folder's show date: Tarik's placement first, then its name. A name with something date-like the rules
  * refuse is listed in `names.unplaced` (at most 50); one with no date at all (old one-offs) or an older year is not.
  */
 export function dated(source: Placement["source"], name: string, id: string, names: Names): string | null {
   const placed = names.placements.find((p) => p.source === source && p.id === id);
-  if (placed && is2026(placed.date)) return placed.date;
+  if (placed && inScope(placed.date, names)) return placed.date;
   const d = showDateFromTitle(name);
-  if (d.ok) return is2026(d.date) ? d.date : null;
+  if (d.ok) return inScope(d.date, names) ? d.date : null;
   if (d.reason !== NO_DATE && names.unplaced.length < MAX_UNPLACED) names.unplaced.push({ source, id, name, reason: d.reason });
   return null;
 }
@@ -166,7 +166,7 @@ export async function readPaper(deps: ScanDeps, names: Names): Promise<Read<Pape
   return guarded(deps, "dropbox", t.key, t.account, async () => {
     const dbx = deps.dropbox!(t.refreshToken);
     const byDate = new Map<string, PaperDoc[]>();
-    // R3: .paper files named for a 2026 show that mention Rhythm Lab, anywhere in the Dropbox.
+    // R3: .paper files named for a 2026 (or added 2025) show that mention Rhythm Lab, anywhere in the Dropbox.
     for (const f of await dbx.listFiles()) {
       const date = /\.paper$/i.test(f.name) && /rhythm lab/i.test(f.name) ? dated("paper", f.name, f.id, names) : null;
       if (date) push(byDate, date, { id: f.id, name: f.name, export: await orUnread(dbx.exportText(f.id), { kind: "unreadable" as const }) });
@@ -224,14 +224,16 @@ async function scanOnce(deps: ScanDeps): Promise<void> {
       return r;
     }
     failed.push(name);
+    // ponytail: this cached Map was dated under the extraDates of its scan, so a 2025 date removed since can be re-upserted
+    // once; drafting is paused meanwhile (R14), it is out of the draft/fetch candidates, and the next complete scan prunes it.
     const prev = mem[key] as Map<string, T[]> | undefined;
     if (!prev) uncached = true;
     return prev ?? new Map();
   };
   // Read first: Tarik's placements date names while the sources are read; his corrections shape the episodes.
-  const { episodes: stored, corrections, placements, rescanAfter } = await deps.convex.list();
+  const { episodes: stored, corrections, placements, rescanAfter, extraDates = [] } = await deps.convex.list();
   deps.memory.seenRescanAfter = rescanAfter;
-  const names: Names = { placements, unplaced: [] };
+  const names: Names = { placements, unplaced: [], extraDates };
   const box = use("box", "box", await readBox(deps, names));
   const drive = use("google", "drive", await readDrive(deps, names));
   const paper = use("dropbox", "paper", await readPaper(deps, names));

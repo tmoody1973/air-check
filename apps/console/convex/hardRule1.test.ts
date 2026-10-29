@@ -53,6 +53,8 @@ test("the public writes are exactly the allowlist", async () => {
       "corrections.place", "corrections.unplace",
       // Plan 6b: the ingest service (its own token) reports the names it could not date.
       "ingest.reportUnplaced",
+      // Add a 2025 show: a signed-in real human adds or removes a 2025 Friday for the scanner; never a source write.
+      "episodes.addShowDate", "episodes.removeShowDate",
     ].sort(),
   );
   expect(internal.sort()).toEqual(

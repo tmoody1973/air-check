@@ -30,11 +30,13 @@ const STATUS: Record<string, [PillTone, string]> = {
   skipped: ["neutral", "Skipped"],
   rerun: ["neutral", "Rerun"],
   "draft-failed": ["problem", "Draft failed"],
+  // A 2025 date Tarik removed whose row stays (a correction keeps it): never drafted.
+  "not-in-backlog": ["neutral", "Not in the backlog"],
 };
 const DRAFTING: [PillTone, string] = ["neutral", "Drafting"];
 /** Plan 6b: before a package, a fix waiting for its scan or a stale fix holds the draft, so the pill says so (not "Waiting to draft"). */
 function fixState(e: EpisodeRow): [PillTone, string] | null {
-  if (e.packageStatus !== "none" || e.status === "rerun") return null;
+  if (e.packageStatus !== "none" || e.status === "rerun" || e.status === "not-in-backlog") return null;
   if (e.rescanPending) return ["neutral", "Checking your fix"];
   return e.corrected?.stale ? ["problem", "Fix needs a look"] : null;
 }

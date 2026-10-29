@@ -68,13 +68,19 @@ export interface IngestRow {
   corrected?: { stale: boolean };
 }
 
+/** In the backlog: a 2026 date, or a 2025 Friday Tarik added (ingest.list's extraDates). */
+export const inBacklog = (date: string, extraDates: readonly string[] = []) => date.startsWith("2026-") || extraDates.includes(date);
+
 export type DraftOutcome = { queued: true; runId: string } | { queued: false; reason: string };
 export interface SourceReport { source: "box" | "google" | "dropbox"; state: "connected" | "needs_reconnect" | "not_connected"; account?: string; lastError?: string }
 
 /** Everything the ingest service needs from Convex. The token lives inside the real implementation. */
 export interface IngestConvex {
-  /** `rescanAfter`: the newest correction, placement or undo (0 for none); newer than the last scan asks for a rescan. */
-  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number; corrections: Correction[]; placements: Placement[]; rescanAfter: number }>;
+  /**
+   * `rescanAfter`: the newest correction, placement, undo or added/removed 2025 date (0 for none); newer than the last
+   * scan asks for a rescan. `extraDates`: the 2025 Fridays Tarik added (absent from a Convex deployed before them).
+   */
+  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number; corrections: Correction[]; placements: Placement[]; rescanAfter: number; extraDates?: string[] }>;
   upsert(episode: ScannedEpisode): Promise<void>;
   setFetch(showDate: string, status: "fetching" | "fetched" | "failed", error?: string): Promise<void>;
   requestDraft(showDate: string): Promise<DraftOutcome>;
