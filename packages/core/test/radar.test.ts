@@ -104,12 +104,20 @@ describe("senderDecision", () => {
       mail("tarik@radiomilwaukee.org", "mx; dkim=fail header.i=@radiomilwaukee.org"),
       mail("tarik@radiomilwaukee.org"),
       mail("tarik@radiomilwaukee.org", "mx; dkim=pass header.d=evil.example"),
-      mail("tarik@radiomilwaukee.org", "mx; dkim=pass header.d=mail.radiomilwaukee.org"),
     ];
     for (const m of bad) expect(senderDecision(m, ALLOW)).toEqual({ ok: false, reason: "Sender's signature (DKIM) did not pass" });
   });
   test("any aligned passing clause counts, e.g. after a forwarder adds its own", () => {
     expect(senderDecision(mail("noreply@bandcamp.com", "mx; dkim=pass header.d=gmail.com; dkim=pass header.i=@bandcamp.com"), ALLOW)).toMatchObject({ ok: true, tab: "bandcamp" });
+  });
+  test("relaxed alignment: a subdomain either way passes (R3)", () => {
+    expect(senderDecision(mail("noreply@bandcamp.com", "mx; dkim=pass header.d=email.bandcamp.com"), ALLOW)).toMatchObject({ ok: true, tab: "bandcamp" });
+    expect(senderDecision(mail("tarik@radiomilwaukee.org", "mx; dkim=pass header.d=mail.radiomilwaukee.org"), ALLOW)).toMatchObject({ ok: true });
+    const sub = parseAllowlist("news@email.bandcamp.com");
+    expect(senderDecision(mail("news@email.bandcamp.com", "mx; dkim=pass header.d=bandcamp.com"), sub)).toMatchObject({ ok: true });
+  });
+  test.each(["bandcamp.com.evil.example", "evilbandcamp.com", "bandcamp.co", "com"])("look-alike signing domain %s fails (R3)", (d) => {
+    expect(senderDecision(mail("noreply@bandcamp.com", `mx; dkim=pass header.d=${d}`), ALLOW)).toEqual({ ok: false, reason: "Sender's signature (DKIM) did not pass" });
   });
   test("an empty allowlist refuses everyone", () => {
     expect(senderDecision(mail("tarik@radiomilwaukee.org", AR("radiomilwaukee.org")), [])).toEqual({ ok: false, reason: "Sender not on the list" });
@@ -201,6 +209,22 @@ describe("bandcampPageUrl (Review Focus 2)", () => {
     expect(bandcampPageUrl("https://artist.bandcamp.com/album/some-record")).toBe("https://artist.bandcamp.com/album/some-record");
     expect(bandcampPageUrl("https://artist.bandcamp.com/track/x#frag")).toBe("https://artist.bandcamp.com/track/x");
     expect(bandcampPageUrl("https://bandcamp.com/album/x")).toBe("https://bandcamp.com/album/x");
+  });
+  test("a query of tracking params only is dropped (R2)", () => {
+    expect(bandcampPageUrl("https://x.bandcamp.com/album/a?from=fanpub_fnb")).toBe("https://x.bandcamp.com/album/a");
+    expect(bandcampPageUrl("https://x.bandcamp.com/album/a?utm_source=e&utm_medium=email")).toBe("https://x.bandcamp.com/album/a");
+    expect(bandcampPageUrl("https://x.bandcamp.com/track/t?utm_campaign=c&utm_term=t&utm_content=x&ref=y#f")).toBe("https://x.bandcamp.com/track/t");
+  });
+  test.each([
+    "https://x.bandcamp.com/album/a?pk=1",
+    "https://x.bandcamp.com/album/a?from=x&pk=1",
+    "http://x.bandcamp.com/album/a?from=fanpub_fnb",
+    "https://bandcamp.com.evil.example/album/a?from=fanpub_fnb",
+    "https://user@x.bandcamp.com/album/a?from=fanpub_fnb",
+    "https://x.bandcamp.com:8443/album/a?from=fanpub_fnb",
+    "https://x.bandcamp.com/merch?from=fanpub_fnb",
+  ])("refuses %s even with tracking params around (R2)", (u) => {
+    expect(bandcampPageUrl(u)).toBeNull();
   });
   test.each([
     "http://x.bandcamp.com/album/a",

@@ -116,7 +116,7 @@ function parseFrom(raw: string): { name?: string; address?: string } {
   return { ...(name ? { name } : {}), ...(ADDRESS.test(address) ? { address } : {}) };
 }
 
-/** Whether Authentication-Results holds a dkim=pass whose header.d (or header.i) is the From domain exactly. */
+/** Whether Authentication-Results holds a dkim=pass whose header.d (or header.i) aligns with the From domain. */
 function dkimAligned(headers: Record<string, string>, domain: string): boolean {
   const key = Object.keys(headers).find((k) => k.toLowerCase() === "authentication-results");
   const value = key ? headers[key]! : "";
@@ -124,12 +124,20 @@ function dkimAligned(headers: Record<string, string>, domain: string): boolean {
     const clause = raw.replace(/\([^)]*\)/g, " "); // comments (e.g. ARC's inner "dkim=pass") are not verdicts
     if (!/(?:^|\s)dkim\s*=\s*pass\b/i.test(clause)) return false;
     const d = clause.match(/\bheader\.d\s*=\s*([^\s;]+)/i)?.[1] ?? clause.match(/\bheader\.i\s*=\s*([^\s;]+)/i)?.[1]?.replace(/^.*@/, "");
-    return d?.toLowerCase() === domain;
+    return d !== undefined && aligned(d.toLowerCase(), domain);
   });
 }
 
+/** Relaxed DMARC-style alignment: equal, or one a dot-suffix subdomain of the other (email.bandcamp.com ↔ bandcamp.com). */
+function aligned(signer: string, from: string): boolean {
+  if (signer === from) return true;
+  const [short, long] = signer.length < from.length ? [signer, from] : [from, signer];
+  // ponytail: a bare TLD never aligns; public suffixes like co.uk are not special-cased (no allowlisted sender uses one).
+  return short.includes(".") && long.endsWith(`.${short}`);
+}
+
 /**
- * Exact address on the allowlist, and a DKIM pass aligned with the From domain (a From line alone can be faked).
+ * Exact address on the allowlist, and a DKIM pass aligned (relaxed) with the From domain (a From line alone can be faked).
  * The tab is Bandcamp when the mail is from bandcamp.com, or when Tarik forwarded a bandcamp.com email by hand.
  */
 export function senderDecision(mail: Pick<InboundMail, "from" | "headers" | "text">, allowlist: string[]): SenderDecision {

@@ -1,23 +1,25 @@
 export const BANDCAMP_DOMAIN = "bandcamp.com";
 
 const HOST = /^(?:[a-z0-9-]+\.)*bandcamp\.com$/;
+// Tracking-only queries (Bandcamp's own "from=", utm_*) are dropped; any other key, such as a private stream's, refuses the link.
+const TRACKING_PARAMS = new Set(["from", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref"]);
 const PAGE_PATH = /^\/(album|track)\/([a-z0-9-]{1,200})$/;
 
 /**
  * The one kind of link anything may fetch (Hard Rule 5's exception, ARCHITECTURE 3.7): a public
- * https://<x>.bandcamp.com/album|track/<slug> page with no credentials, port or query string.
- * Private promo streams carry a key in the query string, so they stay plain links. Returns the canonical URL, or null.
+ * https://<x>.bandcamp.com/album|track/<slug> page with no credentials or port, and no query beyond tracking params.
+ * Private promo streams carry a key in the query string, so they stay plain links. Returns the canonical URL (query and
+ * fragment removed: that is what is stored and fetched), or null.
  */
 export function bandcampPageUrl(raw: string): string | null {
-  const s = raw.trim();
-  if (s.includes("?")) return null;
   let u: URL;
   try {
-    u = new URL(s);
+    u = new URL(raw.trim());
   } catch {
     return null;
   }
-  if (u.protocol !== "https:" || u.username || u.password || u.port || u.search) return null;
+  if (u.protocol !== "https:" || u.username || u.password || u.port) return null;
+  if (raw.includes("?") && (!u.search || [...u.searchParams.keys()].some((k) => !TRACKING_PARAMS.has(k)))) return null;
   if (!HOST.test(u.hostname)) return null;
   const m = u.pathname.match(PAGE_PATH);
   return m ? `https://${u.hostname}/${m[1]}/${m[2]}` : null;
