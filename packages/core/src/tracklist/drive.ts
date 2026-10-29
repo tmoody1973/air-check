@@ -1,7 +1,5 @@
 import type { ParsedTracklist } from "../types";
-import { parseTracklist } from "./parse";
-
-const SPACED_DASH = /\s[-–—]\s/;
+import { parseTracklist, SPACED_DASH } from "./parse";
 
 /** Drive's text export, read by core. A title or byline above HOUR 1 is not a track; a track-like line there still is. */
 export function parseDriveTracklist(text: string): ParsedTracklist {

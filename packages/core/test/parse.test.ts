@@ -18,6 +18,22 @@ test("splits on spaced dash only", () => {
   expect(t!.artist).toBe("SW2 vs EL-B");
 });
 
+test("a dash pressed against an opening quote is the separator (real 2025 lines)", () => {
+  const p = parseTracklist('HOUR 1\nJames Blake –”Doesn’t Just Happen” feat. Dave\nArtist -"Title"\nSomeone -“Curly”');
+  expect(p.bad).toEqual([]);
+  expect(p.tracks.map((t) => [t.artist, t.title, t.feat])).toEqual([
+    ["James Blake", "Doesn’t Just Happen", "Dave"],
+    ["Artist", "Title", undefined],
+    ["Someone", "Curly", undefined],
+  ]);
+});
+
+test("a hyphen inside a word still never splits", () => {
+  expect(parseTracklist('HOUR 1\nJay-Z - "Song"').tracks[0]).toMatchObject({ artist: "Jay-Z", title: "Song" });
+  expect(parseTracklist('HOUR 1\nLo-Fi Hip-Hop - "Beat"').tracks[0]).toMatchObject({ artist: "Lo-Fi Hip-Hop", title: "Beat" });
+  expect(parseTracklist("HOUR 1\nLo-Fi Rapper").bad.map((b) => b.reason)).toEqual(["no-separator"]);
+});
+
 test("keeps feat. outside quotes", () => {
   const [t] = parseTracklist('HOUR 1\nResavoir - "4th Cloud" feat. Gregory Uhlmann').tracks;
   expect(t).toMatchObject({ title: "4th Cloud", feat: "Gregory Uhlmann" });
@@ -94,4 +110,8 @@ test("tracklistDifference: null when exact; else the first difference, in the or
   expect(got('HOUR 1\naja monet - "the black sea"\nB - "Two" feat. C\nHOUR 2\nD - "Four"\nE - "Five"')).toBe(`hour 2 track 2 'E - "Five"' should not be there`);
   expect(got('HOUR 1\nB - "Two" feat. C\naja monet - "the black sea"\nHOUR 2\nD - "Four"')).toMatch(/^hour 1 track 1 /); // order
   expect(got('HOUR 1\naja monet - "the black sea"\nHOUR 2\nB - "Two" feat. C\nD - "Four"')).toMatch(/^hour 1 track 2 is missing/); // hour
+});
+
+test("parseDriveTracklist: a pressed-dash track above HOUR 1 is still flagged, not dropped as a title", () => {
+  expect(parseDriveTracklist('Artist -"Title"\nHOUR 1\nA - "B"').bad.map((b) => b.raw)).toEqual(['Artist -"Title"']);
 });
