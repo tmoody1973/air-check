@@ -27,6 +27,10 @@ export interface Correction {
   folderDate?: true;
   updatedAt: number;
 }
+/** Plan 6b: Tarik put a doc or folder whose name can't be dated on a show date, in the console. Never written back. */
+export interface Placement { source: "box" | "drive" | "paper"; id: string; date: string }
+/** Plan 6b: a doc or folder whose name holds a date the scanner can't read (e.g. "9-4-226"), listed on Episodes. */
+export interface Unplaced { source: Placement["source"]; id: string; name: string; reason: string }
 export interface ScannedEpisode {
   showDate: string;
   audio: { status: "ready" | "incomplete" | "ask" | "none"; folderId?: string; hour1?: FileRef; hour2?: FileRef; pattern?: string; flags: string[] };
@@ -39,6 +43,8 @@ export interface ScannedEpisode {
   audioOnDisk?: boolean;
   /** R1 (Plan 6b): this show's correction points at something no source has any more, so it was not used. */
   correctionStale?: true;
+  /** R4 (Plan 6b): the `updatedAt` of the correction this scan saw for the date, stale or not; absent when none. */
+  appliedCorrectionAt?: number;
 }
 
 /** One row of ingest.list: the scanned facts without the notes text, plus what Convex knows. */
@@ -56,6 +62,8 @@ export interface IngestRow {
   packageStatus: LinkedPackageStatus;
   draftAttempts: number;
   status: string;
+  /** R4: a fix or placement saved since this show's last scan; drafting waits for the rescan. */
+  rescanPending?: boolean;
 }
 
 export type DraftOutcome = { queued: true; runId: string } | { queued: false; reason: string };
@@ -63,13 +71,16 @@ export interface SourceReport { source: "box" | "google" | "dropbox"; state: "co
 
 /** Everything the ingest service needs from Convex. The token lives inside the real implementation. */
 export interface IngestConvex {
-  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number }>;
+  /** `rescanAfter`: the newest correction, placement or undo (0 for none); newer than the last scan asks for a rescan. */
+  list(): Promise<{ episodes: IngestRow[]; awaitingReview: number; corrections: Correction[]; placements: Placement[]; rescanAfter: number }>;
   upsert(episode: ScannedEpisode): Promise<void>;
   setFetch(showDate: string, status: "fetching" | "fetched" | "failed", error?: string): Promise<void>;
   requestDraft(showDate: string): Promise<DraftOutcome>;
   sourceStatus(report: SourceReport): Promise<void>;
   /** I3: remove rows for dates not in `keep`; Convex refuses (skipped) when that would be more than 3. */
   prune(keep: string[]): Promise<{ deleted: number; skipped?: number }>;
+  /** Plan 6b: the names a complete scan could not date, replacing the last list. */
+  reportUnplaced(items: Unplaced[]): Promise<void>;
 }
 
 /** Like media and the publisher: a Convex call that never answers fails instead of wedging the pass. */
@@ -77,7 +88,7 @@ export const CONVEX_TIMEOUT_MS = 15_000;
 
 export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) });
-  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune", FunctionReference<"mutation">>;
+  const m = anyApi.ingest as unknown as Record<"list", FunctionReference<"query">> & Record<"upsert" | "setFetch" | "requestDraft" | "sourceStatus" | "prune" | "reportUnplaced", FunctionReference<"mutation">>;
   return {
     list: () => client.query(m.list, { token }),
     upsert: async (episode) => void (await client.mutation(m.upsert, { token, episode })),
@@ -85,5 +96,6 @@ export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIM
     requestDraft: (showDate) => client.mutation(m.requestDraft, { token, showDate }),
     sourceStatus: async (r) => void (await client.mutation(m.sourceStatus, { token, ...r })),
     prune: (keep) => client.mutation(m.prune, { token, keep }),
+    reportUnplaced: async (items) => void (await client.mutation(m.reportUnplaced, { token, items })),
   };
 }

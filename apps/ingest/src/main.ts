@@ -6,7 +6,7 @@ import { driveClient } from "./drive.js";
 import { dropboxClient } from "./dropbox.js";
 import { fetchPass } from "./fetch.js";
 import { realHttp } from "./http.js";
-import { newMemory, runScan, type ScanDeps } from "./scan.js";
+import { newMemory, rescanIfAsked, runScan, type ScanDeps } from "./scan.js";
 
 // Hard Rule 8: journald (stdout) only, and only `ingest date=... step=... ok=... ms=...` lines: dates, steps, counts,
 // codes and timings. Never a file or doc name, notes text, a token or a URL.
@@ -46,8 +46,10 @@ function main(): void {
   log("ingest step=start ok=true");
   const timers = [
     every(config.scanMs, "scan", () => runScan(scanDeps)),
-    // One download at a time; then at most one draft request.
+    // A fix saved in the console is scanned within a minute (Plan 6b); then one download at a time; then at most one
+    // draft request. The scan gate in runScan keeps this and the hourly scan from running at once.
     every(config.pollMs, "pass", async () => {
+      await rescanIfAsked(scanDeps);
       await fetchPass(fetchDeps);
       await draftPass(draftDeps);
     }),

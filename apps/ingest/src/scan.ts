@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { assembleEpisode, showDateFromTitle } from "@aircheck/core";
 import type { BoxClient } from "./box.js";
 import { buildEpisodes, type BoxFolder, type DriveDoc, type PaperDoc } from "./build.js";
-import type { IngestConvex, SourceReport } from "./convex.js";
+import type { IngestConvex, Placement, SourceReport, Unplaced } from "./convex.js";
 import { onDisk } from "./disk.js";
 import { RATE_LIMITED, type DriveClient } from "./drive.js";
 import type { DropboxClient } from "./dropbox.js";
@@ -19,8 +19,12 @@ export interface SourceMemory {
   lastGood: { box?: Map<string, BoxFolder[]>; drive?: Map<string, DriveDoc[]>; paper?: Map<string, PaperDoc[]> };
   /** R14: the last scan read every connected source. Until it has (and from process start), nothing is drafted. */
   lastScanComplete: boolean;
+  /** Plan 6b: one gate for the hourly timer and the minute pass's rescan, so two scans never run at once. */
+  scanning: boolean;
+  /** When the last scan began (this machine's clock); a save newer than it asks for a rescan. 0 before the first. */
+  lastScanStartedAt: number;
 }
-export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map(), lastGood: {}, lastScanComplete: false });
+export const newMemory = (): SourceMemory => ({ refused: new Map(), reported: new Map(), lastGood: {}, lastScanComplete: false, scanning: false, lastScanStartedAt: 0 });
 
 /** R14: a source that is not connected (no token file, not configured): its column is missing for every show. */
 const ABSENT = "absent" as const;
@@ -37,10 +41,6 @@ export interface ScanDeps {
   dropbox: ((refreshToken: string) => DropboxClient) | null;
 }
 
-/** Plan 6b: Tarik put a doc or folder whose name can't be dated on a show date, in the console. Never written back. */
-export interface Placement { source: "box" | "drive" | "paper"; id: string; date: string }
-/** Plan 6b: a doc or folder whose name holds a date the scanner can't read (e.g. "9-4-226"), listed on Episodes. */
-export interface Unplaced { source: Placement["source"]; id: string; name: string; reason: string }
 /** One scan's placements in, and the names it could not date out. */
 export interface Names { placements: Placement[]; unplaced: Unplaced[] }
 const MAX_UNPLACED = 50;
@@ -180,6 +180,33 @@ export async function readPaper(deps: ScanDeps, names: Names): Promise<Read<Pape
  *   facts are not overwritten with gaps, and nothing is drafted until a scan reads every connected source again.
  */
 export async function runScan(deps: ScanDeps): Promise<void> {
+  // A scan already running (hourly, or a rescan) is not doubled: its caller's next turn catches up.
+  if (deps.memory.scanning) return;
+  deps.memory.scanning = true;
+  deps.memory.lastScanStartedAt = Date.now();
+  try {
+    await scanOnce(deps);
+  } finally {
+    deps.memory.scanning = false;
+  }
+}
+
+/**
+ * Plan 6b: the minute pass's check. A correction, placement or undo saved since the last scan began starts one scan
+ * now, however many were saved. ponytail: compares Convex's clock with this machine's; NTP keeps them within ms, and a
+ * missed save still lands at the hourly scan. Compare against the `rescanAfter` the scan read if that ever bites.
+ */
+export async function rescanIfAsked(deps: ScanDeps): Promise<void> {
+  if (deps.memory.scanning) return;
+  try {
+    const { rescanAfter } = await deps.convex.list();
+    if (rescanAfter > deps.memory.lastScanStartedAt) await runScan(deps);
+  } catch {
+    deps.log("ingest step=rescan ok=false");
+  }
+}
+
+async function scanOnce(deps: ScanDeps): Promise<void> {
   const t0 = Date.now();
   const mem = deps.memory.lastGood;
   const failed: SourceName[] = [];
@@ -200,15 +227,16 @@ export async function runScan(deps: ScanDeps): Promise<void> {
     if (!prev) uncached = true;
     return prev ?? new Map();
   };
-  // ponytail: Task 3 of Plan 6b fills placements from ingest.list and reports `unplaced` after a complete scan.
-  const names: Names = { placements: [], unplaced: [] };
+  // Read first: Tarik's placements date names while the sources are read; his corrections shape the episodes.
+  const { episodes: stored, corrections, placements } = await deps.convex.list();
+  const names: Names = { placements, unplaced: [] };
   const box = use("box", "box", await readBox(deps, names));
   const drive = use("google", "drive", await readDrive(deps, names));
   const paper = use("dropbox", "paper", await readPaper(deps, names));
   deps.memory.lastScanComplete = failed.length === 0;
 
-  const [{ episodes: stored }, disk] = await Promise.all([deps.convex.list(), onDisk(deps.inboxDir, deps.preparedDir)]);
-  let episodes = buildEpisodes({ box, drive, paper }, stored, disk.complete);
+  const disk = await onDisk(deps.inboxDir, deps.preparedDir);
+  let episodes = buildEpisodes({ box, drive, paper }, stored, disk.complete, corrections);
   // ponytail: a failed source with no earlier read in this process (just restarted) can't be merged column by column
   // (list never returns the notes text), so shows already stored keep all their facts until a good scan.
   if (uncached) {
@@ -219,6 +247,8 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   let questions = 0;
   for (const e of episodes) {
     questions += e.questions.length;
+    // Hard Rule 8: the date only; never the id or name the correction pointed at.
+    if (e.correctionStale) deps.log(`ingest date=${e.showDate} step=correction stale=true`);
     try {
       await deps.convex.upsert(e);
       ok++;
@@ -231,6 +261,17 @@ export async function runScan(deps: ScanDeps): Promise<void> {
   // I3/R18: only a scan that read all three sources knows a date is gone (a renamed or deleted doc). A not-connected
   // source blocks it too, or disconnecting Google would delete Drive-only rows and Tarik's answers on them.
   if (deps.memory.lastScanComplete && !absent) await prune(deps, episodes.map((e) => e.showDate));
+  // A failed source's undated names are unknown, so the list is replaced only after a complete scan. A source that is
+  // not connected has none, so (unlike prune) it does not block this.
+  if (deps.memory.lastScanComplete) await reportUnplaced(deps, names.unplaced);
+}
+
+async function reportUnplaced(deps: ScanDeps, items: Unplaced[]): Promise<void> {
+  try {
+    await deps.convex.reportUnplaced(items);
+  } catch {
+    deps.log("ingest step=unplaced ok=false");
+  }
 }
 
 async function prune(deps: ScanDeps, keep: string[]): Promise<void> {

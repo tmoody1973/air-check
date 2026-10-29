@@ -194,6 +194,8 @@ export function buildEpisodes(found: Found, stored: IngestRow[], onDisk: Set<str
       : tracklistOf(date, picked(found.drive.get(date), c?.drive, stale), paper, q);
     const episode: ScannedEpisode = {
       showDate: date, audio, tracklist, notes, questions: q, audioOnDisk: onDisk.has(date), ...(isStale ? { correctionStale: true as const } : {}),
+      // R4: a stale correction was still seen; leaving it out would keep the show "checking your fix" forever.
+      ...(c && { appliedCorrectionAt: c.updatedAt }),
     };
     return { episode, stampDate, docTitle };
   });

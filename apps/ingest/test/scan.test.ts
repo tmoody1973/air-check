@@ -2,7 +2,7 @@ import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { draftPass } from "../src/draft.js";
-import { dated, newMemory, readBox, readDrive, readPaper, runScan, type Names } from "../src/scan.js";
+import { dated, newMemory, readBox, readDrive, readPaper, rescanIfAsked, runScan, type Names } from "../src/scan.js";
 import { json } from "./fakes.js";
 import { DRIVE_DOCS, NOTES_SECRET, PAPER_DOCS, world } from "./world.js";
 
@@ -377,5 +377,101 @@ describe("Plan 6b: names that can't be dated are listed, and a placement dates t
     expect(dated("drive", "Rhythm Lab Radio 9-4-25", "b", m)).toBeNull();
     expect(dated("drive", "Rhythm Lab Radio 11", "c", m)).toBeNull();
     expect(m.unplaced).toEqual([]);
+  });
+});
+
+describe("Plan 6b: the scanner applies corrections and rescans after a save", () => {
+  const draftDeps = (w: Awaited<ReturnType<typeof world>>) => ({ convex: w.cv.convex, log: w.deps.log, last: { key: "" }, scan: w.deps.memory });
+  const scans = (w: Awaited<ReturnType<typeof world>>) => w.box.calls("GET /2.0/folders/123/items").length;
+  const tick = () => new Promise((r) => setTimeout(r, 3));
+  const typed = "HOUR 1\nA - \"One\"\nB - \"Two\"\nHOUR 2\nC - \"Three\"\nD - \"Four\"\n";
+
+  test("a typed tracklist reaches the stored row: its tracks, no tracklist questions, and the correction it applied", async () => {
+    const w = await make();
+    w.cv.corrections.set("2026-01-23", { showDate: "2026-01-23", tracklistText: typed, updatedAt: 41 });
+    await runScan(w.deps);
+    const eps = byDate(w);
+    const jan23 = eps["2026-01-23"]!;
+    expect(jan23.tracklist).toMatchObject({ status: "found", docId: "air-check" });
+    expect(jan23.tracklist.tracks!.map((t) => [t.hour, t.artist, t.title])).toEqual([[1, "A", "One"], [1, "B", "Two"], [2, "C", "Three"], [2, "D", "Four"]]);
+    expect(jan23.questions.filter((q) => q.kind === "tracklist")).toEqual([]);
+    expect(jan23.appliedCorrectionAt).toBe(41);
+    expect(eps["2026-01-02"]!.appliedCorrectionAt).toBeUndefined();
+    expect((await w.cv.convex.list()).episodes.some((r) => r.rescanPending)).toBe(false);
+  });
+
+  test("a stale correction logs its date and step only, and is still sent as seen (no endless 'checking your fix')", async () => {
+    const w = await make();
+    w.cv.corrections.set("2026-01-02", { showDate: "2026-01-02", drive: "gone-doc", updatedAt: 7 });
+    await runScan(w.deps);
+    const jan2 = byDate(w)["2026-01-02"]!;
+    expect(jan2.correctionStale).toBe(true);
+    expect(jan2.appliedCorrectionAt).toBe(7);
+    expect(w.logs).toContain("ingest date=2026-01-02 step=correction stale=true");
+    const line = w.logs.find((l) => l.includes("step=correction"))!;
+    for (const secret of ["gone-doc", "g1", "Rhythm Lab Radio"]) expect(line).not.toContain(secret);
+    for (const l of w.logs) expect(l).toMatch(/^ingest( date=\d{4}-\d{2}-\d{2})?( [a-z_]+=[\w.-]+)+$/);
+  });
+
+  test("placements from Convex date an undated name; undated names are reported after a complete scan only", async () => {
+    let listOk = true;
+    const w = await make({ extra: { drive: { g9: { name: "Rhythm Lab Radio 9-4-226", text: "HOUR 1\nA - \"One\"\nHOUR 2\nB - \"Two\"\n" } } }, dropboxList: () => listOk });
+    await runScan(w.deps);
+    expect(w.cv.unplacedReports).toEqual([[{ source: "drive", id: "g9", name: "Rhythm Lab Radio 9-4-226", reason: expect.any(String) }]]);
+    expect(w.cv.rows.has("2026-09-04")).toBe(false);
+
+    w.cv.placements.push({ source: "drive", id: "g9", date: "2026-09-04", updatedAt: 5 });
+    await runScan(w.deps);
+    expect(w.cv.rows.get("2026-09-04")!.tracklist.docId).toBe("g9");
+    expect(w.cv.unplacedReports.at(-1)).toEqual([]);
+
+    listOk = false; // a connected source failed: its names are unknown, so the list is not replaced
+    await runScan(w.deps);
+    expect(w.cv.unplacedReports).toHaveLength(2);
+  });
+
+  test("a save starts one rescan within a pass; five saves still one; nothing new, no scan", async () => {
+    const w = await make();
+    await runScan(w.deps);
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(1);
+
+    await tick();
+    for (const d of ["2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30"]) w.cv.corrections.set(d, { showDate: d, drive: "x", updatedAt: Date.now() });
+    await tick();
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(2);
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(2);
+
+    await tick();
+    w.cv.undo(Date.now()); // "Use Drive again" leaves no correction to compare, but still asks for a scan
+    await tick();
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(3);
+  });
+
+  test("a pass while the hourly scan runs starts no second scan; the next pass catches the save up", async () => {
+    const w = await make();
+    const hourly = runScan(w.deps);
+    w.cv.corrections.set("2026-01-23", { showDate: "2026-01-23", tracklistText: typed, updatedAt: w.deps.memory.lastScanStartedAt + 1 });
+    await Promise.all([rescanIfAsked(w.deps), runScan(w.deps)]);
+    await hourly;
+    expect(scans(w)).toBe(1);
+    expect(w.cv.rows.get("2026-01-23")!.appliedCorrectionAt).toBeUndefined(); // the hourly scan read before the save
+
+    await tick();
+    await rescanIfAsked(w.deps);
+    expect(scans(w)).toBe(2);
+    expect(w.cv.rows.get("2026-01-23")!.appliedCorrectionAt).toBe(w.cv.corrections.get("2026-01-23")!.updatedAt);
+    expect(w.deps.memory.scanning).toBe(false);
+  });
+
+  test("the draft pass skips a show waiting for its rescan, so it does not hold up the queue", async () => {
+    const w = await make();
+    await runScan(w.deps);
+    w.cv.corrections.set("2026-01-02", { showDate: "2026-01-02", paper: "id:p1", updatedAt: Date.now() + 60_000 });
+    await draftPass(draftDeps(w));
+    expect(w.cv.draftCalls.map((c) => [c.showDate, c.outcome.queued])).toEqual([["2026-01-30", true]]);
   });
 });

@@ -17,7 +17,8 @@ export interface DraftDeps {
 export async function draftPass(deps: DraftDeps): Promise<void> {
   if (!deps.scan.lastScanComplete) return;
   const { episodes, awaitingReview } = await deps.convex.list();
-  const next = nextToDraft(episodes.map((r) => factsOf(r)), awaitingReview);
+  // R4: a show whose fix the scanner hasn't applied yet waits for its rescan, without holding up the shows behind it.
+  const next = nextToDraft(episodes.filter((r) => !r.rescanPending).map((r) => factsOf(r)), awaitingReview);
   if (!next) return;
   const t0 = Date.now();
   const r = await deps.convex.requestDraft(next.showDate);
