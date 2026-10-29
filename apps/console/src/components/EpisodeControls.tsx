@@ -31,6 +31,8 @@ export type EpisodeRow = {
   draftAttempts: number;
   /** A draft run is open for this show (M2). */
   openRun?: boolean;
+  /** The open draft run's id, for the "Watch it work" link. */
+  openRunId?: string;
   audioOnDisk?: boolean;
   fetch?: { status: "fetching" | "fetched" | "failed"; error?: string };
   rerunOf?: string;

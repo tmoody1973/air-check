@@ -246,6 +246,18 @@ describe("EpisodesView reruns", () => {
     expect(within(rowOf("2026-01-16")).getByRole("button", { name: "Mark as rerun of…" })).toBeInTheDocument();
   });
 
+  it("Watch it work: a Drafting row links to its live run, in the table and the phone card; no open run, no link", () => {
+    setup([ep("2026-01-02", { openRun: true, openRunId: "run-abc" }), ep("2026-01-09"), ep("2026-01-16", { openRun: true })], { today: "2026-01-16" });
+    expect(within(rowOf("2026-01-02")).getByRole("link", { name: "Watch it work" })).toHaveAttribute("href", "/runs/run-abc");
+    expect(within(rowOf("2026-01-09")).queryByRole("link", { name: "Watch it work" })).not.toBeInTheDocument();
+    expect(within(rowOf("2026-01-16")).queryByRole("link", { name: "Watch it work" })).not.toBeInTheDocument();
+    cleanup();
+    render(<ul><EpisodeItem layout="card" showDate="2026-01-02" e={ep("2026-01-02", { openRun: true, openRunId: "run-abc" })} sources={{}} ctx={{ actions: actions(), announce: vi.fn(), choices: [] }} /></ul>);
+    const link = within(rowOf("2026-01-02")).getByRole("link", { name: "Watch it work" });
+    expect(link).toHaveAttribute("href", "/runs/run-abc");
+    expect(link.className).toContain("min-h-11");
+  });
+
   it("no Mark control once a show has a package", () => {
     setup([ep("2026-01-02"), ep("2026-01-09", { status: "awaiting-review", packageStatus: "awaiting_review" })], { today: "2026-01-09" });
     expect(within(rowOf("2026-01-09")).queryByRole("button", { name: "Mark as rerun of…" })).not.toBeInTheDocument();

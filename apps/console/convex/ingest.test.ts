@@ -349,6 +349,9 @@ describe("ingest.requestDraft", () => {
     expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "drafting" });
     expect((await t.query(api.ingest.list, { token: INGEST })).awaitingReview).toBe(1);
     expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]!.openRun).toBe(true); // M2: Episodes says "Drafting"
+    // Watch it work: the newest open run's id (the one /runs/[id] takes), nothing else from the run.
+    const openRunId = (await t.run((ctx) => ctx.db.query("runs").collect()))[0]!.runId;
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]!.openRunId).toBe(openRunId);
     // 5 h 59 min: still open. 6 h 1 min: stuck; it counts as a finished attempt instead.
     const age = (ms: number) => t.run(async (ctx) => {
       for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { createdAt: Date.now() - ms });
@@ -360,6 +363,7 @@ describe("ingest.requestDraft", () => {
     expect(l.awaitingReview).toBe(0);
     expect(l.episodes[0]!.draftAttempts).toBe(1);
     expect(l.episodes[0]!.openRun).toBe(false);
+    expect(l.episodes[0]!.openRunId).toBeUndefined();
     expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
     expect(await runs(t)).toHaveLength(2);
   });
