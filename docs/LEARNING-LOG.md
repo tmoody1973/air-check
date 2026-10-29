@@ -41,3 +41,13 @@ In my words:
 **What do we now believe?** A safety step that depends on doing things in the right order is only as strong as the order. Approve is the real gate, and it worked as built: nothing went up without Tarik pressing it. If a dry run matters, the service that publishes has to be stopped before anyone can press Approve, not after.
 
 In my words:
+
+## 2026-10-29: The agent link kept dropping, and the fix undid itself
+
+**What did we expect?** That once Hermes was up, its link to the console would stay up. The link is the port forward on 127.0.0.1:8642, which carries each connection into the sandbox. When it dropped, we expected the watchdog's `recover` to bring it back, because the watchdog said "reconnected".
+
+**What happened?** The link dropped twice in one day: for nearly 8 hours overnight (about 03:04 to 10:57 UTC), then again from 12:08 to 12:55. A read-only investigation found two problems. First, the forward is a separate program that NemoClaw starts and then leaves alone. Nothing restarts it, and it quit both times during a short stall in the gateway's database. Second, the watchdog's repair could not last. A run of the watchdog is a short-lived systemd job, and systemd stops everything a job started when the job ends. So the forward `recover` started was killed 11 seconds later, after the "reconnected" message had already gone out. The link really came back only when someone ran `recover` by hand. The fix gives each forward its own systemd unit that runs NemoClaw's exact command and restarts it 1 second after any exit. The watchdog job is now set to leave behind what it starts (`KillMode=process`).
+
+**What do we now believe?** A repair needs checking after the repair tool has exited, not only inside its own run. The watchdog checked its fix within its own 10 seconds, so it reported success just before systemd removed it. More generally, every long-running process needs an owner that restarts it. A process started from a script or an SSH session has no owner, however stable it looks. The dashboard forwards on 18789 and 18790 are still in that state.
+
+In my words:

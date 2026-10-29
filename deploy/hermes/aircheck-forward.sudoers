@@ -1,0 +1,3 @@
+# Lets the watchdog (runs as `user`) restart the two Hermes forward units, and nothing else.
+# Installed by install-forward.sh to /etc/sudoers.d/aircheck-forward (mode 440, checked with visudo first).
+user ALL=(root) NOPASSWD: /usr/bin/systemctl restart --no-block aircheck-hermes-forward.service, /usr/bin/systemctl restart --no-block aircheck-hermes-demo-forward.service
