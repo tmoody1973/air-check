@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -195,6 +195,50 @@ describe("deploy files", () => {
     return execFileSync("bash", ["-c", script], { env: { ...process.env, HOME: home }, encoding: "utf8" }).trim().split("\n");
   };
   const reg = (v: string) => `{"name": "aircheck", "adapter": {"registered": ${v}, "detail": "x"}}`;
+
+  // Runs the real watchdog with only the Hermes probe, stubs for curl/timeout/nemohermes, and a fake HOME.
+  // `curl` health succeeds only after `nemohermes airc recover` has run (or always, if `healthy`).
+  const runHeal = (opts: { healthy?: boolean; recoverFixes?: boolean; dry?: boolean }) => {
+    const home = mkdtempSync(join(tmpdir(), "watchdog-heal-"));
+    for (const d of [".local/bin", ".aircheck", ".airc", "bin"]) mkdirSync(join(home, d), { recursive: true });
+    writeFileSync(join(home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nTELEGRAM_ALLOWED_IDS=1\n");
+    const stub = (path: string, body: string) => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); };
+    stub(join(home, "bin/timeout"), 'shift; exec "$@"');
+    stub(join(home, ".local/bin/nemohermes"), `echo "$@" >> "${home}/recover.log"\n${opts.recoverFixes ? `touch "${home}/fixed"` : "true"}`);
+    stub(join(home, "bin/curl"), `case "$*" in *8642*) ${opts.healthy ? "exit 0" : `[ -f "${home}/fixed" ]`};; *) echo sent >> "${home}/telegram.log"; exit 0;; esac`);
+    const body = read("hermes/watchdog.sh").replace(/^PROBES=\([\s\S]*?^\)$/m, 'PROBES=(\n  "Hermes|curl -sf -m 5 -o /dev/null http://127.0.0.1:8642/health"\n)');
+    const file = join(home, "watchdog.sh");
+    writeFileSync(file, body);
+    const out = execFileSync("bash", [file, ...(opts.dry ? ["--dry-run"] : [])], {
+      env: { ...process.env, HOME: home, HEAL_WAIT: "0", PATH: `${join(home, "bin")}:${process.env.PATH}` }, encoding: "utf8",
+    });
+    const log = (f: string) => (existsSync(join(home, f)) ? readFileSync(join(home, f), "utf8") : "");
+    const state = existsSync(join(home, ".aircheck/watchdog.state")) ? readFileSync(join(home, ".aircheck/watchdog.state"), "utf8").trim() : "";
+    return { out, recovers: log("recover.log"), telegram: log("telegram.log"), state };
+  };
+
+  it("a failing Hermes probe runs `airc recover` once and sends only the reconnected line when it heals", () => {
+    const r = runHeal({ recoverFixes: true });
+    expect(r.recovers.trim().split("\n")).toEqual(["airc recover"]);
+    expect(r.state).toBe("");
+    expect(r.telegram.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("if recover does not fix it, Hermes still counts as down and alerts", () => {
+    const r = runHeal({ recoverFixes: false });
+    expect(r.recovers.trim().split("\n")).toEqual(["airc recover"]);
+    expect(r.state).toBe("down:Hermes");
+  });
+
+  it("a healthy Hermes triggers no recover", () => {
+    expect(runHeal({ healthy: true }).recovers).toBe("");
+  });
+
+  it("--dry-run never runs recover", () => {
+    const r = runHeal({ dry: true, recoverFixes: true });
+    expect(r.recovers).toBe("");
+    expect(r.out).toContain("would run: nemohermes airc recover");
+  });
 
   it("the Agent tools probe tolerates JSON spacing and goes DOWN on registered false (VM, 2026-10-28)", () => {
     const up = reg("true");
