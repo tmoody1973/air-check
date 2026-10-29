@@ -68,6 +68,18 @@ describe("tavilySearch", () => {
     await expect(tavilySearch({ apiKey: "k", fetch: down }, "q")).rejects.toThrow("Web search could not be reached.");
   });
 
+  it("reads at most 256 KB of the answer; more is unreadable", async () => {
+    const big = JSON.stringify({ results: [{ title: "t", url: "https://example.org/a", content: "x".repeat(300_000) }] });
+    await expect(tavilySearch({ apiKey: "k", fetch: async () => new Response(big, { status: 200 }) }, "q")).rejects.toThrow("Web search gave an unreadable answer.");
+    const fits = JSON.stringify({ results: [{ title: "t", url: "https://example.org/a", content: "x".repeat(200_000) }] });
+    expect(await tavilySearch({ apiKey: "k", fetch: async () => new Response(fits, { status: 200 }) }, "q")).toHaveLength(1);
+  });
+
+  it("drops a result whose URL is over 2,048 characters", async () => {
+    const results = [{ title: "long", url: `https://example.org/${"a".repeat(2_100)}`, content: "c" }, { title: "ok", url: "https://example.org/ok", content: "c" }];
+    expect((await tavilySearch({ apiKey: "k", fetch: async () => json(200, { results }) }, "q")).map((r) => r.title)).toEqual(["ok"]);
+  });
+
   it("an unreadable answer becomes a plain error", async () => {
     const bad = async () => new Response("<html>", { status: 200 });
     await expect(tavilySearch({ apiKey: "k", fetch: bad }, "q")).rejects.toThrow("Web search gave an unreadable answer.");

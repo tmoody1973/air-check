@@ -1,4 +1,4 @@
-import { LIMITS, sourceSays, type ResolvedSource } from "@aircheck/core";
+import { judgeClaim, LIMITS, sourceSays, type ClaimInput, type ResolvedSource } from "@aircheck/core";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { annotateCrateResult, createSourceLedger, musicBrainzUrl, SOURCE_TEXT_MAX, urlsIn } from "../src/sources.js";
@@ -77,6 +77,9 @@ describe("urlsIn", () => {
     const text = 'See https://example.org/a. Also (https://en.wikipedia.org/wiki/Foo_(band)), "https://example.org/a" and ftp://x.org/y, http://b.example.com/p?q=1;';
     expect(urlsIn(text)).toEqual(["https://example.org/a", "https://en.wikipedia.org/wiki/Foo_(band)", "http://b.example.com/p?q=1"]);
   });
+  it("skips a URL over 2,048 characters", () => {
+    expect(urlsIn(`https://x.org/${"a".repeat(2_100)} https://x.org/ok`)).toEqual(["https://x.org/ok"]);
+  });
   it("is linear on a long hostile run", () => {
     const hostile = `https://x.org/${".".repeat(200_000)}`;
     const t = performance.now();
@@ -88,26 +91,26 @@ describe("urlsIn", () => {
 describe("annotateCrateResult", () => {
   const text = (r: CallToolResult) => (r.content as { type: string; text: string }[]).map((c) => c.text).join("\n");
   const idsIn = (s: string) => [...s.matchAll(/\[(S[0-9a-z]{5})\]/g)].map((m) => m[1]!);
+  const sourcesPart = (r: CallToolResult, body: string) => text(r).slice(body.length);
+  const one = (body: string): CallToolResult => ({ content: [{ type: "text", text: body }] });
 
-  it("a result with two URLs ends with two source ids that resolve to them and that text", () => {
+  it("R8b: plain text gives ids to the family's own pages only; other links get none", () => {
     const ledger = createSourceLedger();
-    const body = "Artist A is a band. https://en.wikipedia.org/wiki/Artist_A and https://artista.bandcamp.com/album/home";
-    const out = annotateCrateResult(ledger, "wikipedia_summary", { content: [{ type: "text", text: body }] });
-    const all = text(out);
-    expect(all.startsWith(body)).toBe(true);
-    expect(all).toMatch(/\nSources:\n\[S[0-9a-z]{5}\] en\.wikipedia\.org\n\[S[0-9a-z]{5}\] artista\.bandcamp\.com$/);
-    const ids = idsIn(all.slice(body.length));
-    expect(ids).toHaveLength(2);
-    expect(ids.map((id) => ledger.get(id)!.url)).toEqual(["https://en.wikipedia.org/wiki/Artist_A", "https://artista.bandcamp.com/album/home"]);
-    for (const id of ids) expect(ledger.get(id)).toMatchObject({ text: body, via: "crate:wikipedia_summary" });
+    const body =
+      "Artist A is a band. https://en.wikipedia.org/wiki/Artist_A https://label.example/press https://artista.bandcamp.com/album/home https://upload.wikimedia.org/a.jpg https://en.wikipedia.org/wiki/Cover.png";
+    const out = annotateCrateResult(ledger, "wikipedia_summary", one(body));
+    expect(text(out).startsWith(body)).toBe(true);
+    expect(sourcesPart(out, body)).toMatch(/^\nSources:\n\[S[0-9a-z]{5}\] en\.wikipedia\.org$/);
+    const [id] = idsIn(sourcesPart(out, body));
+    expect(ledger.get(id!)).toMatchObject({ url: "https://en.wikipedia.org/wiki/Artist_A", text: body, via: "crate:wikipedia_summary" });
   });
 
-  it("builds a MusicBrainz URL from each listed id, with that item's own text and name", () => {
+  it("builds one MusicBrainz URL per listed item, with that item's own text and name", () => {
     const ledger = createSourceLedger();
     const a = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
     const b = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3";
-    const body = JSON.stringify({ count: 2, releases: [{ id: a, title: "Home", date: "2026-10-10" }, { id: b, title: "Away", date: "2025-01-01" }] });
-    const all = text(annotateCrateResult(ledger, "musicbrainz_search_release", { content: [{ type: "text", text: body }] }));
+    const body = JSON.stringify({ count: 2, releases: [{ id: a, title: "Home", date: "2026-10-10", url: "https://label.example/home" }, { id: b, title: "Away", date: "2025-01-01" }] });
+    const all = text(annotateCrateResult(ledger, "musicbrainz_search_release", one(body)));
     const ids = idsIn(all.slice(body.length));
     expect(ids.map((id) => ledger.get(id)!.url)).toEqual([musicBrainzUrl("release", a), musicBrainzUrl("release", b)]);
     expect(musicBrainzUrl("release", a)).toBe(`https://musicbrainz.org/release/${a}`);
@@ -117,25 +120,64 @@ describe("annotateCrateResult", () => {
     expect(all).toContain(`[${ids[0]}] Home · musicbrainz.org`);
   });
 
-  it("a lookup with one top-level id is one source, and release groups get their own path", () => {
+  it("names the entity a tool lists: artist releases are releases, release groups have their own path", () => {
     const ledger = createSourceLedger();
     const id = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
-    const body = JSON.stringify({ id, title: "Home", tags: [{ name: "jazz" }] });
-    const ids = idsIn(text(annotateCrateResult(ledger, "musicbrainz_get_release_group", { content: [{ type: "text", text: body }] })));
-    expect(ids.map((i) => ledger.get(i)!.url)).toEqual([`https://musicbrainz.org/release-group/${id}`]);
+    const urlFor = (tool: string, body: string) => idsIn(text(annotateCrateResult(ledger, tool, one(body)))).map((i) => ledger.get(i)!.url);
+    expect(urlFor("musicbrainz_get_release_group", JSON.stringify({ id, title: "Home", tags: [{ name: "jazz" }] }))).toEqual([`https://musicbrainz.org/release-group/${id}`]);
+    expect(urlFor("musicbrainz_get_artist_releases", JSON.stringify({ releases: [{ id, title: "Home" }] }))).toEqual([`https://musicbrainz.org/release/${id}`]);
+    expect(urlFor("musicbrainz_search_artist", JSON.stringify({ artists: [{ id, name: "Artist A" }] }))).toEqual([`https://musicbrainz.org/artist/${id}`]);
   });
 
-  it("a result with no URL and no buildable id gets no source ids", () => {
+  it("R8b: an iTunes item is one source, its store page, never its artwork or preview", () => {
     const ledger = createSourceLedger();
-    const plain: CallToolResult = { content: [{ type: "text", text: "Artist A: 3 releases, latest 2026." }] };
+    const item = {
+      collectionName: "Home",
+      artistViewUrl: "https://music.apple.com/us/artist/artist-a/1",
+      collectionViewUrl: "https://music.apple.com/us/album/home/2",
+      artworkUrl100: "https://is1-ssl.mzstatic.com/image/thumb/a/100x100bb.jpg",
+      previewUrl: "https://audio-ssl.itunes.apple.com/preview.m4a",
+      releaseDate: "2026-10-10T07:00:00Z",
+    };
+    const body = JSON.stringify({ resultCount: 1, results: [item] });
+    const out = annotateCrateResult(ledger, "itunes_search", one(body));
+    const ids = idsIn(sourcesPart(out, body));
+    expect(ids).toHaveLength(1);
+    expect(ledger.get(ids[0]!)).toMatchObject({ url: item.collectionViewUrl, host: "music.apple.com", title: "Home", via: "crate:itunes_search" });
+    expect(sourcesPart(out, body)).toBe(`\nSources:\n[${ids[0]}] Home · music.apple.com`);
+    // Cited twice, it is still one publisher (core's family guard), so it cannot confirm alone.
+    const claim: ClaimInput = { kind: "release-date", text: "Out 2026-10-10.", value: "2026-10-10", sources: [{ id: ids[0]! }, { id: ids[0]! }] };
+    expect(judgeClaim(claim, { [ids[0]!]: ledger.get(ids[0]!)! }).status).toBe("could-not-verify");
+  });
+
+  it("names a source from title, name, collectionName or trackName", () => {
+    const ledger = createSourceLedger();
+    const body = JSON.stringify({ results: [{ trackName: "Song B", trackViewUrl: "https://music.apple.com/us/song/b/3" }] });
+    expect(text(annotateCrateResult(ledger, "itunes_lookup", one(body)))).toMatch(/\[S[0-9a-z]{5}\] Song B · music\.apple\.com$/);
+  });
+
+  it("a result with no family page and no buildable id gets no source ids", () => {
+    const ledger = createSourceLedger();
+    const plain = one("Artist A: 3 releases, latest 2026. https://label.example/a");
     expect(annotateCrateResult(ledger, "itunes_search", plain)).toEqual(plain);
-    const notMb: CallToolResult = { content: [{ type: "text", text: JSON.stringify([{ id: "5b11f4ce-a62d-471e-81fc-a69a8278c7da" }]) }] };
+    const notMb = one(JSON.stringify([{ id: "5b11f4ce-a62d-471e-81fc-a69a8278c7da" }]));
     expect(annotateCrateResult(ledger, "itunes_search", notMb)).toEqual(notMb);
+    const offFamily = one(JSON.stringify([{ title: "X", url: "https://label.example/x" }]));
+    expect(annotateCrateResult(ledger, "bandcamp_search_bandcamp", offFamily)).toEqual(offFamily);
+    const bandcampAsset = one(JSON.stringify([{ title: "X", url: "https://f4.bcbits.com/img/a.jpg" }]));
+    expect(annotateCrateResult(ledger, "bandcamp_search_bandcamp", bandcampAsset)).toEqual(bandcampAsset);
+  });
+
+  it("a Bandcamp search item is one source on its own bandcamp.com page", () => {
+    const ledger = createSourceLedger();
+    const body = JSON.stringify([{ name: "Home", url: "https://artista.bandcamp.com/album/home", image: "https://f4.bcbits.com/img/a.jpg" }]);
+    const ids = idsIn(sourcesPart(annotateCrateResult(ledger, "bandcamp_search_bandcamp", one(body)), body));
+    expect(ids.map((i) => ledger.get(i)!.url)).toEqual(["https://artista.bandcamp.com/album/home"]);
   });
 
   it("leaves an error result alone", () => {
     const ledger = createSourceLedger();
-    const err: CallToolResult = { content: [{ type: "text", text: "failed https://example.org/x" }], isError: true };
+    const err: CallToolResult = { content: [{ type: "text", text: "failed https://en.wikipedia.org/wiki/x" }], isError: true };
     expect(annotateCrateResult(ledger, "wikipedia_summary", err)).toEqual(err);
   });
 });

@@ -18,6 +18,14 @@ export function publisherOf(host: string): string {
   return parts.slice(-n).join(".");
 }
 
+/** R8b: a Crate result's text is its family's text (an iTunes item's artwork link is still iTunes), so one family is one publisher. */
+const CRATE_FAMILY: Record<string, string> = { musicbrainz: "musicbrainz.org", wikipedia: "wikipedia.org", bandcamp: "bandcamp.com", itunes: "apple.com" };
+function publisherOfSource(s: { host: string; via: string }): string {
+  if (!s.via.startsWith("crate:")) return publisherOf(s.host);
+  const family = s.via.slice("crate:".length).split("_")[0]!;
+  return CRATE_FAMILY[family] ?? `crate:${family}`;
+}
+
 const fold = foldText;
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -138,8 +146,8 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
   if (groups.size > 1) return { ...base, status: "conflict", check: `Sources disagree: ${listed.join(" vs ")}` };
   if (own !== undefined && !groups.has(own)) return { ...base, status: "conflict", check: `Sources show ${listed[0]}, not ${claim.value}` };
 
-  const publishers = unique(usable.map((s) => publisherOf(s.host)));
-  const primary = usable.some((s) => s.primary && !AGGREGATORS.includes(publisherOf(s.host)));
+  const publishers = unique(usable.map(publisherOfSource));
+  const primary = usable.some((s) => s.primary && !AGGREGATORS.includes(publisherOfSource(s)));
   const yearOnly = claim.kind === "release-date" && own?.length === 4;
   const monthShown = usable.some((s) => datesIn(textOf.get(s)!).some((d) => d.length >= 7 && d.startsWith(`${own}-`)));
   if (yearOnly && !monthShown) return { ...base, status: "could-not-verify", check: `Only the year ${own} is shown; check the full date` };

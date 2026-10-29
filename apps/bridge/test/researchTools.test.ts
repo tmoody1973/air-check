@@ -201,6 +201,19 @@ describe("research_submit", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("echoes at most 10 unknown ids, then how many more", async () => {
+    const { t, fetch } = setup();
+    const ids = Array.from({ length: 13 }, (_, i) => `Sx${String(i).padStart(4, "0")}`);
+    const r = await t.call({ job: "rj-abc123", key: "H1.4", claims: [claim(ids)] });
+    expect(textOf(r)).toBe(`Not saved. These are not sources Air Check gave you: ${ids.slice(0, 10).join(", ")} and 3 more. Cite only [S…] ids from your search results.`);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("an answer whose JSON is not an object still maps by status", async () => {
+    const { t } = setup(() => json(409, null));
+    expect(textOf(await t.call({ job: "rj-abc123", key: "H1.4", claims: [claim([s1])] }))).toBe("This block cannot be saved now; skip it.");
+  });
+
   it("an expired id is unknown", async () => {
     vi.useFakeTimers();
     try {

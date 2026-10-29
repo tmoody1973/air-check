@@ -239,7 +239,8 @@ describe("bridge HTTPS server", () => {
     const crate = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/call", { name: "wikipedia_links", arguments: {} }) });
     const content = JSON.parse(crate.body).result.content as { text: string }[];
     const sources = content.at(-1)!.text;
-    expect(sources).toMatch(/^Sources:\n\[S[0-9a-z]{5}\] en\.wikipedia\.org\n\[S[0-9a-z]{5}\] label\.example$/);
+    // R8b: the off-family link (label.example) gets no id.
+    expect(sources).toMatch(/^Sources:\n\[S[0-9a-z]{5}\] en\.wikipedia\.org$/);
     const ids = [...sources.matchAll(/\[(S[0-9a-z]{5})\]/g)].map((m) => m[1]!);
     convexHits.length = 0;
     const claim = { kind: "release-date", text: "Album A came out on 2026-10-10.", value: "2026-10-10", sources: ids.map((id) => ({ id })) };
@@ -250,7 +251,7 @@ describe("bridge HTTPS server", () => {
     expect(convexHits[0]!.url).toBe("/agent/research");
     expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
     const posted = JSON.parse(convexHits[0]!.body);
-    expect(Object.values(posted.sources).map((s) => (s as { url: string }).url)).toEqual(["https://en.wikipedia.org/wiki/Album_A", "https://label.example/album-a"]);
+    expect(Object.values(posted.sources).map((s) => (s as { url: string }).url)).toEqual(["https://en.wikipedia.org/wiki/Album_A"]);
   });
 
   it("source_search without a Tavily key answers plainly and calls nothing", async () => {

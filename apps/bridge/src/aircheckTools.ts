@@ -44,7 +44,9 @@ export async function postFields(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
-    return { status: res.status, data: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+    const data: unknown = await res.json().catch(() => ({}));
+    // JSON null, a number or an array is no answer object: treat it as empty so callers can read fields safely.
+    return { status: res.status, data: data !== null && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {} };
   } catch {
     return null;
   }

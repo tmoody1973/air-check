@@ -189,8 +189,10 @@ export function researchSubmitTool(opts: ResearchToolOptions): PackageSubmitTool
     const body = clean(args);
     const ids = citedIds(body);
     const unknown = ids.filter((id) => !opts.ledger.get(id));
-    if (unknown.length)
-      return { text: `Not saved. These are not sources Air Check gave you: ${unknown.join(", ")}. Cite only [S…] ids from your search results.`, isError: true, status: "refused" };
+    if (unknown.length) {
+      const shown = unknown.slice(0, 10).join(", ") + (unknown.length > 10 ? ` and ${unknown.length - 10} more` : "");
+      return { text: `Not saved. These are not sources Air Check gave you: ${shown}. Cite only [S…] ids from your search results.`, isError: true, status: "refused" };
+    }
     if (ids.length > MAX_SOURCES_PER_BLOCK) return { text: `Not saved. Cite at most ${MAX_SOURCES_PER_BLOCK} sources in one block.`, isError: true, status: "refused" };
     const sources = Object.fromEntries(ids.map((id) => [id, opts.ledger.get(id)!]));
 

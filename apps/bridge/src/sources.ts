@@ -71,6 +71,8 @@ export function createSourceLedger(opts: { ttlMs?: number; max?: number } = {}):
   };
 }
 
+/** Longer URLs are skipped: no real page needs more, and the ledger and the agent's text stay small. */
+export const MAX_URL = 2_048;
 const TRAILING = new Set([".", ",", ";", ":", "!", "?"]);
 const count = (s: string, c: string) => s.split(c).length - 1;
 
@@ -89,7 +91,7 @@ export function urlsIn(text: string): string[] {
       else if (!TRAILING.has(ch)) break;
     }
     const u = raw.slice(0, end);
-    if (URL.canParse(u)) out.add(u);
+    if (u.length <= MAX_URL && URL.canParse(u)) out.add(u);
   }
   return [...out];
 }
@@ -97,21 +99,37 @@ export function urlsIn(text: string): string[] {
 export const musicBrainzUrl = (entity: string, mbid: string) => `https://musicbrainz.org/${entity}/${mbid}`;
 
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// First match wins, so release_group comes before release.
-const MB_ENTITIES: [RegExp, string][] = [
-  [/release[_-]group/, "release-group"],
-  [/artist/, "artist"],
-  [/release/, "release"],
-  [/label/, "label"],
-  [/recording/, "recording"],
-  [/work/, "work"],
-];
+// The last entity a tool names is what it lists: musicbrainz_get_artist_releases lists releases.
+const MB_ENTITY = /release[_-]group|artist|release|label|recording|work/g;
+const mbEntity = (tool: string) => tool.match(MB_ENTITY)?.at(-1)?.replace(/_/g, "-");
+
+/**
+ * R8b: each allowlisted Crate family's own publisher. Only its pages get ids; a link to anyone else inside a Crate
+ * result is the family's text about that page, not that page, so it gets none (the agent can source_search it).
+ */
+const FAMILY_HOSTS: Record<string, (host: string) => boolean> = {
+  musicbrainz: (h) => h === "musicbrainz.org" || h === "www.musicbrainz.org",
+  wikipedia: (h) => h === "wikipedia.org" || h.endsWith(".wikipedia.org"),
+  bandcamp: (h) => h === "bandcamp.com" || h.endsWith(".bandcamp.com"),
+  itunes: (h) => h === "apple.com" || h.endsWith(".apple.com"),
+};
+const ASSET = /\.(?:jpe?g|png|gif|webp|svg|ico|mp3|m4a|aac|wav|flac|ogg|mp4|m4v|mov)$/i;
+/** A family's own page: its host, and never an image or audio file. */
+function familyPage(family: string, url: string): boolean {
+  const own = FAMILY_HOSTS[family];
+  if (!own || !URL.canParse(url) || url.length > MAX_URL) return false;
+  const u = new URL(url);
+  return ["http:", "https:"].includes(u.protocol) && own(u.hostname.toLowerCase()) && !ASSET.test(u.pathname);
+}
+/** The one page field of a JSON item, first present: Bandcamp's `url`, then iTunes' store pages. */
+const PAGE_FIELDS = ["url", "collectionViewUrl", "trackViewUrl", "artistViewUrl"];
+const NAME_FIELDS = ["title", "name", "collectionName", "trackName"];
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 
 /**
  * A JSON result's items, so each source keeps its own item's text: an array's elements, or a search wrapper's listed
  * items (`{ count, releases: [...] }`, MusicBrainz's own shape). Anything else is one item.
- * ponytail: shapes assumed from MusicBrainz's API until plan Task 2 Step 1 records Crate's real result shapes on the VM.
+ * ponytail: shapes assumed from the public APIs until plan Task 2 Step 1 records Crate's real result shapes on the VM.
  */
 function itemsOf(text: string): unknown[] {
   let v: unknown;
@@ -128,25 +146,34 @@ function itemsOf(text: string): unknown[] {
   return [v];
 }
 
+/** Exactly one page per JSON item; for plain text, every family page in it. */
+function pagesOf(family: string, tool: string, item: unknown, text: string): string[] {
+  if (!isObj(item)) return typeof item === "string" ? urlsIn(text).filter((u) => familyPage(family, u)) : [];
+  const entity = family === "musicbrainz" ? mbEntity(tool) : undefined;
+  if (entity && typeof item.id === "string" && MBID.test(item.id)) return [musicBrainzUrl(entity, item.id.toLowerCase())];
+  const page = PAGE_FIELDS.map((k) => item[k]).find((v): v is string => typeof v === "string");
+  return page && familyPage(family, page) ? [page] : [];
+}
+
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 200);
 const MAX_SOURCES_PER_RESULT = 25; // ponytail: a long link list is noise to the agent; raise it if real results need more
 
 /**
- * Crate result hook: every URL in an allowlisted Crate tool's result (or built from a MusicBrainz id) is added to the
- * ledger and listed at the end as `Sources:` lines, `[S…] <name> · <host>`. A result with neither gets no ids: it can
- * inform the agent but cannot back a claim.
+ * Crate result hook: each item's own page (or the page built from a MusicBrainz id) is added to the ledger and listed
+ * at the end as `Sources:` lines, `[S…] <name> · <host>`. A result with neither gets no ids: it can inform the agent
+ * but cannot back a claim.
  */
 export function annotateCrateResult(ledger: SourceLedger, tool: string, result: CallToolResult): CallToolResult {
   if (result.isError || !Array.isArray(result.content)) return result;
-  const entity = tool.startsWith("musicbrainz_") ? MB_ENTITIES.find(([re]) => re.test(tool))?.[1] : undefined;
+  const family = tool.split("_")[0]!;
+  if (!FAMILY_HOSTS[family]) return result;
   const lines = new Map<string, string>();
   for (const c of result.content) {
     if (c.type !== "text") continue;
     for (const item of itemsOf(c.text)) {
       const text = typeof item === "string" ? item : JSON.stringify(item);
-      const name = isObj(item) ? [item.title, item.name].find((v): v is string => typeof v === "string" && v.trim() !== "") : undefined;
-      const mbid = entity && isObj(item) && typeof item.id === "string" && MBID.test(item.id) ? musicBrainzUrl(entity, item.id.toLowerCase()) : undefined;
-      for (const url of [...(mbid ? [mbid] : []), ...urlsIn(text)]) {
+      const name = isObj(item) ? NAME_FIELDS.map((k) => item[k]).find((v): v is string => typeof v === "string" && v.trim() !== "") : undefined;
+      for (const url of pagesOf(family, tool, item, text)) {
         if (lines.size >= MAX_SOURCES_PER_RESULT) break;
         const host = new URL(url).hostname.toLowerCase();
         const title = name ? oneLine(name) : "";
