@@ -95,6 +95,11 @@ describe("Add a 2025 show", () => {
     expect(within(section()).getByRole("alert")).toHaveTextContent(frozen);
   });
 
+  it("a removed date whose row stays says so, with no fix pill", () => {
+    setup({ episodes: [{ ...row("2025-12-26"), status: "not-in-backlog", corrected: { fields: ["tracklist"], at: 1, stale: false }, rescanPending: true }] });
+    expect(document.getElementById("ep-2025-12-26")).toHaveTextContent("Not in the backlog");
+  });
+
   it("an added 2025 show sits in the normal table and the phone cards; no 2025 blank Fridays", () => {
     setup({ added: ["2025-12-26"], episodes: [row("2025-12-26"), row("2026-01-02")] });
     expect(screen.getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["Dec 26, 2025", "Jan 2, 2026"]);

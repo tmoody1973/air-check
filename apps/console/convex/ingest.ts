@@ -3,7 +3,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
+import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, inScope, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
 import { MAX_NOTES, queueDraft } from "./tracklist";
 
@@ -158,7 +158,7 @@ function draftNotes(e: Doc<"episodes">): string {
  * Asks for the show's draft: the same draft-package run the Tracklist page queues. Idempotent per show date (Review
  * Focus 4). Whether a show may be drafted is decided here from the stored facts, never by the caller: a package in any
  * status, a rerun, an open question, unclear or missing audio, or a missing tracklist means no run; so do an open draft
- * run for the date, a fix not yet applied by a scan (R4, "rescan-pending"), a fix gone stale (R5, "fix-stale"), two finished ones that made no package since
+ * run for the date, a date out of the backlog (a removed 2025 show, "not-in-backlog"), a fix not yet applied by a scan (R4, "rescan-pending"), a fix gone stale (R5, "fix-stale"), two finished ones that made no package since
  * the show's latest fix (Review Focus 3), or 3 packages already ahead of Tarik.
  */
 export const requestDraft = mutation({
@@ -168,6 +168,8 @@ export const requestDraft = mutation({
     if (!isShowDate(showDate)) throw new ConvexError({ code: "BAD_INPUT", message: "showDate must be a real date, yyyy-mm-dd" });
     const row = await episodeByDate(ctx, showDate);
     if (!row) throw new ConvexError({ code: "NOT_FOUND" });
+    // A 2025 date Tarik removed can keep its row (a correction, or prune's cap); it is never drafted.
+    if (!(await inScope(ctx, showDate))) return { queued: false, reason: "not-in-backlog" } as const;
     const runs = await draftRunsFor(ctx, showDate);
     if (runs.some((r) => isOpenRun(r))) {
       // An open run means "drafting" whatever else the facts say, so a second scan never queues a second run.

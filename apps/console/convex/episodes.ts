@@ -117,7 +117,10 @@ export async function episodeRows(ctx: QueryCtx) {
       const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
       const openRun = runs.some((r) => isOpenRun(r));
-      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts)) };
+      const derived = episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts));
+      // A removed 2025 date whose row stays (a correction, a package, prune's cap) is not backlog: never drafted or counted.
+      const status = (await inScope(ctx, e.showDate)) ? derived.status : "not-in-backlog";
+      return { ...rest, notes, tracklist, ...(tracks && { tracks }), packageId: packageIdFor(e.showDate), ...pkg, draftAttempts, openRun, corrected, rescanPending: await rescanPending(ctx, e), ...derived, status };
     }),
   );
 }
@@ -174,6 +177,8 @@ export const removeShowDate = mutation({
     const row = await extraDateRow(ctx, date);
     if (!row) return;
     await refuseFrozen(ctx, date);
+    // R3: downloaded audio is on its way to a draft; taking the date out now would strand it.
+    if ((await episodeByDate(ctx, date))?.audioOnDisk) throw badInput("this show's audio is already downloaded");
     await ctx.db.delete(row._id);
     await askRescan(ctx);
   },

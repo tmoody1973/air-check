@@ -33,6 +33,18 @@ const rows = (t: T) => t.run((ctx) => ctx.db.query("extraDates").collect());
 const episode = (showDate: string) => ({
   showDate, audio: { status: "ready" as const, flags: [] }, tracklist: { status: "found" as const }, notes: { status: "missing" as const }, questions: [],
 });
+const track = (hour: 1 | 2, position: number, closing = false) => ({
+  hour, position, artist: `A${hour}${position}`, title: `T${hour}${position}`, raw: `A - T`, closing, status: closing ? ("closing-track" as const) : ("confirmed" as const),
+});
+/** A show ready to draft (audio in Box, a tracklist, notes), as the ingest service sends it. */
+const ready = (showDate: string, over: Record<string, unknown> = {}) => ({
+  showDate,
+  audio: { status: "ready" as const, folderId: "f1", hour1: { id: "b1", name: "h1.wav", size: 600_000_000 }, hour2: { id: "b2", name: "h2.wav", size: 600_000_000 }, pattern: "rlr", flags: [] },
+  tracklist: { status: "found" as const, docId: "g1", tracks: [track(1, 1), track(1, 2, true), track(2, 1), track(2, 2, true)] },
+  notes: { status: "found" as const, docId: "p1", text: "notes" },
+  questions: [],
+  ...over,
+});
 
 describe("access (Hard Rule 9)", () => {
   test("demo, signed-out and outside users get FORBIDDEN and null; nothing is written", async () => {
@@ -122,6 +134,35 @@ describe("removeShowDate", () => {
     await h.mutation(api.episodes.removeShowDate, { date: D });
     expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: [] })).toEqual({ deleted: 1 });
     expect((await t.run((ctx) => ctx.db.query("episodes").collect())).map((e) => e.showDate)).toEqual(["2025-12-19"]);
+  });
+});
+
+describe("a removed date is out of the backlog even while its row stays (review fix 1)", () => {
+  test("a corrected row survives prune, but is never drafted and is not counted as backlog", async () => {
+    const t = convexTest(schema, modules);
+    const h = t.withIdentity(human);
+    await h.mutation(api.episodes.addShowDate, { date: D });
+    await t.mutation(api.ingest.upsert, { token: INGEST, episode: ready(D) });
+    await h.mutation(api.corrections.setTracklist, { showDate: D, text: "HOUR 1\nA - B\nC - D\n\nHOUR 2\nE - F\nG - H" });
+    const at = (await t.run((ctx) => ctx.db.query("corrections").first()))!.updatedAt;
+    await t.mutation(api.ingest.upsert, { token: INGEST, episode: ready(D, { appliedCorrectionAt: at }) });
+    expect((await h.query(api.episodes.list, {}))!.episodes[0]!.status).toBe("ready-to-draft");
+
+    await h.mutation(api.episodes.removeShowDate, { date: D });
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: [] })).toEqual({ deleted: 0 }); // the correction keeps it
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: D })).toEqual({ queued: false, reason: "not-in-backlog" });
+    expect(await t.run((ctx) => ctx.db.query("runs").collect())).toEqual([]);
+    expect((await h.query(api.episodes.list, {}))!.episodes[0]!.status).toBe("not-in-backlog");
+    expect((await list(t)).episodes[0]!.status).toBe("not-in-backlog");
+  });
+
+  test("removing is refused once the show's audio is downloaded (R3 wording)", async () => {
+    const t = convexTest(schema, modules);
+    const h = t.withIdentity(human);
+    await h.mutation(api.episodes.addShowDate, { date: D });
+    await t.mutation(api.ingest.upsert, { token: INGEST, episode: ready(D, { audioOnDisk: true }) });
+    expect(await failure(h.mutation(api.episodes.removeShowDate, { date: D }))).toEqual({ code: "BAD_INPUT", message: "this show's audio is already downloaded" });
+    expect(await rows(t)).toHaveLength(1);
   });
 });
 
