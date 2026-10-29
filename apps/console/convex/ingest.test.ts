@@ -413,3 +413,83 @@ describe("ingest.sourceStatus", () => {
     await expect(t.mutation(api.ingest.sourceStatus, { token: INGEST, source: "mixcloud" as never, state: "connected" })).rejects.toThrow();
   });
 });
+
+// Plan 6b Task 2: what the scanner reads back (corrections, placements, when to rescan) and a fresh start after a fix.
+describe("Plan 6b: corrections and placements", () => {
+  const human = { subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true };
+  const GOOD = "HOUR 1\nAlfa Mist - Organic Rust\n\nHOUR 2\nKokoroko - Abusey Junction";
+  const unplacedItem = { source: "drive" as const, id: "g9", name: "Rhythm Lab Radio 9-4-226", reason: "bad year" };
+
+  test("list returns the corrections, the placements and rescanAfter (0 with none; an undo counts too)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    expect(await t.query(api.ingest.list, { token: INGEST })).toMatchObject({ corrections: [], placements: [], rescanAfter: 0 });
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    let out = await t.query(api.ingest.list, { token: INGEST });
+    expect(out.corrections).toEqual([{ showDate: "2026-01-02", tracklistText: GOOD, updatedAt: expect.any(Number) }]);
+    expect(out.rescanAfter).toBe(out.corrections[0]!.updatedAt);
+
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem] });
+    await new Promise((r) => setTimeout(r, 5));
+    await t.withIdentity(human).mutation(api.corrections.place, { source: "drive", id: "g9", date: "2026-09-04" });
+    out = await t.query(api.ingest.list, { token: INGEST });
+    expect(out.placements).toEqual([{ source: "drive", id: "g9", date: "2026-09-04" }]);
+    const placedAt = out.rescanAfter;
+    expect(placedAt).toBeGreaterThan(out.corrections[0]!.updatedAt);
+
+    await new Promise((r) => setTimeout(r, 5));
+    await t.withIdentity(human).mutation(api.corrections.unplace, { source: "drive", id: "g9" });
+    await t.withIdentity(human).mutation(api.corrections.clear, { showDate: "2026-01-02" });
+    out = await t.query(api.ingest.list, { token: INGEST });
+    expect(out).toMatchObject({ corrections: [], placements: [] });
+    expect(out.rescanAfter).toBeGreaterThan(placedAt); // "Use Drive again" must rescan too
+  });
+
+  test("reportUnplaced is INGEST_TOKEN only, replaces the list whole, and is capped at 50", async () => {
+    const t = convexTest(schema, modules);
+    for (const token of ["", "x".repeat(48), ...Object.values(OTHER)])
+      expect(await errorCode(t.mutation(api.ingest.reportUnplaced, { token, items: [unplacedItem] }))).toBe("UNAUTHORIZED");
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [unplacedItem, { ...unplacedItem, id: "g8" }] });
+    await t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: [{ ...unplacedItem, id: "g7" }] });
+    expect((await t.run((ctx) => ctx.db.query("unplaced").collect())).map((u) => u.id)).toEqual(["g7"]);
+    const many = Array.from({ length: 51 }, (_, i) => ({ ...unplacedItem, id: `g${i}` }));
+    expect(await errorCode(t.mutation(api.ingest.reportUnplaced, { token: INGEST, items: many }))).toBe("BAD_INPUT");
+  });
+
+  test("prune keeps a date that has a correction", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    expect(await t.mutation(api.ingest.prune, { token: INGEST, keep: [] })).toEqual({ deleted: 0 });
+    expect(await row(t)).not.toBeNull();
+  });
+
+  test("upsert stores the Drive text and the stale flag; a scan without the flag drops it", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode({ tracklist: { status: "found", docId: "g1", tracks: TRACKS, text: "HOUR 1\n..." }, correctionStale: true }));
+    expect(await row(t)).toMatchObject({ tracklist: { text: "HOUR 1\n..." }, correctionStale: true });
+    await upsert(t, episode());
+    expect((await row(t))!.correctionStale).toBeUndefined();
+    expect(await errorCode(upsert(t, episode({ tracklist: { status: "found", text: "x".repeat(20_001) } })))).toBe("BAD_INPUT");
+  });
+
+  test("Review Focus 3: a draft-failed show gets two fresh attempts after a fix; earlier runs stop counting", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    for (let i = 0; i < 2; i++) {
+      expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+      await t.run(async (ctx) => {
+        for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed", createdAt: Date.now() - 60_000 });
+      });
+    }
+    expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toEqual({ queued: false, reason: "draft-failed" });
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-01-02", text: GOOD });
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]).toMatchObject({ draftAttempts: 0, status: "ready-to-draft" });
+    expect((await t.withIdentity(human).query(api.episodes.list, {}))!.episodes[0]!.draftAttempts).toBe(0);
+    expect((await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).queued).toBe(true);
+    await t.run(async (ctx) => {
+      for (const r of await ctx.db.query("runs").collect()) await ctx.db.patch(r._id, { status: "failed" });
+    });
+    expect((await t.query(api.ingest.list, { token: INGEST })).episodes[0]!.draftAttempts).toBe(1);
+  });
+});

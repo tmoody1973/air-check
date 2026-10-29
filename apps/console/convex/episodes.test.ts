@@ -334,3 +334,22 @@ describe("Connect Google / Connect Dropbox status (Plan 6 Task 3)", () => {
     expect(await errorCode(t.withIdentity(human).mutation(api.episodes.sourceConnected, { source: "google", account: "x".repeat(201) }))).toBe("BAD_INPUT");
   });
 });
+
+// Plan 6b Task 2: a row says what Tarik corrected (and whether the fix still matches, R1), never the Drive text.
+describe("episodes.list corrected", () => {
+  test("rows carry corrected (fields, at, stale) or null, and never tracklist.text", async () => {
+    const t = convexTest(schema, modules);
+    const ep = { ...episode("2026-07-17"), tracklist: { status: "found" as const, tracks: TRACKS, text: "secret drive text" } };
+    await upsert(t, ep as never);
+    await upsert(t, episode("2026-07-24"));
+    await t.withIdentity(human).mutation(api.corrections.setTracklist, { showDate: "2026-07-17", text: "HOUR 1\nA - B\n\nHOUR 2\nC - D" });
+    let out = (await t.withIdentity(human).query(api.episodes.list, {}))!;
+    expect(out.episodes[0]!.corrected).toEqual({ fields: ["tracklist"], at: expect.any(Number), stale: false });
+    expect(out.episodes[1]!.corrected).toBeNull();
+    expect(JSON.stringify(out)).not.toContain("secret drive text");
+    expect(JSON.stringify(out)).not.toContain("correctionStale");
+    await upsert(t, { ...ep, correctionStale: true } as never);
+    out = (await t.withIdentity(human).query(api.episodes.list, {}))!;
+    expect(out.episodes[0]!.corrected!.stale).toBe(true);
+  });
+});

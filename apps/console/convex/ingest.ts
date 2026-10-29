@@ -3,8 +3,8 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { sameToken } from "./agentSubmit";
-import { awaitingReviewCount, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, writeSource } from "./episodes";
-import { scannedEpisodeFields, sourceStateV } from "./schema";
+import { attemptsSince, awaitingReviewCount, correctionFor, draftRunsFor, episodeByDate, episodeRows, factsOf, isOpenRun, isShowDate, linkedPackage, writeSource } from "./episodes";
+import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
 import { MAX_NOTES, queueDraft } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
@@ -26,6 +26,8 @@ const MAX_ERROR_CHARS = 200;
 const PACE = 3;
 /** I3: more than this many rows to remove in one pass looks like a bad read, not renamed docs: remove none. */
 const MAX_PRUNE = 3;
+/** The scanner reports at most this many undated names per scan. */
+const MAX_UNPLACED = 50;
 
 const scannedEpisodeV = v.object(scannedEpisodeFields);
 type ScannedEpisode = Infer<typeof scannedEpisodeV>;
@@ -34,6 +36,7 @@ type ScannedEpisode = Infer<typeof scannedEpisodeV>;
 function scanProblem(e: ScannedEpisode): string | null {
   if (!isShowDate(e.showDate)) return "showDate must be a real date, yyyy-mm-dd";
   if (e.notes.text !== undefined && new TextEncoder().encode(e.notes.text).length > MAX_NOTES_BYTES) return "the notes text is over 64 KB";
+  if ((e.tracklist.text?.length ?? 0) > MAX_NOTES) return "the tracklist text is over 20,000 characters";
   if ((e.tracklist.tracks?.length ?? 0) > MAX_TRACKS) return `the tracklist has over ${MAX_TRACKS} tracks`;
   if (e.questions.length > MAX_QUESTIONS) return `over ${MAX_QUESTIONS} questions`;
   if (e.questions.some((q) => q.text.length > MAX_QUESTION_CHARS)) return `a question is over ${MAX_QUESTION_CHARS} characters`;
@@ -60,23 +63,50 @@ export const upsert = mutation({
         return old?.answer ? { ...q, answer: old.answer, ...(old.answeredAt !== undefined && { answeredAt: old.answeredAt }) } : q;
       });
     const scanned = { ...episode, questions, scannedAt: Date.now() };
-    if (cur) await ctx.db.patch(cur._id, { ...scanned, audioOnDisk: episode.audioOnDisk });
+    if (cur) await ctx.db.patch(cur._id, { ...scanned, audioOnDisk: episode.audioOnDisk, correctionStale: episode.correctionStale });
     else await ctx.db.insert("episodes", scanned);
   },
 });
 
-/** Every episode with its package (R1), status, gaps and finished draft runs, and how many packages are ahead of Tarik. */
+/**
+ * Every episode with its package (R1), status, gaps and finished draft runs, and how many packages are ahead of Tarik.
+ * Plan 6b: plus Tarik's corrections and placements, and `rescanAfter` (the newest save or undo; 0 for none), which
+ * starts a rescan when it is newer than the last scan.
+ */
 export const list = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requireIngest(token);
-    return { episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx) };
+    const corrections = (await ctx.db.query("corrections").collect()).map(({ _id, _creationTime, ...c }) => {
+      void _id, _creationTime;
+      return c;
+    });
+    const placed = await ctx.db.query("placements").collect();
+    const undoneAt = (await ctx.db.query("rescanAsks").first())?.at ?? 0;
+    const rescanAfter = Math.max(0, undoneAt, ...corrections.map((c) => c.updatedAt), ...placed.map((p) => p.updatedAt));
+    return {
+      episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx),
+      corrections, placements: placed.map(({ source, id, date }) => ({ source, id, date })), rescanAfter,
+    };
+  },
+});
+
+/** Plan 6b: after each complete scan, the names it could not date, replaced whole. Names only, never file contents. */
+export const reportUnplaced = mutation({
+  args: { token: v.string(), items: v.array(v.object({ source: fixSourceV, id: v.string(), name: v.string(), reason: v.string() })) },
+  handler: async (ctx, { token, items }) => {
+    requireIngest(token);
+    if (items.length > MAX_UNPLACED) throw new ConvexError({ code: "BAD_INPUT", message: `over ${MAX_UNPLACED} undated names` });
+    for (const u of await ctx.db.query("unplaced").collect()) await ctx.db.delete(u._id);
+    const seenAt = Date.now();
+    for (const item of items) await ctx.db.insert("unplaced", { ...item, seenAt });
   },
 });
 
 /**
  * I3: after a scan that read every connected source, rows for dates no source has any more (a renamed or deleted doc)
- * go. A row with a package, a rerun mark or an ahead-of-time mark (scannedAt 0) is a person's record and stays.
+ * go. A row with a package, a rerun mark, an ahead-of-time mark (scannedAt 0) or a correction is a person's record and
+ * stays.
  */
 export const prune = mutation({
   args: { token: v.string(), keep: v.array(v.string()) },
@@ -85,7 +115,7 @@ export const prune = mutation({
     const kept = new Set(keep);
     const gone = [];
     for (const e of await ctx.db.query("episodes").collect()) {
-      if (kept.has(e.showDate) || e.rerunOf || e.scannedAt === 0) continue;
+      if (kept.has(e.showDate) || e.rerunOf || e.scannedAt === 0 || (await correctionFor(ctx, e.showDate))) continue;
       if ((await linkedPackage(ctx, e.showDate)).packageStatus !== "none") continue;
       gone.push(e._id);
     }
@@ -121,7 +151,8 @@ function draftNotes(e: Doc<"episodes">): string {
  * Asks for the show's draft: the same draft-package run the Tracklist page queues. Idempotent per show date (Review
  * Focus 4). Whether a show may be drafted is decided here from the stored facts, never by the caller: a package in any
  * status, a rerun, an open question, unclear or missing audio, or a missing tracklist means no run; so do an open draft
- * run for the date, two finished ones that made no package, or 3 packages already ahead of Tarik.
+ * run for the date, two finished ones that made no package since the show's latest fix (Review Focus 3), or 3 packages
+ * already ahead of Tarik.
  */
 export const requestDraft = mutation({
   args: { token: v.string(), showDate: v.string() },
@@ -136,7 +167,7 @@ export const requestDraft = mutation({
       const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus));
       return { queued: false, reason: status === "ready-to-draft" ? "drafting" : status } as const;
     }
-    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, runs.length));
+    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
     if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
     if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;
     const tracks = row.tracklist.tracks ?? [];

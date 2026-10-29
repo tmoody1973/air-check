@@ -12,6 +12,7 @@ import type * as activity from "../activity.js";
 import type * as agentSubmit from "../agentSubmit.js";
 import type * as applyEvents from "../applyEvents.js";
 import type * as chat from "../chat.js";
+import type * as corrections from "../corrections.js";
 import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as demoLimits from "../demoLimits.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   agentSubmit: typeof agentSubmit;
   applyEvents: typeof applyEvents;
   chat: typeof chat;
+  corrections: typeof corrections;
   crons: typeof crons;
   cutoff: typeof cutoff;
   demoLimits: typeof demoLimits;

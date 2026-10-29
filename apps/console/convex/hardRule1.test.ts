@@ -46,6 +46,11 @@ test("the public writes are exactly the allowlist", async () => {
       "episodes.answer", "episodes.markRerun", "episodes.unmarkRerun",
       // Plan 6 Task 3: Connect Google / Connect Dropbox record state and an account label only (a signed-in real human).
       "episodes.sourceConnected", "episodes.sourceDisconnected",
+      // Plan 6b (decision 017): Tarik's fixes for a backlog show, a signed-in real human only; never a source write.
+      "corrections.setTracklist", "corrections.pick", "corrections.setHours", "corrections.useFolderDate", "corrections.clear",
+      "corrections.place", "corrections.unplace",
+      // Plan 6b: the ingest service (its own token) reports the names it could not date.
+      "ingest.reportUnplaced",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
@@ -399,7 +404,7 @@ test("ingest and episodes code never reach the gate, decide, publish or descript
 test("every ingest function checks INGEST_TOKEN first", () => {
   const text = src("ingest");
   const names = [...text.matchAll(/export const (\w+) = (?:query|mutation)\(/g)].map((m) => m[1]!);
-  expect(names.sort()).toEqual(["list", "prune", "requestDraft", "setFetch", "sourceStatus", "upsert"]);
+  expect(names.sort()).toEqual(["list", "prune", "reportUnplaced", "requestDraft", "setFetch", "sourceStatus", "upsert"]);
   for (const name of names) expect(fnBody(text, `export const ${name} = `), name).toMatch(/handler: async \(ctx, \{ token[^}]*\}\) => \{\n\s+requireIngest\(token\);/);
   expect(text).not.toMatch(/\b(?:internalMutation|internalQuery|action|httpAction)\b/);
 });

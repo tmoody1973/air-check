@@ -32,6 +32,16 @@ export const episodeTrackV = v.object({
   status: v.union(v.literal("confirmed"), v.literal("spelling-fixed"), v.literal("unverified-in-notes"), v.literal("closing-track")),
 });
 export const questionKindV = v.union(v.literal("audio"), v.literal("date"), v.literal("tracklist"), v.literal("rerun"));
+// Plan 6b: what the console can offer to settle a question (mirrors the ingest service's Fix). Convex accepts only ids
+// a question offered (Review Focus 5).
+export const fixSourceV = v.union(v.literal("box"), v.literal("drive"), v.literal("paper"));
+const choiceV = v.object({ id: v.string(), name: v.string() });
+export const fixV = v.union(
+  v.object({ type: v.literal("tracklist") }),
+  v.object({ type: v.literal("pick"), source: fixSourceV, choices: v.array(choiceV) }),
+  v.object({ type: v.literal("hours"), choices: v.array(choiceV) }),
+  v.object({ type: v.literal("stamp"), folderDate: v.string(), stampDate: v.string() }),
+);
 /** What the scan finds; the ingest service sends exactly this. */
 export const scannedEpisodeFields = {
   showDate: v.string(),
@@ -43,12 +53,16 @@ export const scannedEpisodeFields = {
     pattern: v.optional(v.string()),
     flags: v.array(v.string()),
   }),
-  tracklist: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), tracks: v.optional(v.array(episodeTrackV)) }),
+  // `text`: the chosen Drive doc's text (at most 20,000 characters), for the tracklist editor only: never in a list,
+  // read one show at a time by a signed-in real human (corrections.tracklistText).
+  tracklist: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), tracks: v.optional(v.array(episodeTrackV)), text: v.optional(v.string()) }),
   notes: v.object({ status: v.union(v.literal("found"), v.literal("missing")), docId: v.optional(v.string()), text: v.optional(v.string()) }),
   // `rerunOf` on a rerun question is the candidate original; "" means unknown (R8). `action`: fixed in the source, never
   // answered (M6).
-  questions: v.array(v.object({ id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)) })),
+  questions: v.array(v.object({ id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)), fix: v.optional(fixV) })),
   audioOnDisk: v.optional(v.boolean()),
+  // R1 (Plan 6b): the show's correction points at something no source has any more, so the scan did not use it.
+  correctionStale: v.optional(v.literal(true)),
 };
 export const sourceStateV = v.union(v.literal("connected"), v.literal("needs_reconnect"), v.literal("not_connected"));
 
@@ -56,7 +70,7 @@ export default defineSchema({
   episodes: defineTable({
     ...scannedEpisodeFields,
     questions: v.array(v.object({
-      id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)),
+      id: v.string(), text: v.string(), kind: questionKindV, rerunOf: v.optional(v.string()), action: v.optional(v.literal(true)), fix: v.optional(fixV),
       answer: v.optional(v.string()), answeredAt: v.optional(v.number()),
     })),
     scannedAt: v.number(), // 0 for a row a person created before the scan found the show (a rerun marked ahead of time)
@@ -65,6 +79,25 @@ export default defineSchema({
     rerunSource: v.optional(v.union(v.literal("chat"), v.literal("episodes"), v.literal("detected"))),
     rerunDeclined: v.optional(v.literal(true)), // Tarik answered No to "is this a rerun?"; never asked again
   }).index("by_showDate", ["showDate"]),
+  // Plan 6b (decision 017): Tarik's fixes for one show, used by the scanner instead of what Drive, Paper or Box say.
+  // Written only by a signed-in real human (corrections.ts); never written back to a source.
+  corrections: defineTable({
+    showDate: v.string(),
+    tracklistText: v.optional(v.string()), // used exactly as typed
+    drive: v.optional(v.string()),
+    paper: v.optional(v.string()),
+    box: v.optional(v.string()),
+    hours: v.optional(v.object({ hour1: v.string(), hour2: v.string() })),
+    folderDate: v.optional(v.literal(true)),
+    updatedAt: v.number(),
+  }).index("by_showDate", ["showDate"]),
+  // Docs and folders whose names the scanner could not date; replaced whole after each complete scan.
+  unplaced: defineTable({ source: fixSourceV, id: v.string(), name: v.string(), reason: v.string(), seenAt: v.number() }).index("by_source_id", ["source", "id"]),
+  // Tarik's date for one of them. Never written back as a rename.
+  placements: defineTable({ source: fixSourceV, id: v.string(), date: v.string(), updatedAt: v.number() }).index("by_source_id", ["source", "id"]),
+  // One row: when a correction or placement was last removed. A delete leaves no updatedAt behind, so ingest.list's
+  // rescanAfter counts this too and "Use Drive again" rescans as promptly as a save.
+  rescanAsks: defineTable({ at: v.number() }),
   // One row per source the ingest service reads. Hard Rule 2: state and account only, never a credential.
   ingestSources: defineTable({
     source: v.union(v.literal("box"), v.literal("google"), v.literal("dropbox")),
