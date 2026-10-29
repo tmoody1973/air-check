@@ -168,6 +168,14 @@ describe("deploy files", () => {
     ]));
   });
 
+  it("DEPLOY creates the ingest token folder before the console rebuild in the deploy order, and says why (M7)", () => {
+    const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
+    const order = doc.slice(doc.indexOf("## Deploy order"), doc.indexOf("## Certificates"));
+    expect(order.indexOf("~/.aircheck/ingest-tokens")).toBeGreaterThan(-1);
+    expect(order.indexOf("~/.aircheck/ingest-tokens")).toBeLessThan(order.indexOf("dc up -d --build"));
+    expect(order).toMatch(/Docker creates the folder as root and Connect fails/);
+  });
+
   it("DEPLOY copies WAVs under a temporary name so a half-copied file is never an inbox WAV (C1)", () => {
     const doc = readFileSync(new URL("../docs/DEPLOY.md", import.meta.url), "utf8");
     expect(doc).toMatch(/cat > [^\n']*\.wav\.part && mv [^\n']*\.wav\.part [^\n']*\.wav/);

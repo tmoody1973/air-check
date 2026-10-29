@@ -72,7 +72,7 @@ The console writes `token.json` with mode 640: the console can rewrite it and th
 
 ### The ingest token folder (Connect Google Drive, Connect Dropbox)
 
-"Connect Google Drive" and "Connect Dropbox" in Settings write a read-only refresh token to `~/.aircheck/ingest-tokens/google.json` and `dropbox.json` (`{refresh_token, account, connectedAt}`; never the access token or the app secret). The ingest service (Plan 6) is the only other thing that reads them; they are never stored in Convex. Same sharing as the Mixcloud folder, created before the first `up`:
+"Connect Google Drive" and "Connect Dropbox" in Settings write a read-only refresh token to `~/.aircheck/ingest-tokens/google.json` and `dropbox.json` (`{refresh_token, account, connectedAt}`; never the access token or the app secret). The ingest service (Plan 6) is the only other thing that reads them; they are never stored in Convex. Same sharing as the Mixcloud folder. Create it before the console rebuild that first mounts it (the Plan 6 deploy; see "Deploy order"), otherwise Docker creates the folder as root and Connect fails:
 
 ```sh
 mkdir -p ~/.aircheck/ingest-tokens
@@ -516,8 +516,9 @@ Some changes span several parts, and each part expects the newer version of the 
 
 1. **Convex first** (from the Mac, `npx convex deploy -y` as in "Convex production commands"). New routes, tables and functions must exist before anything calls them.
 2. **The bridge**, then re-wire both sandboxes so the agent sees the new tool list: `nemohermes airc mcp restart` and `nemohermes aircdemo mcp restart`. Check with `nemohermes airc mcp status aircheck --json --tools` (and the same for `aircdemo`) that the tools are listed and registered.
-3. **The console** (`dc up -d --build`), and check `dc ps` says healthy.
-4. **The publisher last, and only when nothing is publishing** (see "Updating the publisher").
+3. **The ingest token folder, once, before the console rebuild that first mounts it** (Plan 6): `~/.aircheck/ingest-tokens`, owner 1000, group 1001, mode 2770, as in "The ingest token folder". Otherwise Docker creates the folder as root and Connect fails.
+4. **The console** (`dc up -d --build`), and check `dc ps` says healthy.
+5. **The publisher last, and only when nothing is publishing** (see "Updating the publisher").
 
 Deploy from `main`, after the pull request is merged; a production deploy from an unmerged branch was blocked on Oct 28, and the PR route that followed is the normal path now. For multi-step changes on the VM, put the commands in a short script file, copy it over with ssh and `cat`, read it, and run it, rather than pasting a long one-line ssh command: long pasted one-liners broke on Oct 28 (`docs/FRICTION_LOG.md`).
 
