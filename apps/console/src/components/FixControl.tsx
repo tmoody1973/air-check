@@ -180,11 +180,14 @@ export function UndatedList({ items, placements, actions, announce }: Names) {
   );
 }
 
-/** A date input plus Save that calls place; `label` names it. Rhythm Lab airs Fridays: Convex refuses any other day. */
+/**
+ * A date input plus Save that calls place; `label` names it. Rhythm Lab airs Fridays: Convex refuses any other day, and
+ * a 2025 date that wasn't added under "Add a 2025 show", in plain words.
+ */
 function PlaceForm({ label, onSave, busy }: { label: string; onSave: (date: string) => void; busy: boolean }) {
   const [date, setDate] = useState("");
   const id = useId();
-  const ok = /^2026-\d{2}-\d{2}$/.test(date);
+  const ok = /^202[56]-\d{2}-\d{2}$/.test(date);
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
     if (ok) onSave(date);
@@ -192,7 +195,7 @@ function PlaceForm({ label, onSave, busy }: { label: string; onSave: (date: stri
   return (
     <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
       <label htmlFor={id} className="text-ink-soft">{label}</label>
-      <input id={id} type="date" min="2026-01-01" max="2026-12-31" value={date} onChange={(e) => setDate(e.target.value)} className={`${FIELD} min-w-0`} />
+      <input id={id} type="date" min="2025-01-01" max="2026-12-31" value={date} onChange={(e) => setDate(e.target.value)} className={`${FIELD} min-w-0`} />
       <button type="submit" className={SECONDARY} disabled={busy || !ok}>Save</button>
     </form>
   );

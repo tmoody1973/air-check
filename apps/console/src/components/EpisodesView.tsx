@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { blankFridays, summaryLine } from "../lib/episodes";
+import { AddShowDate, type AddShowActions } from "./AddShowDate";
 import type { EpisodeActions, EpisodeRow, RowCtx } from "./EpisodeControls";
 import { COLUMN_SOURCE, EpisodeItem, type SourceStates } from "./EpisodeItem";
 import { UndatedList, type Placed, type Unplaced } from "./FixControl";
 import type { Workspace } from "./Shell";
 import { UNREADABLE, UNREADABLE_TEXT, type SourceStatus } from "./SourceConnections";
 
-export type { EpisodeActions, EpisodeRow, Placed, Unplaced };
+export type { AddShowActions, EpisodeActions, EpisodeRow, Placed, Unplaced };
 
-// Plan 6 Task 5: the 2026 backlog, oldest first (the order it clears in, so the next show is at the top). Every
+// Plan 6 Task 5: the 2026 backlog (plus the 2025 Fridays Tarik added), oldest first (the order it clears in, so the next show is at the top). Every
 // count and blank Friday comes from the rows; nothing is invented. Notes text never reaches this page (Hard Rule 12).
 
 const CONNECT_NOTE = { box: "Set up Box in Settings", google: "Connect Google in Settings", dropbox: "Connect Dropbox in Settings" } as const;
@@ -37,6 +38,8 @@ export function EpisodesView({
   workspace,
   today,
   actions,
+  added,
+  addActions,
   layout,
 }: {
   /** episodes.list: undefined while loading, null for the demo or anyone not signed in as station staff. */
@@ -48,6 +51,10 @@ export function EpisodesView({
   /** Today's Chicago day key, for the blank Fridays. */
   today: string;
   actions: EpisodeActions;
+  /** episodes.extraDates: the 2025 Fridays Tarik added. undefined while loading, null when not allowed. */
+  added?: string[] | null;
+  /** Add a 2025 show; the control shows only when these are given. */
+  addActions?: AddShowActions;
   /** Forces a layout (tests, screenshots); otherwise the screen width picks. */
   layout?: "table" | "cards";
 }) {
@@ -100,6 +107,7 @@ export function EpisodesView({
           {" — drafting is paused."}
         </p>
       )}
+      {added && addActions && <AddShowDate added={added} actions={addActions} announce={announce} />}
       {unplaced && unplaced.items.length + unplaced.placements.length > 0 && <UndatedList {...unplaced} actions={actions} announce={announce} />}
       {cards ? (
         <>
@@ -108,12 +116,12 @@ export function EpisodesView({
               {unconnected.map((s) => <Link key={s} href="/settings" className={NOTE_LINK}>{CONNECT_NOTE[s]}</Link>)}
             </p>
           )}
-          <ol aria-label="2026 shows, oldest first" className="flex flex-col gap-3">{items}</ol>
+          <ol aria-label="Shows, oldest first" className="flex flex-col gap-3">{items}</ol>
         </>
       ) : (
-        <section aria-label="2026 shows" className="overflow-x-auto rounded-card border border-line bg-surface p-2">
+        <section aria-label="Shows" className="overflow-x-auto rounded-card border border-line bg-surface p-2">
           <table className="w-full min-w-[720px] border-collapse text-sm tabular-nums">
-            <caption className="sr-only">2026 shows, oldest first. The oldest unfinished show is drafted next.</caption>
+            <caption className="sr-only">Shows, oldest first. The oldest unfinished show is drafted next.</caption>
             <thead>
               <tr>
                 <th scope="col" className={th}>Show</th>
