@@ -53,7 +53,6 @@ type Block = Entry["block"];
 type Slot = { key: string; block: Block; closing: boolean };
 
 const ACTIVE: readonly Job["status"][] = ["queued", "running"];
-const FINISHED: readonly Job["status"][] = ["done", "stopped", "taken-over"];
 /** R6: Apple Music lookups per workspace per Chicago day, apart from the web cap (the bridge sends no job id). */
 const APPLE_CAP = { real: 60, demo: 20 } as const;
 const MAX_EDIT = 4_000;
@@ -158,12 +157,14 @@ const busy = (j: JobSpec) =>
   : `A deep dive on ${j.subject?.name} is already being written.`;
 
 /**
- * One active job per workspace, kind and show date (and subject, for a deep dive; and visitor, in the demo). A job
+ * One active job per workspace, kind and show date (per subject instead, for a deep dive; and per visitor, in the demo). A job
  * counts as active only while its newest run is open, so a run the relay never reported cannot block the show for good:
  * a new start supersedes it (marked stopped).
  */
 async function supersede(ctx: MutationCtx, workspace: Workspace, spec: JobSpec, sessionKey: string | undefined): Promise<void> {
-  const same = await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) => q.eq("workspace", workspace).eq("kind", spec.kind).eq("showDate", spec.showDate)).collect();
+  // M7: a deep dive is one per subject whatever the show date, so it reads the whole kind.
+  const same = await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) =>
+    spec.kind === "deep-dive" ? q.eq("workspace", workspace).eq("kind", spec.kind) : q.eq("workspace", workspace).eq("kind", spec.kind).eq("showDate", spec.showDate)).collect();
   const now = Date.now();
   for (const j of same) {
     if (!ACTIVE.includes(j.status)) continue;
@@ -212,8 +213,9 @@ async function episodeTracks(ctx: QueryCtx, workspace: Workspace, showDate: stri
 const notesJobs = async (ctx: QueryCtx, workspace: Workspace, showDate: string) =>
   (await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) => q.eq("workspace", workspace).eq("kind", "show-notes").eq("showDate", showDate)).collect())
     .sort((a, b) => b.createdAt - a.createdAt);
-const finishedNotesJob = async (ctx: QueryCtx, workspace: Workspace, showDate: string) =>
-  (await notesJobs(ctx, workspace, showDate)).find((j) => FINISHED.includes(j.status));
+/** R9: the newest done show-notes job; a stopped or taken-over one never feeds a draft or a verify. */
+const doneNotesJob = async (ctx: QueryCtx, workspace: Workspace, showDate: string) =>
+  (await notesJobs(ctx, workspace, showDate)).find((j) => j.status === "done");
 
 /** P11: the newest show-notes job's tracks, else the real episode's, else the typed tracklist. */
 async function showTracks(ctx: QueryCtx, workspace: Workspace, showDate: string, text?: string): Promise<ResearchTrack[] | undefined> {
@@ -257,9 +259,24 @@ function verifyMarkdown(job: Job, entries: Entry[], active: ActiveEmbargo[]): st
   ].join("\n\n") + "\n";
 }
 
-/** P10: the plain helper ingest (Task 5) and the query share. The newest finished show-notes job, rendered by core. */
+/**
+ * R9/I3: a deep dive on an artist, from Tarik's real episodes: the shows in the year (of the job's show date, else
+ * today) before that date whose tracklist credits the artist (normalized), and the newest. Undefined (no line at all)
+ * in the demo, which never reads episodes (Hard Rule 9), and for a label or release subject.
+ */
+async function pastShows(ctx: QueryCtx, job: Job, today: string): Promise<{ count: number; year: number; last?: string } | undefined> {
+  if (job.workspace !== "real" || job.subject?.type !== "artist") return undefined;
+  const before = job.showDate ?? today;
+  const year = before.slice(0, 4);
+  const rows = await ctx.db.query("episodes").withIndex("by_showDate", (q) => q.gte("showDate", `${year}-01-01`).lt("showDate", before)).collect();
+  const name = normalize(job.subject.name);
+  const played = rows.filter((r) => (r.tracklist.tracks ?? []).some((t) => normalize(t.artist) === name || (t.feat !== undefined && normalize(t.feat) === name)));
+  return { count: played.length, year: Number(year), ...(played.length && { last: played.at(-1)!.showDate }) };
+}
+
+/** P10: the plain helper ingest (Task 5) and the query share. The newest done show-notes job, rendered by core. */
 export async function draftNotesFromResearch(ctx: QueryCtx, workspace: Workspace, showDate: string): Promise<string> {
-  const job = await finishedNotesJob(ctx, workspace, showDate);
+  const job = await doneNotesJob(ctx, workspace, showDate);
   if (!job) return "";
   return renderNotesForDraft(notesView(job, await liveEntries(ctx, job.jobId), await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()))));
 }
@@ -286,18 +303,19 @@ export const startShowNotes = mutation({
 const notesFromV = v.union(v.object({ from: v.literal("air-check") }), v.object({ from: v.literal("paper") }), v.object({ from: v.literal("pasted"), text: v.string() }));
 
 /** The notes to check, snapshotted now. Air Check's own come as the agent copy (D3: no PRIVATE marker lines). */
-async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: Infer<typeof notesFromV>): Promise<string> {
-  if (notes.from === "pasted") return notes.text;
+async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: Infer<typeof notesFromV>): Promise<{ text: string; tracks?: ResearchTrack[] }> {
+  if (notes.from === "pasted") return { text: notes.text };
   if (notes.from === "paper") {
     await requireRealHuman(ctx);
     const text = (await episodeByDate(ctx, showDate))?.notes.text;
     if (!text) throw refuse(`No Paper notes for ${showDate}.`);
-    return text;
+    return { text };
   }
-  const job = await finishedNotesJob(ctx, ws, showDate);
+  const job = await doneNotesJob(ctx, ws, showDate);
   if (!job) throw refuse(`No finished Air Check show notes for ${showDate} yet.`);
   const view = notesView(job, await liveEntries(ctx, job.jobId), await activeEmbargoes(ctx, ws, chicagoDayKey(Date.now())));
-  return showNotesMarkdown(view, { forAgent: true });
+  // M5: the notes are numbered against the tracks they were written for.
+  return { text: showNotesMarkdown(view, { forAgent: true }), tracks: job.tracks };
 }
 
 export const startVerify = mutation({
@@ -305,10 +323,10 @@ export const startVerify = mutation({
   handler: async (ctx, { showDate, notes, tracklistText }) => {
     const ws = await callerWorkspace(ctx);
     requireShowDate(showDate);
-    const text = await notesText(ctx, ws, showDate, notes);
+    const { text, tracks: ownTracks } = await notesText(ctx, ws, showDate, notes);
     if (!text.trim()) throw refuse("The notes are empty.");
     if (new TextEncoder().encode(text).length > MAX_NOTES_BYTES) throw refuse("The notes are over 64 KB. Check them in parts.");
-    const tracks = await showTracks(ctx, ws, showDate, tracklistText);
+    const tracks = ownTracks ?? (await showTracks(ctx, ws, showDate, tracklistText));
     if (!tracks) throw refuse("Add the tracklist first, so closing tracks are skipped.");
     return startJob(ctx, ws, { kind: "verify", showDate, tracks, lines: numberLines(text, tracks), notesSource: notes.from, angles: false });
   },
@@ -372,18 +390,18 @@ export const resume = mutation({
   },
 });
 
-/** One block again. A block Tarik edited is overwritten only when he says so; then his edit is cleared. No continuation. */
+/**
+ * One block again (job.scope = [key]: no continuation). A block Tarik edited is regenerated only when he says so, and
+ * his edit is cleared only when the new block is saved (submitEntry), so a stopped Regenerate keeps it (M4).
+ */
 export const regenerate = mutation({
   args: { jobId: v.string(), key: v.string(), overwriteEdit: v.boolean() },
   handler: async (ctx, { jobId, key, overwriteEdit }) => {
     const job = await ownJob(ctx, jobId);
     refuseActive(job, "Wait for this job to finish, or take over first.");
     slotFor(job, key);
-    const entry = await entryAt(ctx, jobId, key);
-    if (entry?.edited && !overwriteEdit) throw refuse("This block has your edits. Regenerate anyway?", "HAS_EDITS");
-    const out = await requeue(ctx, job, [key], [key]);
-    if (entry?.edited) await ctx.db.patch(entry._id, { edited: undefined, updatedAt: Date.now() });
-    return out;
+    if ((await entryAt(ctx, jobId, key))?.edited && !overwriteEdit) throw refuse("This block has your edits. Regenerate anyway?", "HAS_EDITS");
+    return requeue(ctx, job, [key], [key]);
   },
 });
 
@@ -438,12 +456,16 @@ export const retarget = mutation({
     const old = new Map((job.tracks ?? []).map((t) => [t.key, t]));
     const nextById = new Map(next.map((t) => [id(t), t]));
     const updatedAt = Date.now();
+    const taken = new Set<string>(); // M3: duplicate tracks never put two live entries on one key
     for (const e of await liveEntries(ctx, jobId)) {
       if (e.block !== "track") continue;
       const was = old.get(e.key);
       const now = was && nextById.get(id(was));
-      if (!now || now.closing) await ctx.db.patch(e._id, { stale: true, updatedAt });
-      else if (now.key !== e.key) await ctx.db.patch(e._id, { key: now.key, updatedAt });
+      if (!now || now.closing || taken.has(now.key)) await ctx.db.patch(e._id, { stale: true, updatedAt });
+      else {
+        taken.add(now.key);
+        if (now.key !== e.key) await ctx.db.patch(e._id, { key: now.key, updatedAt });
+      }
     }
     await ctx.db.patch(job._id, { tracks: next, updatedAt });
   },
@@ -481,7 +503,7 @@ export const get = query({
         const embargo = trackEmbargo(t, active);
         return embargo ? { ...t, embargo } : t;
       }),
-      ...(job.subject && { subjectEmbargo: subjectEmbargo(job.subject.name, active) }),
+      ...(job.subject && { subjectEmbargo: subjectEmbargo(job.subject.name, active), pastShows: await pastShows(ctx, job, dayOf(today)) }),
       entries: entries.filter((e) => !closing.has(e.key)).map(({ _id: _e, _creationTime: _c, workspace: _w, jobId: _j, ...e }) => e),
       progress: { done, total: todo.length },
       ...(secondsLeft !== undefined && { secondsLeft }),
@@ -515,10 +537,10 @@ export const exportMarkdown = query({
     if (job.kind === "show-notes") return showNotesMarkdown(notesView(job, entries, active));
     if (job.kind === "verify") return verifyMarkdown(job, entries, active);
     const brief = entries.find((e) => e.key === "brief");
-    // ponytail: past-show counts come from play history (Task 5); until then the brief says "No past shows found".
+    const past = await pastShows(ctx, job, day);
     return deepDiveMarkdown({
       subject: { type: job.subject!.type, name: job.subject!.name }, embargo: subjectEmbargo(job.subject!.name, active),
-      tracks: job.tracks ?? [], ...(brief && { entry: forView(brief) }), pastShows: { count: 0, year: Number(day.slice(0, 4)) },
+      tracks: job.tracks ?? [], ...(brief && { entry: forView(brief) }), ...(past && { pastShows: past }),
     });
   },
 });
@@ -578,6 +600,9 @@ function blockProblems(job: Job, slot: Slot, input: Submit): string[] {
     if (list.length > LIMITS.claimsPerBlock) problems.push(`At most ${LIMITS.claimsPerBlock} ${field} in one block.`);
     list.forEach((c, i) => {
       check(c.text, "claim", `${label} ${i + 1}`);
+      // I1: value and says are model text too; they reach the export and the claim's check text.
+      check(c.value, "claim", `${label} ${i + 1} value`);
+      c.sources.forEach((s, j) => check(s.says, "claim", `${label} ${i + 1} source ${j + 1} says`));
       if (c.sources.length > LIMITS.sourcesPerClaim) problems.push(`${label} ${i + 1} cites more than ${LIMITS.sourcesPerClaim} sources.`);
       for (const s of c.sources) if (!given.has(s.id)) unknown.add(s.id);
     });
@@ -630,7 +655,8 @@ export const submitEntry = internalMutation({
     if (!slot) return no(400, [`${input.key} is not a key in this job.`]);
     if (slot.closing) return no(409, [closingSlot(slot)]);
     const existing = await entryAt(ctx, job.jobId, slot.key);
-    if (existing?.edited) return no(409, [`${slot.key} was edited by Tarik; skip it.`]);
+    // A Regenerate Tarik confirmed over his edit (job.scope) may replace it; nothing else may.
+    if (existing?.edited && !job.scope?.includes(slot.key)) return no(409, [`${slot.key} was edited by Tarik; skip it.`]);
     const problems = blockProblems(job, slot, input);
     if (problems.length) return no(400, problems);
 
@@ -648,7 +674,7 @@ export const submitEntry = internalMutation({
     const fields = {
       claims, intro: input.intro, angle: input.angle, note: input.note, replacement: input.replacement,
       private: existing?.private?.by === "tarik" ? existing.private : agentPrivate,
-      savedAt: now, updatedAt: now,
+      edited: undefined, savedAt: now, updatedAt: now,
     };
     if (existing) await ctx.db.patch(existing._id, fields);
     else await ctx.db.insert("researchEntries", { workspace, jobId: job.jobId, key: slot.key, block: slot.block, ...fields });
@@ -698,7 +724,8 @@ export const onRunFinished = internalMutation({
     if (!left.length) return end("done");
     if (job.status === "taken-over" || run.status === "cancelled") return end("stopped");
     if (!entries.some((e) => (e.savedAt ?? -1) >= createdAtOf(run))) return end("failed");
-    if (job.scope || job.continuations >= MAX_CONTINUATIONS) return end("stopped");
+    if (job.scope) return end("stopped");
+    if (job.continuations >= MAX_CONTINUATIONS) return end("stopped", [`Stopped after ${MAX_CONTINUATIONS} continuations; Resume to finish.`]);
     let next: string | null = null;
     try {
       next = await queueRun(ctx, job, left, job.sessionKey);

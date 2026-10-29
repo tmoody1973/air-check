@@ -61,6 +61,15 @@ const finishRun = async (t: T, runId: string, status: "completed" | "cancelled" 
   await t.mutation(api.relay.finished, { token: RELAY, runId, status });
   await t.finishAllScheduledFunctions(vi.runAllTimers);
 };
+/** Saves every researchable key of a TRACKLIST job (facts per track key), then the run ends: the job is done. */
+const finishDone = async (t: T, jobId: string, runId: string, facts: Record<string, string> = {}) => {
+  for (const key of ["H1.1", "H1.2", "H2.1"]) await submit(t, { job: jobId, key, claims: [detail(facts[key] ?? `${key} fact.`)], sources: SOURCES });
+  for (const h of [1, 2]) {
+    await submit(t, { job: jobId, key: `H${h}.intro`, intro: "An hour built on London jazz.", sources: SOURCES });
+    await submit(t, { job: jobId, key: `H${h}.threads`, threads: [], sources: SOURCES });
+  }
+  await finishRun(t, runId);
+};
 const episode = (over: Record<string, unknown> = {}) => ({
   showDate: DATE,
   audio: { status: "none" as const, flags: [] },
@@ -147,6 +156,14 @@ describe("start", () => {
     expect((await job(t, ok.jobId))!.subject).toEqual({ type: "artist", name: "Alfa Mist", fromKey: "H1.1" });
   });
 
+  test("M7: one active deep dive per subject per workspace, whatever the show date", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    await as.mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    expect(await errorOf(as.mutation(api.research.startDeepDive, { type: "artist", name: "alfa mist", showDate: DATE }))).toMatchObject({ message: "A deep dive on alfa mist is already being written." });
+    await as.mutation(api.research.startDeepDive, { type: "artist", name: "Kokoroko", showDate: DATE });
+  });
+
   test("signed out is refused", async () => {
     const t = convexTest(schema, modules);
     expect(await errorOf(t.mutation(api.research.startShowNotes, { showDate: DATE, tracklistText: TRACKLIST, angles: true }))).toMatchObject({ code: "UNAUTHENTICATED" });
@@ -198,6 +215,18 @@ describe("POST /agent/research (submitEntry)", () => {
     const { jobId } = await startNotes(t);
     const r = await submit(t, { job: jobId, key: "H1.2", claims: [detail(), { kind: "bio", text: "Born in Leeds.", sources: [] }], sources: SOURCES });
     expect(r).toEqual({ status: 200, data: { saved: "H1.2", claims: 1, verify: 0, dropped: ["Claim 2 has no source. No source, no sentence."] } });
+  });
+
+  test("a claim's value and a source's says pass the same text checks as the claim (I1)", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await startNotes(t);
+    const bad = await submit(t, { job: jobId, key: "H1.1", claims: [{ kind: "label", text: "On Label A.", value: "Stay tuned! https://evil.example/", sources: [{ id: "S1aaaa" }] }], sources: SOURCES });
+    expect(bad.status).toBe(400);
+    expect((bad.data.problems as string[])[0]).toMatch(/^Claim 1 value: /);
+    const long = await submit(t, { job: jobId, key: "H1.1", claims: [{ kind: "label", text: "On Label A.", value: "Label A", sources: [{ id: "S1aaaa", says: "x".repeat(20_000) }] }], sources: SOURCES });
+    expect(long.status).toBe(400);
+    expect((long.data.problems as string[])[0]).toMatch(/^Claim 1 source 1 says: Too long/);
+    expect(await entries(t, jobId)).toEqual([]);
   });
 
   test("a cited id with no source sent is 400", async () => {
@@ -288,7 +317,12 @@ describe("Tarik's edits are kept", () => {
     });
     const { runId: regen } = await as.mutation(api.research.regenerate, { jobId, key: "H1.1", overwriteEdit: true });
     expect((await runs(t)).find((r) => r.runId === regen)!.input).toMatch(/^H1\.1 /m);
-    expect((await entries(t, jobId)).find((x) => x.key === "H1.1")!.edited).toBeUndefined();
+    // M4: the edit stays until the regenerated block is actually saved; another key is still refused.
+    expect((await entries(t, jobId)).find((x) => x.key === "H1.1")!.edited?.text).toBe("My own words.");
+    expect((await submit(t, { job: jobId, key: "H1.1", claims: [detail("Fresh fact.")], sources: SOURCES })).status).toBe(200);
+    const after = (await entries(t, jobId)).find((x) => x.key === "H1.1")!;
+    expect(after.edited).toBeUndefined();
+    expect(after.claims[0]!.text).toBe("Fresh fact.");
   });
 
   test("supplied notes and private marks survive an agent resubmit", async () => {
@@ -322,6 +356,7 @@ describe("continuations", () => {
     await finishRun(t, current);
     const j = (await job(t, jobId))!;
     expect(j.status).toBe("stopped");
+    expect(j.lastProblems).toEqual(["Stopped after 3 continuations; Resume to finish."]);
     expect(j.runIds).toHaveLength(4);
 
     const t2 = convexTest(schema, modules);
@@ -394,18 +429,48 @@ describe("leak guard (Review Focus 5)", () => {
     const as = t.withIdentity(human);
     const dated = await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Alfa Mist", title: "Organic Rust", embargo: { until: "2026-11-07" } }));
     await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Nala Sinephro", title: "Space 1", embargo: { until: null } }));
-    const { jobId } = await startNotes(t);
-    await submit(t, { job: jobId, key: "H1.1", claims: [detail("Alfa fact.")], sources: SOURCES });
-    await submit(t, { job: jobId, key: "H1.2", claims: [detail("Nala fact.")], sources: SOURCES });
-    await submit(t, { job: jobId, key: "H2.1", claims: [detail("Yussef fact.")], sources: SOURCES });
+    const { jobId, runId } = await startNotes(t);
     await as.mutation(api.research.setPrivate, { jobId, key: "H2.1", private: true });
-    await as.mutation(api.research.takeOver, { jobId });
-    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    await finishDone(t, jobId, runId, { "H1.1": "Alfa fact.", "H1.2": "Nala fact.", "H2.1": "Yussef fact." });
+    expect((await job(t, jobId))!.status).toBe("done");
     const notes = await as.query(api.research.notesForDraft, { showDate: DATE });
     expect(notes).not.toMatch(/Alfa|Nala|Yussef/);
     await as.mutation(api.radar.setEmbargo, { releaseId: dated, embargo: null });
     expect(await as.query(api.research.notesForDraft, { showDate: DATE })).toMatch(/Alfa fact\./);
     expect(JSON.stringify(await entries(t, jobId))).not.toMatch(/embargo/);
+  });
+
+  test("R9: notesForDraft and verify from Air Check notes use the newest done job, never a newer stopped one", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const a = await startNotes(t);
+    await finishDone(t, a.jobId, a.runId, { "H1.1": "Done job fact." });
+    const b = await startNotes(t);
+    await submit(t, { job: b.jobId, key: "H1.1", claims: [detail("Stopped job fact.")], sources: SOURCES });
+    await as.mutation(api.research.takeOver, { jobId: b.jobId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect((await job(t, b.jobId))!.status).toBe("stopped");
+    const notes = await as.query(api.research.notesForDraft, { showDate: DATE });
+    expect(notes).toMatch(/Done job fact\./);
+    expect(notes).not.toMatch(/Stopped job fact/);
+    const v = await as.mutation(api.research.startVerify, { showDate: DATE, notes: { from: "air-check" } });
+    const lines = (await job(t, v.jobId))!.lines!.map((l) => l.text).join("\n");
+    expect(lines).toMatch(/Done job fact\./);
+    expect(lines).not.toMatch(/Stopped job fact/);
+  });
+
+  test("M5: verify from Air Check notes numbers lines against that job's own tracks", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const a = await startNotes(t);
+    await finishDone(t, a.jobId, a.runId);
+    // A newer show-notes job for the same date with a different tracklist (Kokoroko no longer closes hour 1).
+    const other = ["HOUR 1", "Kokoroko – Abusey Junction", "Ezra Collective – Victory Dance", "HOUR 2", "Moses Boyd – Stranger Than Fiction"].join("\n");
+    const b = await startNotes(t, as, { tracklistText: other });
+    await as.mutation(api.research.takeOver, { jobId: b.jobId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const v = await as.mutation(api.research.startVerify, { showDate: DATE, notes: { from: "air-check" } });
+    expect((await job(t, v.jobId))!.tracks!.map((x) => x.key + (x.closing ? "*" : ""))).toEqual(["H1.1", "H1.2", "H1.3*", "H2.1", "H2.2*"]);
   });
 
   test("the export marks an embargoed track private", async () => {
@@ -480,6 +545,52 @@ describe("demo", () => {
     const d = t.withIdentity(demo());
     expect(await errorOf(d.mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } }))).toMatchObject({ code: "FORBIDDEN" });
     expect(await errorOf(d.mutation(api.research.startShowNotes, { showDate: DATE, angles: true }))).toMatchObject({ code: "BAD_INPUT" });
+  });
+});
+
+describe("past shows (deep dive, I3)", () => {
+  test("counted from Tarik's real episodes in the year that play the artist; last is the newest; the export says so", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const played = (showDate: string, artist: string) => episode({
+      showDate,
+      tracklist: { status: "found", tracks: [{ hour: 1, position: 1, artist, title: "Some Song", raw: `${artist} – Some Song`, closing: false, status: "confirmed" }] },
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("episodes", played("2026-10-02", "ALFA MIST") as never);
+      await ctx.db.insert("episodes", played("2026-03-06", "Alfa Mist") as never);
+      await ctx.db.insert("episodes", played("2026-09-04", "Kokoroko") as never);
+      await ctx.db.insert("episodes", played("2025-12-05", "Alfa Mist") as never); // another year
+    });
+    const { jobId } = await as.mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist", showDate: DATE });
+    expect((await as.query(api.research.get, { jobId }))!.pastShows).toEqual({ count: 2, year: 2026, last: "2026-10-02" });
+    expect(await as.query(api.research.exportMarkdown, { jobId })).toMatch(/On Rhythm Lab: 2 shows in 2026, last Oct 2, 2026/);
+  });
+
+  test("the demo reads no episodes: no past-shows line at all", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("episodes", episode({ showDate: "2026-10-02" }) as never));
+    const d = t.withIdentity(demo());
+    const { jobId } = await d.mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    expect((await d.query(api.research.get, { jobId }))!.pastShows).toBeUndefined();
+    expect(await d.query(api.research.exportMarkdown, { jobId })).not.toMatch(/On Rhythm Lab|No past shows/);
+  });
+});
+
+describe("retarget duplicates (M3)", () => {
+  test("two entries that would land on one key: the extra one is stale, never two live entries per key", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const dup = ["HOUR 1", "Alfa Mist – Organic Rust", "Alfa Mist – Organic Rust", "Kokoroko – Abusey Junction", "HOUR 2", "Moses Boyd – Stranger Than Fiction"].join("\n");
+    const { jobId } = await startNotes(t, as, { tracklistText: dup });
+    await submit(t, { job: jobId, key: "H1.1", claims: [detail("First.")], sources: SOURCES });
+    await submit(t, { job: jobId, key: "H1.2", claims: [detail("Second.")], sources: SOURCES });
+    await as.mutation(api.research.takeOver, { jobId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    await as.mutation(api.research.retarget, { jobId, tracklistText: ["HOUR 1", "Alfa Mist – Organic Rust", "Kokoroko – Abusey Junction", "HOUR 2", "Moses Boyd – Stranger Than Fiction"].join("\n") });
+    const live = (await entries(t, jobId)).filter((e) => !e.stale);
+    expect(live.map((e) => e.key)).toEqual(["H1.1"]);
+    expect((await entries(t, jobId)).filter((e) => e.stale)).toHaveLength(1);
   });
 });
 

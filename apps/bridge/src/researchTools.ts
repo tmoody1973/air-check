@@ -13,7 +13,7 @@ export const MAX_SOURCES_PER_BLOCK = 40;
 
 const NOT_CONFIGURED_SEARCH = "Web search is not configured on the bridge. Tell the operator; do not retry.";
 const NOT_CONFIGURED_APPLE = "Apple Music is not configured on the bridge. Use web search or Crate instead; do not retry.";
-export const APPLE_CAP_REACHED = "Apple Music lookup limit reached for this research run; finish with what you have, mark the rest could-not-verify.";
+export const APPLE_CAP_REACHED = "Apple Music lookup limit reached for today; finish with what you have, mark the rest could-not-verify.";
 const SOURCES = ["web", "apple_music"] as const;
 const COULD_NOT_CHECK = "Could not check today's search limit. Try again later.";
 const flat = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);

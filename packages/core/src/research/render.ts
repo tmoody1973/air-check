@@ -221,8 +221,8 @@ export function deepDiveMarkdown(view: DeepDiveView): string {
     .slice(0, LIMITS.connectsMax)
     .map((c) => `- **${trackLabel(tracks.get(c.value!)!)}:** ${withLinks(c.text, matched(c))}`);
   const unverified = claims.filter(isVerify).map(verifyBullet);
-  const { count, year, last } = view.pastShows;
-  const past = count ? `On Rhythm Lab: ${count} show${count === 1 ? "" : "s"} in ${year}${last ? `, last ${paperDate(last)}` : ""}` : "No past shows found";
+  const p = view.pastShows;
+  const past = !p ? [] : [p.count ? `On Rhythm Lab: ${p.count} show${p.count === 1 ? "" : "s"} in ${p.year}${p.last ? `, last ${paperDate(p.last)}` : ""}` : "No past shows found"];
   const chunks = [
     `# Deep dive: ${view.subject.name}`,
     ...(mark ? [mark] : []),
@@ -231,7 +231,7 @@ export function deepDiveMarkdown(view: DeepDiveView): string {
     ...(connects.length ? ["## Connects to your list", connects.join("\n")] : []),
     ...(unverified.length ? ["## Could not verify", unverified.join("\n")] : []),
     ...(e?.note ? [`**Note:** ${e.note}`] : []),
-    past,
+    ...past,
   ];
   return `${chunks.join("\n\n")}\n`;
 }

@@ -361,7 +361,7 @@ describe("source_search with source apple_music (R6)", () => {
   it("at the run's lookup cap answers the Apple limit sentence and does not call Apple", async () => {
     const { t, search } = setup(() => json(200, { allowed: false }));
     const r = await t.call({ query: "artist a", source: "apple_music" });
-    expect(textOf(r)).toBe("Apple Music lookup limit reached for this research run; finish with what you have, mark the rest could-not-verify.");
+    expect(textOf(r)).toBe("Apple Music lookup limit reached for today; finish with what you have, mark the rest could-not-verify.");
     expect(search).not.toHaveBeenCalled();
   });
 
