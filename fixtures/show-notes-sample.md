@@ -9,13 +9,13 @@ The hour moves from [Artist A]'s new single into older label cuts.
 ## Show Thread
 
 - [Artist A] and [Artist B] both recorded at [Studio], and [Artist B] wrote [Title B] there. [[example.org](https://example.org/studio)]
-- **Release dates:** [Artist A] – "[Title A]" released 14 days before the show (2026-10-16) [[example.org](https://example.org/a1)] [[example.org](https://example.org/a2)]
+- **Release dates:** [Artist A] – "[Title A]" released 14 days before the show (Oct 16, 2026) [[example.org](https://example.org/a1)] [[example.org](https://example.org/a2)]
 
 ----------
 
 ## 1. [Artist A] – "[Title A]"
 
-**Release:** [Album A] [[example.org](https://example.org/a1)], [Label A] [[example.org](https://example.org/a1)] [[example.org](https://example.org/a2)], 2026-10-16 [[example.org](https://example.org/a1)] [[example.org](https://example.org/a2)]
+**Release:** [Album A], [Label A], Oct 16, 2026 [[example.org](https://example.org/a1)] [[example.org](https://example.org/a2)]
 
 ### Details:
 
@@ -31,7 +31,7 @@ The hour moves from [Artist A]'s new single into older label cuts.
 
 ## 2. [Artist B] – "[Title B]"
 
-**PRIVATE · embargoed until 2026-11-06**
+**PRIVATE · embargoed until Nov 6, 2026**
 
 ### Details:
 
@@ -78,6 +78,6 @@ closing-track, no notes
 
 ## Pre-Air Verify List
 
-- **H1.2 [Artist B] – "[Title B]":** [Title B] came out on 2026-10-10. — Sources disagree: 2026-10-10 (example.org) vs 2026-10-17 (example.org)
-- **H1.2 [Artist B] – "[Title B]":** I found no verified bio.
-- **H2.1 [Artist D] – "[Title D]":** It came out on [Label D]. — Only one source: example.org
+- **H1.2 [Artist B] – "[Title B]":** [Title B] came out on 2026-10-10. — Sources disagree: 2026-10-10 (example.org) vs 2026-10-17 (example.org) · PRIVATE
+- **H1.2 [Artist B] – "[Title B]":** I found no verified bio. · PRIVATE
+- **H2.1 [Artist D] – "[Title D]":** It came out on [Label D]. — Only one source: example.org · PRIVATE

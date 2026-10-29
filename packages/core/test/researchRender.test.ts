@@ -19,7 +19,7 @@ describe("showNotesMarkdown", () => {
       entries: sampleView.entries.map((e) => (e.key === "H1.1" ? { ...e, private: { by: "tarik" as const } } : e)),
     };
     const md = showNotesMarkdown(view);
-    expect(md).toContain('## 2. [Artist B] – "[Title B]"\n\n**PRIVATE · embargoed until 2026-11-06**');
+    expect(md).toContain('## 2. [Artist B] – "[Title B]"\n\n**PRIVATE · embargoed until Nov 6, 2026**');
     expect(md).toContain('## 1. [Artist A] – "[Title A]"\n\n**PRIVATE**\n');
     expect(md).not.toContain("embargoed (date not known)");
   });
@@ -35,7 +35,26 @@ describe("showNotesMarkdown", () => {
   it("drops every PRIVATE marker line in the agent copy (R8), and keeps the rest", () => {
     const md = showNotesMarkdown(sampleView, { forAgent: true });
     expect(md).not.toMatch(/PRIVATE|embargoed|2026-11-06/);
-    expect(md).toBe(golden.replace(/\*\*PRIVATE[^\n]*\*\*\n\n/g, ""));
+    expect(md).toBe(golden.replace(/\*\*PRIVATE[^\n]*\*\*\n\n/g, "").replace(/ · PRIVATE/g, ""));
+  });
+
+  it("drops a sentence of Tarik's edit that names an embargoed release from the agent copy only (R8)", () => {
+    const view = { ...sampleView, entries: sampleView.entries.map((e) => (e.key === "H1.1" ? { ...e, edited: { text: "A fine sentence. Ahead of [Title B] next month." } } : e)) };
+    expect(showNotesMarkdown(view)).toContain("A fine sentence. Ahead of [Title B] next month.");
+    const agent = showNotesMarkdown(view, { forAgent: true });
+    expect(agent).toContain("A fine sentence.");
+    expect(agent).not.toContain("Ahead of");
+  });
+
+  it("marks a recent release of an embargoed track as private in the Show Thread", () => {
+    const view = {
+      ...sampleView,
+      entries: sampleView.entries.map((e) =>
+        e.key === "H1.2" ? { ...e, claims: [{ kind: "release-date" as const, text: "Out 2026-10-20.", value: "2026-10-20", status: "confirmed" as const, sources: [link] }] } : e,
+      ),
+    };
+    expect(showNotesMarkdown(view)).toContain('[Artist B] – "[Title B]" released 10 days before the show (Oct 20, 2026) [[example.org](https://example.org/x)] · PRIVATE');
+    expect(showNotesMarkdown(view, { forAgent: true })).not.toContain("PRIVATE");
   });
 });
 
@@ -54,6 +73,11 @@ describe("notesForDraft (Review Focus 5)", () => {
       ),
     };
     expect(notesForDraft(view)).toBe("[Artist A] and [Artist C] share a drummer.");
+  });
+
+  it("splits sentences without breaking on abbreviations", () => {
+    const view = { ...sampleView, entries: sampleView.entries.map((e) => (e.key === "H1.threads" ? { ...e, claims: e.claims.map((c) => ({ ...c, text: "[Artist A] worked with Dr. [Title B] Jones, e.g. on tour. They share a drummer." })) } : e)) };
+    expect(notesForDraft(view).split("\n")[0]).toBe("They share a drummer.");
   });
 
   it("treats an undated embargo as active", () => {
@@ -76,15 +100,20 @@ describe("verifyReport", () => {
         key: "L2",
         claims: [
           { kind: "release-date", text: "It came out on 2026-10-17.", value: "2026-10-17", status: "confirmed", sources: [link, { ...link, url: "https://example.org/y" }] },
-          { kind: "label", text: "On Brownswood.", value: "Brownswood", status: "could-not-verify", sources: [link], check: "Only one source: example.org" },
+          { kind: "label", text: "On Brownswood.", value: "Brownswood", status: "sourced", sources: [link] },
         ],
         replacement: "“Café” came out on October 17, 2026 on Brownswood Recordings.",
+      },
+      {
+        key: "L1",
+        claims: [{ kind: "release-date", text: "It came out on 2026-10-03.", value: "2026-10-03", status: "could-not-verify", sources: [{ ...link, url: "https://www.discogs.com/release/1", host: "www.discogs.com" }], check: "Only one source: discogs.com" }],
+        replacement: "Álvaro released “Café” on October 3, 2026.",
       },
       { key: "L4", claims: [], replacement: "Never shown." },
     ],
   };
 
-  it("keeps the original line verbatim, appends code links to the replacement, and lists what is open", () => {
+  it("offers a replacement only for a line whose claims all hold; a one-source Discogs line stays open", () => {
     const r = verifyReport(view);
     expect(r.changes).toEqual([
       {
@@ -93,7 +122,7 @@ describe("verifyReport", () => {
         replacement: "“Café” came out on October 17, 2026 on Brownswood Recordings. [[example.org](https://example.org/x)] [[example.org](https://example.org/y)]",
       },
     ]);
-    expect(r.open).toEqual(["L2: On Brownswood. — Only one source: example.org"]);
+    expect(r.open).toEqual(["L1: It came out on 2026-10-03. — Only one source: discogs.com"]);
   });
 });
 
@@ -132,7 +161,7 @@ describe("deepDiveMarkdown", () => {
         "",
         "- **[verify]** [Label A] is part of [Group]. — Only one source: example.org [[example.org](https://example.org/x)]",
         "",
-        "On Rhythm Lab: 3 shows in 2026, last 2026-10-16",
+        "On Rhythm Lab: 3 shows in 2026, last Oct 16, 2026",
         "",
       ].join("\n"),
     );

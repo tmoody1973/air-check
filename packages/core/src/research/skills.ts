@@ -35,7 +35,7 @@ One document per show, split by hour.
 
 ## How you submit
 - Air Check gives you keys: \`H1.intro\`, \`H1.threads\`, and one per track (\`H1.1\`, \`H1.2\` …). Submit one \`research_submit\` per key.
-- Cite sources only by the \`[S…]\` ids your tools return. Never send a URL, an artist or a title; Air Check has them.
+- Cite sources only by the \`[S…]\` ids your tools return. Never send artist, title or URL fields; Air Check has them.
 - Air Check judges every claim against its sources, then writes the links, the **Release:** line, the release-dates bullet, the **[verify]** checks and the Pre-Air Verify List.
 
 ## Output

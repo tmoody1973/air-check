@@ -7,8 +7,10 @@ import {
   embargoedSearch,
   judgeClaim,
   LIMITS,
+  normalize,
   normalizeValue,
   numberLines,
+  researchInput,
   parseTracklist,
   publisherOf,
   researchTracks,
@@ -30,6 +32,8 @@ describe("publisherOf", () => {
     expect(publisherOf("news.bbc.co.uk")).toBe("bbc.co.uk");
     expect(publisherOf("pitchfork.com")).toBe("pitchfork.com");
     expect(AGGREGATORS).toContain("daily.bandcamp.com");
+    expect(publisherOf("www.discogs.com.")).toBe("discogs.com");
+    for (const a of ["youtu.be", "bandcamp.com", "soundcloud.com", "qobuz.com", "beatport.com"]) expect(AGGREGATORS).toContain(a);
   });
 });
 
@@ -46,6 +50,15 @@ describe("normalizeValue", () => {
     expect(normalizeValue("credit", "Bénédicte, Jr.")).toBe("benedicte jr");
     expect(normalizeValue("track-number", "Track 03")).toBe("3");
     expect(normalizeValue("length", "4:07")).toBe("4:07");
+  });
+
+  it("reads ISO timestamps at day precision and ordinal days, and refuses impossible dates (R7)", () => {
+    expect(normalizeValue("release-date", "2026-10-10T00:00Z")).toBe("2026-10-10");
+    expect(normalizeValue("release-date", "2026-10-10T08:30:00+02:00")).toBe("2026-10-10");
+    expect(normalizeValue("release-date", "10th October 2026")).toBe("2026-10-10");
+    expect(normalizeValue("release-date", "2026-02-31")).toBeNull();
+    expect(normalizeValue("release-date", "February 31, 2026")).toBeNull();
+    expect(sourceSays("Published 2026-10-10T00:00:00Z", "release-date", "2026-10-10")).toBe(true);
   });
 });
 
@@ -111,6 +124,12 @@ describe("judgeClaim (Review Focus 1 and 2)", () => {
     expect(year.status).toBe("conflict");
   });
 
+  it("never confirms a year alone unless a source shows at least the month (R7)", () => {
+    const year = (a: string, b: string) => judgeClaim({ ...date([{ id: "S1" }, { id: "S2" }]), value: "2026" }, { S1: S("a.bandcamp.com", a), S2: S("pitchfork.com", b) });
+    expect(year("Released in 2026.", "A 2026 record.")).toMatchObject({ status: "could-not-verify", check: "Only the year 2026 is shown; check the full date" });
+    expect(year("Out October 10, 2026.", "A 2026 record.").status).toBe("confirmed");
+  });
+
   it("calls a non-critical fact with a source sourced, and with none could-not-verify", () => {
     const bio: ClaimInput = { kind: "bio", text: "A bassist from Detroit.", sources: [{ id: "S1" }] };
     expect(judgeClaim(bio, { S1: S("pitchfork.com", "anything") }).status).toBe("sourced");
@@ -129,6 +148,9 @@ describe("checkResearchText (Review Focus 5)", () => {
     expect(checkResearchText("See www.example.org.", "note")).toMatch(/link/);
     expect(checkResearchText("x".repeat(LIMITS.angle + 1), "angle")).toContain(String(LIMITS.angle));
     expect(checkResearchText("I checked the label page.", "note")).toBeNull();
+    for (const talk of ["Next up, a deep cut.", "Tune in for the second hour.", "Stick around for this one."]) expect(checkResearchText(talk, "claim")).toMatch(/talk/);
+    expect(checkResearchText("Details at example.org/press/release.", "claim")).toMatch(/link/);
+    expect(checkResearchText("Released on Ninja Tune.", "claim")).toBeNull();
   });
 });
 
@@ -170,6 +192,52 @@ describe("numberLines (Review Focus 3)", () => {
     expect(lines.slice(2, 6).every((l) => l.trackKey === "H1.1" && !l.closing)).toBe(true);
     expect(lines.slice(6, 10).every((l) => l.trackKey === "H1.15" && l.closing)).toBe(true);
     expect(lines.slice(10).every((l) => l.trackKey === undefined && !l.closing)).toBe(true);
+  });
+});
+
+describe("numberLines fails closed (round 1)", () => {
+  const tracks = [
+    { key: "H1.1", hour: 1 as const, position: 1, artist: "Alpha", title: "One", closing: false },
+    { key: "H1.2", hour: 1 as const, position: 2, artist: "Beta", title: "Don't Stop", closing: true },
+  ];
+  const keyed = (heading: string) => numberLines(`## 1. Alpha – "One"\n- a fact\n${heading}\n- under it`, tracks).slice(2);
+  it.each(["## 2. Beta – 'Don't Stop'", '2) Beta – "Don’t Stop"', '2. Beta: "Don\'t Stop"', "**2. Beta – Don't Stop**", "2. Beta Don't Stop"])("keys %s as the closing track", (heading) => {
+    expect(keyed(heading)).toEqual([
+      { id: "L3", text: heading, trackKey: "H1.2", closing: true },
+      { id: "L4", text: "- under it", trackKey: "H1.2", closing: true },
+    ]);
+  });
+  it("never lets a numbered heading for an unknown track inherit the previous key", () => {
+    expect(keyed('## 9. Gamma – "Nope"')).toEqual([
+      { id: "L3", text: '## 9. Gamma – "Nope"', closing: false },
+      { id: "L4", text: "- under it", closing: false },
+    ]);
+  });
+  it("keeps a plain numbered list inside a track", () => {
+    expect(keyed("1. Recorded in one take.").every((l) => l.trackKey === "H1.1")).toBe(true);
+  });
+});
+
+const fastest = (f: () => unknown) =>
+  Math.min(...[0, 1, 2].map(() => {
+    const t = performance.now();
+    f();
+    return performance.now() - t;
+  }));
+
+describe("untrusted text stays linear (round 1)", () => {
+  const hostile = `a${" ".repeat(200_000)}b`;
+  const active = [{ artist: "Ãrtist A", title: "Home", until: null }];
+  it("normalizes and screens a 200k-character whitespace run fast", { timeout: 30_000 }, () => {
+    expect(fastest(() => normalize(hostile))).toBeLessThan(200);
+    expect(fastest(() => embargoedSearch(hostile, []))).toBeLessThan(200);
+    expect(fastest(() => embargoedSearch(hostile, active))).toBeLessThan(200);
+  });
+  it("builds a verify prompt over a 200k-character line fast", { timeout: 30_000 }, () => {
+    const lines = numberLines(`1. ${hostile}`, []);
+    const job = { jobId: "rj-big001", kind: "verify" as const, lines, embargoes: active, angles: true, searchesLeft: 1 };
+    expect(fastest(() => researchInput(job))).toBeLessThan(200);
+    expect(fastest(() => researchInput({ ...job, embargoes: [] }))).toBeLessThan(200);
   });
 });
 

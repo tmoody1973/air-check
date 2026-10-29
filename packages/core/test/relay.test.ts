@@ -159,6 +159,7 @@ describe("researchInput", () => {
     expect(text).toMatch(/Crate first/);
     expect(text).toMatch(/untrusted/);
     expect(text).toContain("If research_submit refuses twice for the same key, skip it and move on");
+    expect(text).toContain("never send artist, title or URL fields");
     expect(text).toContain(RESEARCH_SKILL_TEXT["show-notes"]);
     expect(text).toMatch(/On-air angle|angle/);
   });

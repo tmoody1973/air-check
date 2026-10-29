@@ -1,22 +1,24 @@
+import { foldText } from "../radar/extract";
 import { type CitedSource, type ClaimInput, type ClaimKind, CRITICAL_KINDS, type JudgedClaim, type ResolvedSource, VALUE_KINDS } from "./types";
 
 /** Never primary: they copy from elsewhere. Two different ones still count as two publishers (R5). */
 export const AGGREGATORS: readonly string[] = [
   "musicbrainz.org", "discogs.com", "wikipedia.org", "genius.com", "last.fm", "allmusic.com", "rateyourmusic.com", "apple.com",
   "spotify.com", "youtube.com", "tidal.com", "deezer.com", "amazon.com", "whosampled.com", "daily.bandcamp.com",
+  "youtu.be", "bandcamp.com", "soundcloud.com", "qobuz.com", "beatport.com",
 ];
 const SECOND_LEVEL = ["co", "com", "org", "net"];
 
 /** Who published a page: each `<name>.bandcamp.com` on its own; else the registrable domain (`bbc.co.uk`). */
 export function publisherOf(host: string): string {
-  const h = host.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
+  const h = host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "").replace(/^m\./, "");
   if (h.endsWith(".bandcamp.com")) return h;
   const parts = h.split(".");
   const n = parts.length >= 3 && SECOND_LEVEL.includes(parts.at(-2)!) && parts.at(-1)!.length === 2 ? 3 : 2;
   return parts.slice(-n).join(".");
 }
 
-const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const fold = foldText;
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const MONTH = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?";
@@ -25,9 +27,10 @@ const MONTH = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?
 const DATE = new RegExp(
   [
     String.raw`\b\d{1,2}/\d{1,2}/\d{2,4}\b`,
-    String.raw`\b(\d{4})-(\d{2})(?:-(\d{2}))?\b`,
+    // An ISO timestamp (2026-10-10T00:00Z) reads at day precision.
+    String.raw`\b(\d{4})-(\d{2})(?:-(\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?)?\b`,
     String.raw`\b${MONTH}\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b`,
-    String.raw`\b(\d{1,2})\s+${MONTH},?\s+(\d{4})\b`,
+    String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s+${MONTH},?\s+(\d{4})\b`,
     String.raw`\b${MONTH},?\s+(\d{4})\b`,
     String.raw`\b((?:19|20)\d{2})\b`,
   ].join("|"),
@@ -39,7 +42,8 @@ function isoDate(year: string, month?: number, day?: number): string | null {
   if (month === undefined) return year;
   if (month < 1 || month > 12) return null;
   if (day === undefined) return `${year}-${pad(month)}`;
-  return day >= 1 && day <= 31 ? `${year}-${pad(month)}-${pad(day)}` : null;
+  // A real calendar day only: 2026-02-31 is no date.
+  return day >= 1 && new Date(Date.UTC(Number(year), month - 1, day)).getUTCDate() === day ? `${year}-${pad(month)}-${pad(day)}` : null;
 }
 const monthOf = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase()) + 1;
 
@@ -84,7 +88,8 @@ export function normalizeValue(kind: ClaimKind, value: string): string | null {
 export function sourceSays(text: string, kind: ClaimKind, value: string): boolean {
   const want = normalizeValue(kind, value);
   if (want === null) return false;
-  if (kind === "release-date") return datesIn(text).includes(want);
+  // A year-only value is shown by any date in that year; judgeClaim still needs a month before it confirms.
+  if (kind === "release-date") return datesIn(text).some((d) => d === want || (want.length === 4 && d.startsWith(`${want}-`)));
   return ` ${fold(text)} `.includes(` ${fold(want)} `);
 }
 
@@ -96,11 +101,12 @@ const unique = (xs: string[]) => [...new Set(xs)];
  */
 export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSource>): JudgedClaim {
   const valueKind = VALUE_KINDS.includes(claim.kind);
+  const textOf = new Map<CitedSource, string>();
   const cited: CitedSource[] = claim.sources.map((c) => {
     const s = sources[c.id];
     if (!s) throw new Error(`judgeClaim: ${c.id} was not resolved`); // the bridge refuses unknown ids first
     const says = c.says ?? claim.value;
-    return {
+    const out: CitedSource = {
       url: s.url,
       host: s.host,
       title: s.title,
@@ -109,6 +115,8 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
       primary: c.primary === true,
       matched: !valueKind || (says !== undefined && sourceSays(s.text, claim.kind, says)),
     };
+    textOf.set(out, s.text);
+    return out;
   });
   const base = { kind: claim.kind, text: claim.text, ...(claim.value !== undefined ? { value: claim.value } : {}), sources: cited };
   const usable = cited.filter((s) => s.matched);
@@ -132,6 +140,9 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
 
   const publishers = unique(usable.map((s) => publisherOf(s.host)));
   const primary = usable.some((s) => s.primary && !AGGREGATORS.includes(publisherOf(s.host)));
+  const yearOnly = claim.kind === "release-date" && own?.length === 4;
+  const monthShown = usable.some((s) => datesIn(textOf.get(s)!).some((d) => d.length >= 7 && d.startsWith(`${own}-`)));
+  if (yearOnly && !monthShown) return { ...base, status: "could-not-verify", check: `Only the year ${own} is shown; check the full date` };
   if (publishers.length >= 2 || primary) return { ...base, status: "confirmed" };
   return { ...base, status: "could-not-verify", check: `Only one source: ${publishers[0]}` };
 }

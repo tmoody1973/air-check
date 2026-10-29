@@ -3,8 +3,9 @@ import { LIMITS } from "./limits";
 export type ResearchTextWhere = "claim" | "intro" | "angle" | "note" | "replacement";
 
 // Straight or curly apostrophes, since the model writes both.
-const TALK = /\b(you[’']?re listening|stay tuned|coming up|up next|right here on|welcome (back )?to|thanks for listening|let[’']?s (hear|listen|go)|on the air tonight)\b/i;
-const LINK = /https?:\/\/|www\./i;
+const TALK = /\b(you[’']?re listening|stay tuned|coming up|up next|right here on|welcome (back )?to|thanks for listening|let[’']?s (hear|listen|go)|on the air tonight|next up|tune in|stick around)\b/i;
+// A bare domain with a path (example.org/x) is a link too.
+const LINK = /https?:\/\/|www\.|\b[\w-]+\.[a-z]{2,}\//i;
 const PERSON = /\b(i|i[’']m|me|my|we|our|you|your)\b/i;
 const MAX: Record<ResearchTextWhere, number> = { claim: LIMITS.claim, intro: LIMITS.intro, angle: LIMITS.angle, note: LIMITS.note, replacement: LIMITS.replacement };
 
