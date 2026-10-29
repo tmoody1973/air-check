@@ -81,7 +81,6 @@ function notesOf(date: string, docs: PaperDoc[] | undefined, q: Question[]): { n
     return { notes: { status: "found", docId: doc.id }, paper: null };
   }
   const parsed = parsePaperExport(text);
-  if (parsed.unreadable) q.push(ask("tracklist", `The notes for ${date} could not be read as a track list (no "Artist – "Title"" lines under Hour headings). Check the Paper doc "${doc.name}".`));
   return { notes: { status: "found", docId: doc.id, text }, paper: parsed.tracks.length ? parsed.tracks : null };
 }
 
@@ -99,16 +98,12 @@ function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTra
     q.push(fix("tracklist", `Drive has ${docs.length} tracklists for ${date} (${docs.map((d) => `"${d.name}"`).join(", ")}) and the right one is unclear. Trash or rename the extra one.`));
     return { tracklist: { status: "missing" } };
   }
-  let tracks: ScannedTrack[];
-  if (paper) {
-    const r = reconcile(pick.p, paper);
-    tracks = r.tracks.map((t) => scannedTrack(t, t.status));
-    q.push(...r.questions.map((text) => ask("tracklist", text)));
-  } else {
-    // No usable notes: nothing confirms the tracks, and that alone is not a question per track.
-    tracks = pick.p.tracks.map((t) => scannedTrack(t, t.closing ? "closing-track" : "unverified-in-notes"));
-    q.push(...pick.p.bad.map((b) => fix("tracklist", `Line ${b.line} "${b.raw}" could not be read (${b.reason}). Fix it so no track is missed.`)));
-  }
+  // Drive decides (Tarik, Oct 28): most Paper notes are about the artists, not a track list, so the notes never raise a
+  // question. Paper only fixes the spelling of a track it matches; Drive's order and count stand.
+  const tracks: ScannedTrack[] = paper
+    ? reconcile(pick.p, paper).tracks.map((t) => scannedTrack(t, t.status))
+    : pick.p.tracks.map((t) => scannedTrack(t, t.closing ? "closing-track" : "unverified-in-notes"));
+  q.push(...pick.p.bad.map((b) => fix("tracklist", `Line ${b.line} "${b.raw}" could not be read (${b.reason}). Fix it so no track is missed.`)));
   for (const h of [1, 2] as const)
     if (!tracks.some((t) => t.hour === h)) q.push(fix("tracklist", `The tracklist for ${date} has no Hour ${h} tracks. Check the Drive doc "${pick.d.name}".`));
   if (tracks.length > MAX_TRACKS) {
@@ -122,7 +117,7 @@ function tracklistOf(date: string, docs: DriveDoc[] | undefined, paper: PaperTra
 function capped(date: string, q: Question[]): Question[] {
   if (q.length <= MAX_QUESTIONS) return q;
   const more = q.length - (MAX_QUESTIONS - 1);
-  return [...q.slice(0, MAX_QUESTIONS - 1), fix("tracklist", `…and ${more} more differences between the tracklist and the notes for ${date}. Fix the docs and they will be checked again.`)];
+  return [...q.slice(0, MAX_QUESTIONS - 1), fix("tracklist", `…and ${more} more problems with the docs for ${date}. Fix the docs and they will be checked again.`)];
 }
 
 /** One episode per show date found in any source. `stored` carries the rerun marks; `onDisk` the local audio. */
