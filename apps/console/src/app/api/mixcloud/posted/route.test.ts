@@ -66,6 +66,23 @@ describe("postedShows (the public read)", () => {
     expect(old).toHaveBeenCalledTimes(1);
   });
 
+  it("one deadline covers the whole paging loop: slow pages end in null, not 10 slow waits", async () => {
+    const slow = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const t = setTimeout(() => resolve(page(["Rhythm Lab Radio 1.3.25"], FIRST)), 30);
+      init.signal!.addEventListener("abort", () => { clearTimeout(t); reject(init.signal!.reason); });
+    }));
+    vi.stubGlobal("fetch", slow);
+    const t0 = Date.now();
+    expect(await postedShows("2025", 80)).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(250);
+    expect(slow.mock.calls.length).toBeLessThan(5);
+  });
+
+  it("a page over the size cap is refused (null)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [{ name: "x".repeat(2_100_000) }] }), { status: 200 })));
+    expect(await postedShows("2025")).toBeNull();
+  });
+
   it("is null on a network error, a non-2xx or a body that isn't the list", async () => {
     for (const f of [async () => Promise.reject(new Error("down")), async () => new Response("no", { status: 503 }), async () => new Response("{}", { status: 200 })]) {
       vi.stubGlobal("fetch", vi.fn(f));
