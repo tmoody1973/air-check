@@ -537,3 +537,50 @@ describe("R5 (Plan 6b fix round 1): drafting never runs on facts a save has outd
     expect(w.cv.rows.get("2026-01-23")!.appliedCorrectionAt).toBe(9);
   });
 });
+
+describe("2025 shows Tarik added (extraDates): in scope only when added", () => {
+  const D25 = "2025-12-26";
+  const extra = { paper: { "id:p25": { name: "Rhythm Lab Radio 12-26-25.paper", options: ["markdown"], text: `# Hour 1\n## 1. Alfa Mist – "Organic Rust"\n# Hour 2\n## 1. Kokoroko – "Abusey Junction"\n` } } };
+
+  test("the 2025 Box folder, Drive doc and Paper doc are ignored until the date is added", async () => {
+    const w = await make({ extra });
+    await runScan(w.deps);
+    expect(Object.keys(byDate(w))).not.toContain(D25);
+    expect(w.cv.unplacedReports.at(-1)).toEqual([]);
+  });
+
+  test("added, the episode is built and stored like a 2026 one; other 2025 names stay out", async () => {
+    const w = await make({ extra: { ...extra, drive: { g24: { name: "Rhythm Lab Radio 12-19-25", text: "HOUR 1\nA - \"B\"\n" } } } });
+    w.cv.extraDates.push(D25);
+    await runScan(w.deps);
+    const eps = byDate(w);
+    expect(Object.keys(eps)).not.toContain("2025-12-19");
+    const e = eps[D25]!;
+    expect(e.audio).toMatchObject({ status: "ready", folderId: "199", hour1: { id: "991" }, hour2: { id: "992" } });
+    expect(e.tracklist.docId).toBe("gold");
+    expect(e.tracklist.tracks!.map((t) => t.status)).toEqual(["confirmed", "closing-track", "confirmed", "closing-track"]);
+    expect(e.notes).toMatchObject({ status: "found", docId: "id:p25" });
+    expect(e.questions).toEqual([]);
+    // Prune keeps it while it is added.
+    expect(w.cv.prunes.at(-1)).toContain(D25);
+  });
+
+  test("removed again, the next scan stops reporting it and prune drops the row", async () => {
+    const w = await make({ extra });
+    w.cv.extraDates.push(D25);
+    await runScan(w.deps);
+    expect(w.cv.rows.has(D25)).toBe(true);
+    w.cv.extraDates.length = 0;
+    await runScan(w.deps);
+    expect(w.cv.prunes.at(-1)).not.toContain(D25);
+    expect(w.cv.rows.has(D25)).toBe(false);
+  });
+
+  test("a placement on a 2025 date counts only when the date is added", () => {
+    const placed = [{ source: "drive" as const, id: "x", date: D25 }];
+    expect(dated("drive", "Rhythm Lab Radio 12-26-225", "x", { placements: placed, unplaced: [] })).toBeNull();
+    expect(dated("drive", "Rhythm Lab Radio 12-26-225", "x", { placements: placed, unplaced: [], extraDates: new Set([D25]) })).toBe(D25);
+    expect(dated("drive", "Rhythm Lab Radio 12-26-25", "y", { placements: [], unplaced: [], extraDates: new Set([D25]) })).toBe(D25);
+    expect(dated("drive", "Rhythm Lab Radio 12-19-25", "z", { placements: [], unplaced: [], extraDates: new Set([D25]) })).toBeNull();
+  });
+});

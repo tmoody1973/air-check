@@ -21,6 +21,8 @@ export function fakeConvex() {
   const corrections = new Map<string, Correction>();
   const placements: (Placement & { updatedAt: number })[] = [];
   const unplacedReports: Unplaced[][] = [];
+  /** The 2025 Fridays Tarik added on Episodes (episodes.addShowDate). */
+  const extraDates: string[] = [];
   const scannedAt = new Map<string, number>();
   let undoneAt = 0;
   let awaitingExtra = 0;
@@ -45,6 +47,7 @@ export function fakeConvex() {
       return {
         episodes: [...rows.values()].sort((a, b) => a.showDate.localeCompare(b.showDate)).map(rowOf), awaitingReview: open + waiting + awaitingExtra,
         corrections: [...corrections.values()].map((c) => structuredClone(c)), placements: placements.map(({ source, id, date }) => ({ source, id, date })), rescanAfter,
+        extraDates: [...extraDates].sort(),
       };
     },
     async upsert(e) {
@@ -88,7 +91,7 @@ export function fakeConvex() {
     },
   };
   return {
-    convex, rows, extra, packages, runs, upserts, fetches, draftCalls, sources, prunes, corrections, placements, unplacedReports,
+    convex, rows, extra, packages, runs, upserts, fetches, draftCalls, sources, prunes, corrections, placements, unplacedReports, extraDates,
     setAwaiting: (n: number) => void (awaitingExtra = n),
     /** A clear or unplace: nothing left to compare, but the scan must still run (ingest.ts's rescanAsks). */
     undo: (at: number) => void (undoneAt = at),
