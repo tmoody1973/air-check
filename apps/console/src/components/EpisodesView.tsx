@@ -3,10 +3,11 @@ import { useState, useSyncExternalStore } from "react";
 import { blankFridays, summaryLine } from "../lib/episodes";
 import type { EpisodeActions, EpisodeRow, RowCtx } from "./EpisodeControls";
 import { COLUMN_SOURCE, EpisodeItem, type SourceStates } from "./EpisodeItem";
+import { UndatedList, type Unplaced } from "./FixControl";
 import type { Workspace } from "./Shell";
 import { UNREADABLE, UNREADABLE_TEXT, type SourceStatus } from "./SourceConnections";
 
-export type { EpisodeActions, EpisodeRow };
+export type { EpisodeActions, EpisodeRow, Unplaced };
 
 // Plan 6 Task 5: the 2026 backlog, oldest first (the order it clears in, so the next show is at the top). Every
 // count and blank Friday comes from the rows; nothing is invented. Notes text never reaches this page (Hard Rule 12).
@@ -31,6 +32,7 @@ const useWide = () => useSyncExternalStore(subscribe, () => !window.matchMedia |
 
 export function EpisodesView({
   data,
+  unplaced = null,
   sources,
   workspace,
   today,
@@ -39,6 +41,8 @@ export function EpisodesView({
 }: {
   /** episodes.list: undefined while loading, null for the demo or anyone not signed in as station staff. */
   data: { episodes: EpisodeRow[]; awaitingReview: number } | null | undefined;
+  /** episodes.unplaced: names the scanner couldn't date (Plan 6b). undefined while loading, null when not allowed. */
+  unplaced?: Unplaced[] | null;
   sources: SourceStatus[] | null | undefined;
   workspace: Workspace;
   /** Today's Chicago day key, for the blank Fridays. */
@@ -96,6 +100,7 @@ export function EpisodesView({
           {" — drafting is paused."}
         </p>
       )}
+      {unplaced && unplaced.length > 0 && <UndatedList items={unplaced} actions={actions} announce={announce} />}
       {cards ? (
         <>
           {unconnected.length > 0 && (

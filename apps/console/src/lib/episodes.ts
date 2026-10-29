@@ -74,3 +74,18 @@ export function fetchErrorText(code: string | undefined): string {
   if (http?.startsWith("5")) return "Box had a server problem";
   return "the connection dropped or Box refused";
 }
+
+const CORRECTED_WORDS = {
+  tracklist: "tracklist",
+  drive: "which Drive doc",
+  paper: "which Paper doc",
+  box: "which Box folder",
+  hours: "which files are Hour 1 and Hour 2",
+  folderDate: "the show date",
+} as const;
+
+/** "tracklist, which Paper doc": what Tarik's saved fix covers, in the order Convex sends it. */
+export const correctedText = (fields: readonly (keyof typeof CORRECTED_WORDS)[]) => fields.map((f) => CORRECTED_WORDS[f]).join(", ");
+
+/** Where an undated name was found, in words. */
+export const SOURCE_NAME = { box: "Box", drive: "Google Drive", paper: "Dropbox Paper" } as const;
