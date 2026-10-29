@@ -146,6 +146,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
   const [tone, word] = !e ? (["neutral", "Blank Friday"] as const) : e.openRun && e.packageStatus === "none" ? DRAFTING : (fixState(e) ?? STATUS[e.status] ?? ["neutral", e.status]);
   const cells = e && cellsOf(e, sources);
   const link = e && statusLink(e);
+  const watch = e && word === DRAFTING[1] && e.openRunId ? <Link href={`/runs/${e.openRunId}`} className={`inline-flex items-center ${ROW_ACTION}`}>Watch it work</Link> : null;
   const onMark = canMark && !marking ? () => setMarking(true) : undefined;
   // Plan 6b: a show is fixed here until it has a package or an open run (then it is frozen: the package page).
   const canChange = !!e && e.packageStatus === "none" && !e.openRun;
@@ -176,9 +177,10 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
         ) : (
           <p className="mt-2 text-sm text-muted">{BLANK}</p>
         )}
-        {(link || onEdit || onMark) && (
+        {(link || watch || onEdit || onMark) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-4">
             {link}
+            {watch}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
           </div>
@@ -200,6 +202,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Pill tone={tone}>{word}</Pill>
             {link}
+            {watch}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
           </div>
