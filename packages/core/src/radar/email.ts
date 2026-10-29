@@ -299,6 +299,31 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
   return { text: stripped, links, bandcampPages, hosts };
 }
 
+// Listening-queue brief C: an unsubscribe or preferences link (it can carry Tarik's address and a signature) is never kept.
+const UNWANTED_LINK = /unsub|opt-?out|preferences|email_settings/i;
+const TRACKING_PARAM = (k: string) => k.startsWith("utm_") || k === "from" || k === "ref";
+
+/**
+ * The links worth keeping for Tarik, in order: tracking (utm_*, from, ref) and the fragment stripped (the same rule as
+ * bandcampPageUrl), unsubscribe and preference links dropped, a bare site root (path "/" and no query) dropped, then
+ * duplicates removed. A value that is not a URL is left as is so the caller's own check still refuses it.
+ */
+export function tidyLinks(links: string[]): string[] {
+  const out = links.flatMap((link) => {
+    let u: URL;
+    try {
+      u = new URL(link);
+    } catch {
+      return [link];
+    }
+    for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM(k)) u.searchParams.delete(k);
+    u.hash = "";
+    if (UNWANTED_LINK.test(u.pathname + u.search) || (u.pathname === "/" && !u.search)) return [];
+    return [u.href];
+  });
+  return [...new Set(out)];
+}
+
 /** At most `max` characters, cut at the last whitespace so a link is never cut in half (and then collected). */
 function cutOnSpace(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -322,7 +347,7 @@ export function cleanMail(mail: InboundMail, decision: Extract<SenderDecision, {
     ...(sender.name || sender.address ? { sender } : {}),
     subject: subject.text,
     body: body.text.slice(0, MAX_STORED_CHARS),
-    links: body.links,
+    links: tidyLinks(body.links),
     bandcampPages: body.bandcampPages,
     hosts: body.hosts,
   };

@@ -17,6 +17,7 @@ import {
   MAX_TAGS,
   type ReleaseFields,
   releaseKey,
+  tidyLinks,
 } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -152,7 +153,9 @@ function tidyMail(m: CleanMailArg): CleanMailArg {
   return {
     ...mail,
     ...(sender.name || sender.address ? { sender } : {}),
-    links: m.links.filter((l) => !HTTP_LINK.test(l) || linkHostOk(l)), // a non-http link stays, so mailProblem refuses it
+    // A non-http link stays, so mailProblem refuses it. Brief C: core's tidyLinks again, so a stored row never holds an
+    // unsubscribe link, a bare site root or a tracking copy of a link it already has.
+    links: tidyLinks(m.links.filter((l) => !HTTP_LINK.test(l) || linkHostOk(l))),
     hosts: m.hosts.filter(isHostName),
   };
 }
@@ -590,7 +593,8 @@ export const list = query({
           .withIndex("by_workspace_source_receivedAt", (q) => q.eq("workspace", ws).eq("source", tab))
           .order("desc")
           .take(MAX_LIST);
-    const rows = found.map(({ searchText: _searchText, ...r }) => ({ ...r, status: statusOf(r) }));
+    // Brief C: rows stored before the link rule show tidy links too.
+    const rows = found.map(({ searchText: _searchText, ...r }) => ({ ...r, status: statusOf(r), ...(r.links && { links: tidyLinks(r.links) }) }));
     const counts = { new: 0, considering: 0, played: 0, passed: 0 };
     for (const r of rows) counts[r.status] += 1;
     return { rows: status ? rows.filter((r) => r.status === status) : rows, counts };

@@ -22,6 +22,7 @@ import {
   releaseKey,
   senderDecision,
   stripLinks,
+  tidyLinks,
   unwrapForward,
   type InboundMail,
   type SenderVerdict,
@@ -314,6 +315,51 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
     expect(r.text).toBe("Write [email] or [email], see [link] and [link].");
     expect(r.links).toEqual(["https://h.example/Y"]);
     expect(stripLinks("Follow @artistname").text).toBe("Follow (at)artistname");
+  });
+});
+
+// Listening-queue brief C: the links a real Bandcamp email held (2026-10-29): its page three ways, Bandcamp's home page,
+// and an unsubscribe link carrying Tarik's address and a signature. Only the page is kept, once.
+describe("tidyLinks and cleanMail's stored links (brief C)", () => {
+  const PAGE = "https://acidjazz.bandcamp.com/album/peace-love";
+  const REAL = [
+    PAGE,
+    `${PAGE}?from=fanpub_fnb`,
+    `${PAGE}?utm_source=fanpub&utm_medium=email&utm_campaign=new_release&utm_content=fnb&from=fanpub_fnb#buy`,
+    "https://bandcamp.com/",
+    "https://bandcamp.com/fan_unsubscribe?email=tarik%40radiomilwaukee.org&sig=0a1b2c3d&band_id=123",
+  ];
+  test("the real Bandcamp shapes collapse to the one page", () => {
+    expect(tidyLinks(REAL)).toEqual([PAGE]);
+  });
+  test("unsubscribe and preference links are dropped, in the path or the query, any case", () => {
+    for (const l of [
+      "https://x.example/unsubscribe",
+      "https://x.example/a?action=Unsub&id=1",
+      "https://x.example/opt-out/1",
+      "https://x.example/optout",
+      "https://x.example/manage_preferences?u=1",
+      "https://x.example/email/Preferences",
+      "https://x.example/email_settings",
+      "https://x.example/fan_unsubscribe?x=1",
+    ])
+      expect(tidyLinks([l])).toEqual([]);
+  });
+  test("a bare root is dropped; a root with a real query, or any real path, stays; tracking is stripped and duplicates go", () => {
+    expect(tidyLinks(["https://label.example/", "https://label.example/?ref=x", "https://label.example"])).toEqual([]);
+    expect(tidyLinks(["https://label.example/?id=7"])).toEqual(["https://label.example/?id=7"]);
+    expect(tidyLinks(["https://press.example/a/b?pk=1&utm_source=x&ref=y#top", "https://press.example/a/b?pk=1"])).toEqual(["https://press.example/a/b?pk=1"]);
+    expect(tidyLinks(["https://press.example/kit?from=x", "https://press.example/kit"])).toEqual(["https://press.example/kit"]);
+  });
+  test("a link that is not a URL is left as is, so Convex can still refuse it", () => {
+    expect(tidyLinks(["not a url"])).toEqual(["not a url"]);
+  });
+  test("cleanMail stores the tidy links (and the page is still a Bandcamp page)", () => {
+    const m: InboundMail = { messageId: "x", from: "noreply@bandcamp.com", subject: "New release from Acid Jazz Records", text: "Acid Jazz Records just released it", hrefs: REAL, attachmentCount: 0, bodyMissing: false };
+    const c = cleanMail(m, { ok: true, tab: "bandcamp", address: "noreply@bandcamp.com" });
+    expect(c.links).toEqual([PAGE]);
+    expect(c.bandcampPages).toEqual([PAGE]);
+    expect(JSON.stringify(c)).not.toMatch(/unsubscribe|radiomilwaukee|sig=/);
   });
 });
 
