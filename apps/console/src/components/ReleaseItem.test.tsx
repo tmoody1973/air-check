@@ -91,6 +91,49 @@ describe("a record shows", () => {
   });
 });
 
+describe("the date the email was received", () => {
+  // 03:00 UTC on Oct 30 is still Oct 29 in Milwaukee: the label is the station's calendar day.
+  const AT = Date.UTC(2026, 9, 30, 3);
+  const cosign = (over: Partial<Release> = {}) => rel({ source: "cosign", senders: [{ name: "Ana PR", messageId: "m", at: 1 }], receivedAt: AT, ...over });
+
+  it("Bandcamp, card and row: appended to the sender line", () => {
+    setup(rel({ receivedAt: AT }));
+    expect(screen.getByText("From Bandcamp · received Oct 29, 2026")).toBeInTheDocument();
+    cleanup();
+    setup(rel({ receivedAt: AT }), { layout: "row" });
+    expect(screen.getByText("From Bandcamp · received Oct 29, 2026")).toBeInTheDocument();
+  });
+
+  it("Bandcamp with no sender: its own line, card and row", () => {
+    setup(rel({ senders: [], receivedAt: AT }));
+    expect(screen.getByText("Received Oct 29, 2026")).toBeInTheDocument();
+    cleanup();
+    setup(rel({ senders: [], receivedAt: AT }), { layout: "row" });
+    expect(screen.getByText("Received Oct 29, 2026")).toBeInTheDocument();
+  });
+
+  it("co-signs: the card's top From line; the row's own muted line under the title, the sender in its column", () => {
+    setup(cosign());
+    expect(screen.getByText("From Ana PR · received Oct 29, 2026")).toBeInTheDocument();
+    cleanup();
+    setup(cosign(), { layout: "row" });
+    expect(screen.getByText("Received Oct 29, 2026")).toHaveClass("text-muted");
+    expect(screen.getByText("Ana PR")).toBeInTheDocument();
+    expect(screen.queryByText(/From Ana PR/)).toBeNull();
+  });
+
+  it("no receivedAt: nothing, no placeholder, on either tab or layout", () => {
+    for (const r of [rel(), cosign({ receivedAt: undefined })])
+      for (const layout of ["card", "row"] as const) {
+        setup(r, { layout });
+        expect(screen.queryByText(/received/i)).toBeNull();
+        cleanup();
+      }
+    setup(rel());
+    expect(screen.getByText("From Bandcamp")).toBeInTheDocument();
+  });
+});
+
 describe("other links", () => {
   it("domain in mono, then the full address as a new-tab link with noopener noreferrer nofollow, and the note", () => {
     setup(rel({ links: ["https://press.example.com/a/b?pk=1", "javascript:alert(1)", "ftp://x.example/a"] }));

@@ -2,7 +2,7 @@
 
 import { bandcampArtUrl, isEmbargoActive, type BandcampEmbed } from "@aircheck/core";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { showDateLabel } from "../lib/date";
+import { chicagoDateLabel, showDateLabel } from "../lib/date";
 import { BandcampPlayer } from "./BandcampPlayer";
 import { FIELD, PRIMARY, SECONDARY, useSave } from "./EpisodeControls";
 import { Pill, type PillTone } from "./Pill";
@@ -13,7 +13,7 @@ import { SampleTag } from "./SampleTag";
 // back to New" as the undo. Each calls an injected Convex mutation as the signed-in person, never the model.
 // Everything here came from an email or a Bandcamp page, so it is rendered as text: no auto-linking, no HTML (Hard Rule 5).
 // Task 6b adds the page's cover art (a lazy image, no referrer), its tags (a click filters), the about (collapsed) and a
-// favorite star that is independent of status.
+// favorite star that is independent of status. The sender line also carries the date the email was received.
 
 export type ReleaseStatus = "new" | "considering" | "played" | "passed";
 export type RadarTab = "bandcamp" | "cosign";
@@ -43,6 +43,7 @@ export type Release = {
   tags?: string[];
   about?: string;
   favorite?: boolean;
+  receivedAt?: number;
 };
 type EditFields = { label?: string; genre?: string; type?: "album" | "single" | "ep" | ""; releasedOn?: string };
 export type RadarActions = {
@@ -374,6 +375,12 @@ function Title({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
 }
 
 const meta = (parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
+/** "From X · received Oct 29, 2026", "From X", "Received Oct 29, 2026" or null: the sender line with the email's date. */
+const fromLine = (sender: string, receivedAt?: number) => {
+  const got = receivedAt === undefined ? undefined : chicagoDateLabel(receivedAt);
+  if (sender) return got ? `From ${sender} · received ${got}` : `From ${sender}`;
+  return got ? `Received ${got}` : null;
+};
 const released = (r: Release) => (r.releasedOn ? showDateLabel(r.releasedOn) : undefined);
 
 export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "card"; ctx: ReleaseCtx }) {
@@ -381,11 +388,12 @@ export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "c
   const sender = senderText(r);
   const type = r.type && TYPE[r.type];
   const cosign = ctx.tab === "cosign";
+  const from = fromLine(sender, r.receivedAt);
 
   if (layout === "card")
     return (
       <li aria-label={`${r.artist} – ${r.title}`} className="flex min-w-0 flex-col gap-3 rounded-card border border-line bg-surface p-4">
-        {cosign && sender && <p className="text-sm font-medium text-ink-soft [overflow-wrap:anywhere]">From {sender}</p>}
+        {cosign && from && <p className="text-sm font-medium text-ink-soft [overflow-wrap:anywhere]">{from}</p>}
         <div className="flex items-start gap-3">
           <Art r={r} ctx={ctx} size="md" />
           <div className="min-w-0 flex-1"><Title r={r} ctx={ctx} /></div>
@@ -395,7 +403,7 @@ export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "c
           </span>
         </div>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">{meta([r.label, r.genre, type, released(r) && `Out ${released(r)}`])}</p>
-        {!cosign && sender && <p className="text-sm text-muted [overflow-wrap:anywhere]">From {sender}</p>}
+        {!cosign && from && <p className="text-sm text-muted [overflow-wrap:anywhere]">{from}</p>}
         <div className="border-t border-line pt-3"><Body r={r} ctx={ctx} /></div>
       </li>
     );
@@ -412,7 +420,9 @@ export function ReleaseItem({ r, layout, ctx }: { r: Release; layout: "row" | "c
             <Art r={r} ctx={ctx} size="sm" />
             <div className="min-w-0">
               <Title r={r} ctx={ctx} />
-              {!cosign && sender && <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]">From {sender}</p>}
+              {cosign
+                ? r.receivedAt !== undefined && <p className="mt-1 text-sm text-muted">Received {chicagoDateLabel(r.receivedAt)}</p>
+                : from && <p className="mt-1 text-sm text-muted [overflow-wrap:anywhere]">{from}</p>}
             </div>
           </div>
         </td>
