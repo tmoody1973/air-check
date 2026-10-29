@@ -5,8 +5,14 @@
   "subject": "New release from Pale Signal Records",
   "text": "Hi Tarik,\n\nPale Signal Records just released Glass Weather by Ferro Lane.\n\nCheck it out: https://palesignal.bandcamp.com/album/glass-weather\n\nDigital album, released October 24, 2026\n\nYou are getting this because you follow Pale Signal Records on Bandcamp.\nUnsubscribe: https://example.invalid/unsubscribe/label",
   "html": "<html><head><title>Bandcamp</title><style>p{margin:0}</style></head><body><p>Hi Tarik,</p><br><p>Pale Signal Records just released Glass Weather by Ferro Lane.</p><br><p>Check it out: <a href=\"https://palesignal.bandcamp.com/album/glass-weather\">https://palesignal.bandcamp.com/album/glass-weather</a></p><br><p>Digital album, released October 24, 2026</p><br><p>You are getting this because you follow Pale Signal Records on Bandcamp.</p><p>Unsubscribe: <a href=\"https://example.invalid/unsubscribe/label\">https://example.invalid/unsubscribe/label</a></p></body></html>",
-  "headers": {
-    "Authentication-Results": "mx.agentmail.invalid; dkim=pass header.i=@bandcamp.com header.s=s1 header.b=AbCdEf; spf=pass smtp.mailfrom=bandcamp.com; dmarc=pass header.from=bandcamp.com"
+  "authentication_results": {
+    "dkim": "none",
+    "dmarc": "pass",
+    "dmarc_domain": "bandcamp.com"
   },
+  "labels": [
+    "received",
+    "unread"
+  ],
   "attachments": []
 }

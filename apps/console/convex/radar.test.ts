@@ -147,6 +147,23 @@ describe("received", () => {
     expect(rows[0]).toMatchObject({ messageId: "m1", state: "received", tab: "cosign", body: mail().body, linkCount: 0, sender: { address: "press@label.example.invalid" } });
   });
 
+  test("R12 catch-up: an email ignored before is stored again when it is now kept; never the other way", async () => {
+    const t = convexTest(schema, modules);
+    expect(await received(t, "m1", null, { ignoredReason: "Air Check's sender check is not set up" })).toEqual({ fresh: true });
+    expect(await received(t, "m1")).toEqual({ fresh: true });
+    expect(await inboxRows(t)).toHaveLength(1);
+    expect(await inboxRow(t, "m1")).toMatchObject({ state: "received", body: mail().body });
+    // a kept row is never replaced, by a later kept call or by an ignored one
+    expect(await received(t, "m1", mail({ body: "other text" }))).toEqual({ fresh: false });
+    expect(await received(t, "m1", null, { ignoredReason: "No" })).toEqual({ fresh: false });
+    // an ignored row stays ignored when it is ignored again
+    expect(await received(t, "m2", null, { ignoredReason: "First" })).toEqual({ fresh: true });
+    expect(await received(t, "m2", null, { ignoredReason: "Second" })).toEqual({ fresh: false });
+    expect(await inboxRow(t, "m1")).toMatchObject({ state: "received", body: mail().body });
+    expect(await inboxRow(t, "m2")).toMatchObject({ state: "ignored", reasons: ["First"] });
+    expect(await inboxRows(t)).toHaveLength(2);
+  });
+
   test("an ignored email stores no body", async () => {
     const t = convexTest(schema, modules);
     expect(await received(t, "m1", null, { ignoredReason: "Not on the sender list" })).toEqual({ fresh: true });

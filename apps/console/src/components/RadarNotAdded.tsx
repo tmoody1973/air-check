@@ -30,7 +30,7 @@ const RETRYABLE = new Set<NotAddedRow["state"]>(["refused", "failed"]);
 /** Core's senderDecision reasons as stored by the inbound route, in the words Tarik reads (R9: no env-var name). */
 const IGNORED: Record<string, string> = {
   "Sender not on the list": "Sender not on the list. To accept their mail, add the address to Air Check's sender list.",
-  "Sender's signature (DKIM) did not pass": "Sender's signature (DKIM) did not pass.",
+  "AgentMail could not confirm the sender": "AgentMail could not confirm the sender, so Air Check did not read it.",
 };
 const sentence = (r: string) => (/[.!?]$/.test(r) ? r : `${r}.`);
 

@@ -12,14 +12,13 @@ const row = (over: Partial<NotAddedRow>): NotAddedRow => ({ messageId: "m", rece
 
 // The reasons exactly as they are stored, taken from the code that writes them where it is exported, so a wording
 // change there fails here. Core: senderDecision (the inbound route's ignoredReason) and checkExtraction (refused).
-const denied = (allowlist: string[], authserv: string | undefined) => {
-  const d = senderDecision({ from: "Promo <promo@label.example>", headers: {}, text: "" }, allowlist, authserv);
+const denied = (allowlist: string[]) => {
+  const d = senderDecision({ from: "Promo <promo@label.example>", text: "" }, allowlist, null);
   if (d.ok) throw new Error("expected a refusal");
   return d.reason;
 };
-const NOT_LISTED = denied([], "mx.example");
-const NO_DKIM = denied(["promo@label.example"], "mx.example");
-const NOT_SET_UP = denied([], undefined);
+const NOT_LISTED = denied([]);
+const NOT_CONFIRMED = denied(["promo@label.example"]);
 const refusal = checkExtraction({ artist: "Nova", title: "Low Tide" }, "Low Tide is out on Friday", 0);
 const REFUSED = refusal.ok || !("reasons" in refusal) ? "" : refusal.reasons[0]!;
 // apps/ingest/src/radar.ts keeps these private; copied exactly.
@@ -28,8 +27,9 @@ const INGEST_NO_ANSWER = "The reader gave no answer";
 
 const SHOWN: [NotAddedRow["state"], string, string][] = [
   ["ignored", NOT_LISTED, "Sender not on the list. To accept their mail, add the address to Air Check's sender list."],
-  ["ignored", NO_DKIM, "Sender's signature (DKIM) did not pass."],
-  ["ignored", NOT_SET_UP, "Air Check's sender check is not set up"],
+  ["ignored", NOT_CONFIRMED, "AgentMail could not confirm the sender, so Air Check did not read it."],
+  // Rows stored before ruling R12 keep their old reason, shown as stored.
+  ["ignored", "Air Check's sender check is not set up", "Air Check's sender check is not set up"],
   ["not-a-release", INGEST_NOT_A_RELEASE, "Not a release email."],
   ["refused", REFUSED, "Couldn't read it: The artist is not in the email."],
   ["failed", INGEST_NO_ANSWER, "Couldn't read it: The reader gave no answer."],
@@ -37,10 +37,9 @@ const SHOWN: [NotAddedRow["state"], string, string][] = [
 
 describe("Not added", () => {
   it("the stored reasons are what the code writes today", () => {
-    expect([NOT_LISTED, NO_DKIM, NOT_SET_UP, REFUSED]).toEqual([
+    expect([NOT_LISTED, NOT_CONFIRMED, REFUSED]).toEqual([
       "Sender not on the list",
-      "Sender's signature (DKIM) did not pass",
-      "Air Check's sender check is not set up",
+      "AgentMail could not confirm the sender",
       "The artist is not in the email",
     ]);
   });

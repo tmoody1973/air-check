@@ -7,12 +7,19 @@ export interface InboundMail {
   subject: string;
   text: string;
   hrefs: string[];
-  headers: Record<string, string>;
   attachmentCount: number;
   bodyMissing: boolean;
 }
 
 export type RadarTab = "bandcamp" | "cosign";
+/**
+ * AgentMail's own SPF/DKIM/DMARC verdict on a message and its labels, read from AgentMail's API with our key (R12).
+ * Never taken from the email's text or headers: AgentMail strips the raw Authentication-Results header.
+ */
+export interface SenderVerdict {
+  auth: { dmarc?: string; dmarc_domain?: string } | null;
+  labels: string[] | null;
+}
 export type SenderDecision = { ok: true; tab: RadarTab; address: string } | { ok: false; reason: string };
 export interface CleanMail {
   tab: RadarTab;
@@ -30,7 +37,8 @@ export const MAX_SUBJECT_CHARS = 1_000;
 const MAX_NAME_CHARS = 200; // radar.received's field limit
 const BODY_MARGIN = 1_000; // the body is cut to its stored limit plus this before cleaning, then to the limit after
 const MAX_FROM_CHARS = 998; // RFC 5322's line limit
-const MAX_AUTH_RESULTS_CHARS = 4_096; // real Authentication-Results headers are well under 1 KB
+const MAX_VERDICT_CHARS = 255; // a DMARC result word or a domain name
+const MAX_LABELS = 100;
 const MAX_LINKS = 20;
 const MAX_LINK_CHARS = 500;
 const MAX_PAGES = 3;
@@ -57,20 +65,27 @@ export function pickInbound(message: unknown): InboundMail | null {
     subject: str(m.subject) ?? "",
     text: text?.trim() ? text : (fromHtml?.text ?? ""),
     hrefs: fromHtml?.hrefs ?? [],
-    headers: pickHeaders(m.headers),
     attachmentCount: Array.isArray(m.attachments) ? m.attachments.length : 0,
     bodyMissing: text === undefined && html === undefined, // AgentMail omits both over 1 MB
   };
 }
 
-function pickHeaders(h: unknown): Record<string, string> {
-  if (!h || typeof h !== "object" || Array.isArray(h)) return {};
-  return Object.fromEntries(
-    Object.entries(h).flatMap(([k, v]): [string, string][] =>
-      // The topmost occurrence only (receivers prepend), never a join: a sender can add headers below it.
-      typeof v === "string" ? [[k, v]] : Array.isArray(v) && typeof v[0] === "string" ? [[k, v[0]]] : [],
-    ),
-  );
+/** `authentication_results` and `labels` from an AgentMail message, shape-checked: anything unexpected is null. */
+export function readVerdict(message: unknown): SenderVerdict {
+  const m = message && typeof message === "object" ? (message as Record<string, unknown>) : {};
+  const a = m.authentication_results;
+  const auth =
+    a && typeof a === "object" && !Array.isArray(a)
+      ? Object.fromEntries(
+          (["dmarc", "dmarc_domain"] as const).flatMap((k) => {
+            const v = str((a as Record<string, unknown>)[k]);
+            return v === undefined ? [] : [[k, v.slice(0, MAX_VERDICT_CHARS)]];
+          }),
+        )
+      : null;
+  const l = m.labels;
+  const labels = Array.isArray(l) && l.every((x) => typeof x === "string") ? (l as string[]).slice(0, MAX_LABELS) : null;
+  return { auth, labels };
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
@@ -161,48 +176,36 @@ function parseFrom(full: string): { name?: string; address?: string } {
   return { ...(name ? { name } : {}), ...(address.length <= MAX_ADDRESS_CHARS && ADDRESS.test(address) ? { address } : {}) };
 }
 
-/**
- * Whether the topmost Authentication-Results, written by our own receiver (its authserv-id), holds a dkim=pass whose
- * header.d (or header.i) aligns with the From domain. Lower headers, or one from any other authserv-id, are the
- * sender's and are never trusted.
- */
-function dkimAligned(headers: Record<string, string>, domain: string, authservId: string): boolean {
-  const key = Object.keys(headers).find((k) => k.toLowerCase() === "authentication-results");
-  // A string holding several unfolded header lines: only the first is the topmost header.
-  const value = (key ? headers[key]! : "").split(/\r?\n(?=\S)/)[0]!.slice(0, MAX_AUTH_RESULTS_CHARS);
-  const [server, ...clauses] = value.split(";");
-  if (server?.trim().split(/\s+/)[0]?.toLowerCase() !== authservId.toLowerCase()) return false;
-  return clauses.some((raw) => {
-    const clause = raw.replace(/\([^)]*\)/g, " "); // comments (e.g. ARC's inner "dkim=pass") are not verdicts
-    if (!/(?:^|\s)dkim\s*=\s*pass\b/i.test(clause)) return false;
-    const d = clause.match(/\bheader\.d\s*=\s*([^\s;]+)/i)?.[1] ?? clause.match(/\bheader\.i\s*=\s*([^\s;]+)/i)?.[1]?.replace(/^.*@/, "");
-    return d !== undefined && aligned(d.toLowerCase(), domain);
-  });
+/** Whether the From address, parsed, is exactly one on the list. */
+export function isListedSender(from: string, allowlist: string[]): boolean {
+  const address = parseFrom(from).address;
+  return address !== undefined && allowlist.includes(address);
 }
 
-/** Relaxed DMARC-style alignment: equal, or one a dot-suffix subdomain of the other (email.bandcamp.com ↔ bandcamp.com). */
-function aligned(signer: string, from: string): boolean {
-  if (signer === from) return true;
-  const [short, long] = signer.length < from.length ? [signer, from] : [from, signer];
-  // ponytail: a bare TLD never aligns; public suffixes like co.uk are not special-cased (no allowlisted sender uses one).
-  return short.includes(".") && long.endsWith(`.${short}`);
+/** DMARC relaxed alignment, one way: the From domain is dmarc_domain or a subdomain of it. A dotless domain never aligns. */
+function aligned(dmarcDomain: string, from: string): boolean {
+  const d = dmarcDomain.trim().toLowerCase();
+  // ponytail: public suffixes like co.uk are not special-cased (no allowlisted sender uses one).
+  return d.includes(".") && (from === d || from.endsWith(`.${d}`));
 }
 
+const BAD_LABELS = ["unauthenticated", "spam", "blocked"];
+const NOT_CONFIRMED = "AgentMail could not confirm the sender";
+
 /**
- * Exact address on the allowlist, and a DKIM pass aligned (relaxed) with the From domain (a From line alone can be faked).
+ * Ruling R12: exact address on the allowlist, and AgentMail's verdict (from its API, never the email) is a DMARC pass
+ * aligned with the From domain, on a message not labelled unauthenticated, spam or blocked. A From line alone can be faked.
  * The tab is Bandcamp when the mail is from bandcamp.com, or when Tarik forwarded a bandcamp.com email by hand.
  */
-export function senderDecision(
-  mail: Pick<InboundMail, "from" | "headers" | "text">,
-  allowlist: string[],
-  authservId: string | undefined, // RADAR_AUTHSERV_ID: the receiver's id at the start of its Authentication-Results
-): SenderDecision {
-  const receiver = authservId?.trim();
-  if (!receiver) return { ok: false, reason: "Air Check's sender check is not set up" };
-  const address = parseFrom(mail.from).address;
-  if (!address || !allowlist.includes(address)) return { ok: false, reason: "Sender not on the list" };
+export function senderDecision(mail: Pick<InboundMail, "from" | "text">, allowlist: string[], verdict: SenderVerdict | null): SenderDecision {
+  if (!isListedSender(mail.from, allowlist)) return { ok: false, reason: "Sender not on the list" };
+  const address = parseFrom(mail.from).address!;
   const domain = address.slice(address.lastIndexOf("@") + 1);
-  if (!dkimAligned(mail.headers, domain, receiver)) return { ok: false, reason: "Sender's signature (DKIM) did not pass" };
+  const auth = verdict?.auth;
+  const labels = verdict?.labels;
+  const confirmed =
+    auth?.dmarc === "pass" && auth.dmarc_domain !== undefined && aligned(auth.dmarc_domain, domain) && labels != null && !labels.some((l) => BAD_LABELS.includes(l));
+  if (!confirmed) return { ok: false, reason: NOT_CONFIRMED };
   const original = unwrapForward(mail.text).sender?.address;
   const bandcamp = domain === BANDCAMP_DOMAIN || original?.endsWith(`@${BANDCAMP_DOMAIN}`);
   return { ok: true, tab: bandcamp ? "bandcamp" : "cosign", address };

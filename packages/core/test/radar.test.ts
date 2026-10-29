@@ -24,6 +24,9 @@ import {
   stripLinks,
   unwrapForward,
   type InboundMail,
+  type SenderVerdict,
+  isListedSender,
+  readVerdict,
   HOST_NAME,
   isHostName,
 } from "../src/index";
@@ -32,9 +35,8 @@ import { readFixture } from "./helpers/fixtures";
 const mailFixture = (name: string): Record<string, unknown> => JSON.parse(readFixture(`email/${name}.json`));
 const inbound = (name: string): InboundMail => pickInbound(mailFixture(name))!;
 const ALLOW = parseAllowlist("tarik@radiomilwaukee.org, noreply@bandcamp.com");
-const ID = "mx.agentmail.invalid"; // the receiver's authserv-id (RADAR_AUTHSERV_ID)
 const OCT29 = Date.UTC(2026, 9, 29, 15); // 10:00 in Chicago
-const AR = (d: string) => `mx.agentmail.invalid; dkim=pass header.i=@${d} header.s=s1 header.b=abc; spf=pass smtp.mailfrom=${d}`;
+const PASS = (d: string): SenderVerdict => ({ auth: { dmarc: "pass", dmarc_domain: d }, labels: ["received"] });
 
 describe("pickInbound", () => {
   test("from_ wins over from", () => {
@@ -66,10 +68,10 @@ describe("pickInbound", () => {
     expect(pickInbound("nope")).toBeNull();
     expect(pickInbound(null)).toBeNull();
   });
-  test("reads the fixture shape", () => {
+  test("reads the fixture shape, and no headers: the verdict comes from readVerdict", () => {
     const m = inbound("bandcamp-label");
     expect(m).toMatchObject({ messageId: "<bc-label-0001@bandcamp.example.invalid>", from: "Bandcamp <noreply@bandcamp.com>", attachmentCount: 0 });
-    expect(m.headers["Authentication-Results"]).toContain("dkim=pass");
+    expect(m).not.toHaveProperty("headers");
   });
 });
 
@@ -101,68 +103,99 @@ describe("parseAllowlist", () => {
   });
 });
 
-describe("senderDecision", () => {
-  const mail = (from: string, ar?: string, text = "hello") => ({ from, text, headers: (ar === undefined ? {} : { "Authentication-Results": ar }) as Record<string, string> });
-  test("an exact match with an aligned DKIM pass is ok", () => {
-    expect(senderDecision(mail("Tarik <Tarik@RadioMilwaukee.org>", AR("radiomilwaukee.org")), ALLOW, ID)).toEqual({ ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" });
+describe("senderDecision (R12: AgentMail's own verdict, read from its API)", () => {
+  const mail = (from: string, text = "hello") => ({ from, text });
+  const NOT_CONFIRMED = { ok: false, reason: "AgentMail could not confirm the sender" };
+  // The five shapes seen live on rhythmlab@agentmail.to on 2026-10-29 (GET /v0/inboxes/{inbox}/messages/{id}).
+  const LIVE: [string, Record<string, string>][] = [
+    ["Bandcamp <noreply@bandcamp.com>", { dkim: "none", dmarc: "pass", dmarc_domain: "bandcamp.com" }],
+    ["Tarik <tarik@radiomilwaukee.org>", { spf: "pass", dkim: "pass", dmarc: "pass", spf_domain: "radiomilwaukee.org", dkim_domain: "radiomilwaukee.org", dmarc_domain: "radiomilwaukee.org" }],
+    ["<tarikjmoody@gmail.com>", { spf: "pass", dkim: "pass", dmarc: "pass", dmarc_domain: "gmail.com" }],
+    ["<newmusic@co-sign.com>", { dkim: "pass", dmarc: "pass", dmarc_domain: "co-sign.com" }],
+    ["Gmail <forwarding-noreply@google.com>", { spf: "pass", dkim: "pass", dmarc: "pass", dmarc_domain: "google.com" }],
+  ];
+  const LIVE_ALLOW = parseAllowlist("noreply@bandcamp.com, tarik@radiomilwaukee.org, tarikjmoody@gmail.com, newmusic@co-sign.com, forwarding-noreply@google.com");
+  const seen = (auth: SenderVerdict["auth"], labels: string[] | null = ["received", "unread"]): SenderVerdict => ({ auth, labels });
+
+  test.each(LIVE)("the live shape for %s is kept when the sender is on the list", (from, auth) => {
+    expect(senderDecision(mail(from), LIVE_ALLOW, seen(auth))).toMatchObject({ ok: true });
   });
-  test("header.d alignment works too, and the header name is case-insensitive", () => {
-    const m = { from: "tarik@radiomilwaukee.org", text: "x", headers: { "authentication-results": "mx.agentmail.invalid; dkim=pass header.d=radiomilwaukee.org header.s=g" } };
-    expect(senderDecision(m, ALLOW, ID)).toMatchObject({ ok: true });
+  test.each(LIVE)("the live shape for %s is not on an empty list", (from, auth) => {
+    expect(senderDecision(mail(from), [], seen(auth))).toEqual({ ok: false, reason: "Sender not on the list" });
   });
-  test("lookalike addresses are not on the list", () => {
+  test("an exact match is ok, address lowercased", () => {
+    expect(senderDecision(mail("Tarik <Tarik@RadioMilwaukee.org>"), ALLOW, seen({ dmarc: "pass", dmarc_domain: "RadioMilwaukee.org" }))).toEqual({ ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" });
+  });
+  test("lookalike addresses are not on the list, whatever the verdict", () => {
     for (const from of ["tarik@radiomilwaukee.org.evil.com", "nottarik@radiomilwaukee.org"])
-      expect(senderDecision(mail(from, AR("radiomilwaukee.org.evil.com")), ALLOW, ID)).toEqual({ ok: false, reason: "Sender not on the list" });
+      expect(senderDecision(mail(from), ALLOW, seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org.evil.com" }))).toEqual({ ok: false, reason: "Sender not on the list" });
   });
-  test("allowlisted but DKIM failed, absent or unaligned", () => {
-    const bad = [
-      mail("tarik@radiomilwaukee.org", "mx.agentmail.invalid; dkim=fail header.i=@radiomilwaukee.org"),
-      mail("tarik@radiomilwaukee.org"),
-      mail("tarik@radiomilwaukee.org", "mx.agentmail.invalid; dkim=pass header.d=evil.example"),
+  test("a forged From on the list is refused when AgentMail could not confirm it", () => {
+    const forged = mail("Tarik <tarik@radiomilwaukee.org>");
+    const refused: (SenderVerdict | null)[] = [
+      seen({ dmarc: "fail", dmarc_domain: "radiomilwaukee.org" }),
+      seen({ dmarc: "none", dmarc_domain: "radiomilwaukee.org" }),
+      seen({ dmarc: "PASS ", dmarc_domain: "radiomilwaukee.org" }), // the exact word only
+      seen({ dmarc: "pass", dmarc_domain: "attacker.com" }),
+      seen({ dmarc: "pass", dmarc_domain: "org" }), // a bare public suffix never aligns
+      seen({ dmarc: "pass", dmarc_domain: "" }),
+      seen({ dmarc: "pass" }),
+      seen({ dmarc_domain: "radiomilwaukee.org" }),
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["received", "unauthenticated"]),
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["spam"]),
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, ["blocked"]),
+      seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }, null), // labels unknown: cannot rule out "unauthenticated"
+      seen(null),
+      null,
     ];
-    for (const m of bad) expect(senderDecision(m, ALLOW, ID)).toEqual({ ok: false, reason: "Sender's signature (DKIM) did not pass" });
+    for (const v of refused) expect(senderDecision(forged, ALLOW, v), JSON.stringify(v)).toEqual(NOT_CONFIRMED);
   });
-  test("any aligned passing clause counts, e.g. after a forwarder adds its own", () => {
-    expect(senderDecision(mail("noreply@bandcamp.com", "mx.agentmail.invalid; dkim=pass header.d=gmail.com; dkim=pass header.i=@bandcamp.com"), ALLOW, ID)).toMatchObject({ ok: true, tab: "bandcamp" });
-  });
-  test("relaxed alignment: a subdomain either way passes (R3)", () => {
-    expect(senderDecision(mail("noreply@bandcamp.com", "mx.agentmail.invalid; dkim=pass header.d=email.bandcamp.com"), ALLOW, ID)).toMatchObject({ ok: true, tab: "bandcamp" });
-    expect(senderDecision(mail("tarik@radiomilwaukee.org", "mx.agentmail.invalid; dkim=pass header.d=mail.radiomilwaukee.org"), ALLOW, ID)).toMatchObject({ ok: true });
+  test("relaxed alignment: the From domain may be a subdomain of dmarc_domain, never the other way", () => {
     const sub = parseAllowlist("news@email.bandcamp.com");
-    expect(senderDecision(mail("news@email.bandcamp.com", "mx.agentmail.invalid; dkim=pass header.d=bandcamp.com"), sub, ID)).toMatchObject({ ok: true });
+    expect(senderDecision(mail("news@email.bandcamp.com"), sub, seen({ dmarc: "pass", dmarc_domain: "bandcamp.com" }))).toMatchObject({ ok: true, tab: "cosign" });
+    expect(senderDecision(mail("noreply@bandcamp.com"), ALLOW, seen({ dmarc: "pass", dmarc_domain: "email.bandcamp.com" }))).toEqual(NOT_CONFIRMED);
   });
-  test.each(["bandcamp.com.evil.example", "evilbandcamp.com", "bandcamp.co", "com"])("look-alike signing domain %s fails (R3)", (d) => {
-    expect(senderDecision(mail("noreply@bandcamp.com", `mx.agentmail.invalid; dkim=pass header.d=${d}`), ALLOW, ID)).toEqual({ ok: false, reason: "Sender's signature (DKIM) did not pass" });
-  });
-  test("R4: only the topmost Authentication-Results counts, and only from our receiver", () => {
-    const at = (headers: string[]) => pickInbound({ message_id: "m", from: "tarik@radiomilwaukee.org", text: "x", headers: { "Authentication-Results": headers } })!;
-    const forged = "mx.forged.example; dkim=pass header.d=radiomilwaukee.org";
-    const ours = (v: string) => `${ID}; dkim=${v} header.d=radiomilwaukee.org`;
-    const refused = { ok: false, reason: "Sender's signature (DKIM) did not pass" };
-    // forged header first (wrong authserv-id), receiver's fail header below
-    expect(senderDecision(at([forged, ours("fail")]), ALLOW, ID)).toEqual(refused);
-    // receiver's fail on top, a forged pass carrying our own authserv-id below
-    expect(senderDecision(at([ours("fail"), ours("pass")]), ALLOW, ID)).toEqual(refused);
-    // receiver's pass on top
-    expect(senderDecision(at([ours("pass"), forged]), ALLOW, ID)).toMatchObject({ ok: true });
-    // a single string holding two unfolded header lines: only the first counts
-    expect(senderDecision({ from: "tarik@radiomilwaukee.org", text: "x", headers: { "Authentication-Results": `${ours("fail")}\n${ours("pass")}` } }, ALLOW, ID)).toEqual(refused);
-  });
-  test("R4: a wrong authserv-id is refused", () => {
-    expect(senderDecision(mail("tarik@radiomilwaukee.org", "mx.other.example; dkim=pass header.d=radiomilwaukee.org"), ALLOW, ID)).toEqual({ ok: false, reason: "Sender's signature (DKIM) did not pass" });
-  });
-  test("R4: an unset authserv-id refuses everyone", () => {
-    for (const id of [undefined, "", "  "])
-      expect(senderDecision(mail("tarik@radiomilwaukee.org", AR("radiomilwaukee.org")), ALLOW, id)).toEqual({ ok: false, reason: "Air Check's sender check is not set up" });
+  test.each(["bandcamp.com.evil.example", "evilbandcamp.com", "bandcamp.co", "com"])("look-alike dmarc_domain %s fails", (d) => {
+    expect(senderDecision(mail("noreply@bandcamp.com"), ALLOW, seen({ dmarc: "pass", dmarc_domain: d }))).toEqual(NOT_CONFIRMED);
   });
   test("an empty allowlist refuses everyone", () => {
-    expect(senderDecision(mail("tarik@radiomilwaukee.org", AR("radiomilwaukee.org")), [], ID)).toEqual({ ok: false, reason: "Sender not on the list" });
+    expect(senderDecision(mail("tarik@radiomilwaukee.org"), [], seen({ dmarc: "pass", dmarc_domain: "radiomilwaukee.org" }))).toEqual({ ok: false, reason: "Sender not on the list" });
+  });
+  test("isListedSender: the exact parsed address only", () => {
+    expect(isListedSender("Tarik <Tarik@RadioMilwaukee.org>", ALLOW)).toBe(true);
+    expect(isListedSender("tarik@radiomilwaukee.org.evil.com", ALLOW)).toBe(false);
+    expect(isListedSender("not an address", ALLOW)).toBe(false);
+    expect(isListedSender("tarik@radiomilwaukee.org", [])).toBe(false);
   });
   test("tabs", () => {
     expect(BANDCAMP_DOMAIN).toBe("bandcamp.com");
-    expect(senderDecision(inbound("bandcamp-label"), ALLOW, ID)).toMatchObject({ ok: true, tab: "bandcamp", address: "noreply@bandcamp.com" });
-    expect(senderDecision(inbound("bandcamp-hand-forwarded"), ALLOW, ID)).toMatchObject({ ok: true, tab: "bandcamp", address: "tarik@radiomilwaukee.org" });
-    expect(senderDecision(inbound("cosign-forwarded"), ALLOW, ID)).toMatchObject({ ok: true, tab: "cosign" });
+    const decide = (name: string) => senderDecision(inbound(name), ALLOW, readVerdict(mailFixture(name)));
+    expect(decide("bandcamp-label")).toMatchObject({ ok: true, tab: "bandcamp", address: "noreply@bandcamp.com" });
+    expect(decide("bandcamp-hand-forwarded")).toMatchObject({ ok: true, tab: "bandcamp", address: "tarik@radiomilwaukee.org" });
+    expect(decide("cosign-forwarded")).toMatchObject({ ok: true, tab: "cosign" });
+  });
+});
+
+describe("readVerdict: AgentMail's authentication_results and labels, validated", () => {
+  test("the live shape", () => {
+    expect(readVerdict({ authentication_results: { spf: "pass", dkim: "none", dmarc: "pass", dmarc_domain: "bandcamp.com" }, labels: ["received", "unread"] })).toEqual({
+      auth: { dmarc: "pass", dmarc_domain: "bandcamp.com" },
+      labels: ["received", "unread"],
+    });
+  });
+  test("unknown shapes are null, wrong-typed fields are dropped", () => {
+    expect(readVerdict({})).toEqual({ auth: null, labels: null });
+    expect(readVerdict(null)).toEqual({ auth: null, labels: null });
+    expect(readVerdict("x")).toEqual({ auth: null, labels: null });
+    expect(readVerdict({ authentication_results: "dmarc=pass", labels: "received" })).toEqual({ auth: null, labels: null });
+    expect(readVerdict({ authentication_results: ["pass"], labels: [1, "spam"] })).toEqual({ auth: null, labels: null });
+    expect(readVerdict({ authentication_results: { dmarc: true, dmarc_domain: 7 }, labels: [] })).toEqual({ auth: {}, labels: [] });
+  });
+  test("a long field is cut, so a hostile value costs nothing", () => {
+    const v = readVerdict({ authentication_results: { dmarc: "p".repeat(100_000), dmarc_domain: "d".repeat(100_000) }, labels: Array(10_000).fill("x") });
+    expect(v.auth?.dmarc?.length).toBeLessThanOrEqual(255);
+    expect(v.auth?.dmarc_domain?.length).toBeLessThanOrEqual(255);
+    expect(v.labels?.length).toBeLessThanOrEqual(100);
   });
 });
 
@@ -204,7 +237,7 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
   test("cleanMail body and subject hold no http, www. or @, while sender.address is kept", () => {
     for (const name of ["cosign-forwarded", "cosign-injection", "bandcamp-label", "bandcamp-artist", "bandcamp-hand-forwarded"]) {
       const m = inbound(name);
-      const d = senderDecision(m, ALLOW, ID);
+      const d = senderDecision(m, ALLOW, readVerdict(mailFixture(name)));
       if (!d.ok) throw new Error(d.reason);
       const c = cleanMail(m, d);
       for (const bad of ["http", "www.", "@"]) {
@@ -227,14 +260,14 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
     expect(bc.bandcampPages).toEqual(["https://palesignal.bandcamp.com/album/glass-weather"]);
   });
   test("cleanMail merges subject links into links and Bandcamp pages", () => {
-    const m: InboundMail = { messageId: "x", from: "tarik@radiomilwaukee.org", subject: "Fwd: listen https://artist.bandcamp.com/album/x", text: "hi", hrefs: [], headers: {}, attachmentCount: 0, bodyMissing: false };
+    const m: InboundMail = { messageId: "x", from: "tarik@radiomilwaukee.org", subject: "Fwd: listen https://artist.bandcamp.com/album/x", text: "hi", hrefs: [], attachmentCount: 0, bodyMissing: false };
     const c = cleanMail(m, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" });
     expect(c.subject).toBe("Fwd: listen [link]");
     expect(c.links).toEqual(["https://artist.bandcamp.com/album/x"]);
     expect(c.bandcampPages).toEqual(["https://artist.bandcamp.com/album/x"]);
   });
   test("cleanMail caps the body", () => {
-    const m: InboundMail = { messageId: "x", from: "tarik@radiomilwaukee.org", subject: "s", text: "a ".repeat(30_000), hrefs: [], headers: {}, attachmentCount: 0, bodyMissing: false };
+    const m: InboundMail = { messageId: "x", from: "tarik@radiomilwaukee.org", subject: "s", text: "a ".repeat(30_000), hrefs: [], attachmentCount: 0, bodyMissing: false };
     expect(cleanMail(m, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" }).body.length).toBeLessThanOrEqual(MAX_STORED_CHARS);
   });
   test.each([
@@ -642,8 +675,8 @@ describe("no catastrophic regex time on hostile input", () => {
   fast("htmlToText: unclosed comments x 50k", () => htmlToText("<!--".repeat(50_000)));
   fast("htmlToText: < x 200k", () => htmlToText("<".repeat(200_000)));
   fast("htmlToText: unclosed <p x 100k", () => htmlToText("<p ".repeat(100_000)));
-  fast("senderDecision: a 200k From with quotes and an Authentication-Results full of (", () =>
-    senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "", headers: { "Authentication-Results": `${ID}; dkim=pass ${"(".repeat(200_000)}` } }, ALLOW, ID));
+  fast("senderDecision: a 200k From with quotes", () =>
+    senderDecision({ from: `${'"'.repeat(100_000)}x <a@b.example>`, text: "" }, ["a@b.example"], PASS("b.example")));
   fast("readBandcampEmbed: unclosed <meta x 100k", () => readBandcampEmbed("<meta".repeat(100_000)));
   fast("parseBandcampEmail: one 20k line of template words", () => parseBandcampEmail("s", "a just released ".repeat(1_300)));
   fast("cleanMail: a 1.4 MB body and subject", () =>
@@ -688,7 +721,7 @@ describe("hosts and addresses that radar.received would refuse are dropped in co
   });
   test("an address over 254 characters is not an address (direct and forwarded senders)", () => {
     const long = `${"a".repeat(290)}@label.example`;
-    expect(senderDecision({ from: `X <${long}>`, text: "", headers: {} }, [long], ID)).toEqual({ ok: false, reason: "Sender not on the list" });
+    expect(senderDecision({ from: `X <${long}>`, text: "" }, [long], PASS("x.example"))).toEqual({ ok: false, reason: "Sender not on the list" });
     const fwd = `---------- Forwarded message ---------\nFrom: Press <${long}>\nSubject: hi\n\nHello there`;
     const c = cleanMail({ ...inbound("cosign-forwarded"), text: fwd }, ok);
     expect(c.sender?.address).toBeUndefined();

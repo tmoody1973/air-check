@@ -3,10 +3,10 @@ import { getFunctionName, type FunctionReference } from "convex/server";
 import { Webhook } from "svix";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Fixtures are signed here with a test secret. fetch is a spy and Convex is a fake that records calls and keeps one row
-// per message id, the way radar.received does.
+// Fixtures are signed here with a test secret. fetch is a spy that plays AgentMail's API (it serves each posted message,
+// with its verdict, unless a test serves another) and Convex is a fake that records calls and keeps one row per message
+// id, the way radar.received does.
 const SECRET = `whsec_${Buffer.from("test-secret-not-real-0123456789").toString("base64")}`;
-const AUTHSERV = "mx.agentmail.invalid"; // the authserv-id the Task 1 fixtures use
 
 type Call = { fn: string; args: Record<string, unknown> };
 const convex = vi.hoisted(() => ({ calls: [] as { fn: unknown; args: Record<string, unknown> }[], rows: new Map<string, unknown>() }));
@@ -29,19 +29,27 @@ vi.mock("convex/nextjs", () => ({
 const calls = (): Call[] => convex.calls.map((c) => ({ fn: getFunctionName(c.fn as FunctionReference<"mutation">), args: c.args }));
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../../../../../../../fixtures/email/${name}`, import.meta.url), "utf8"));
 
-const fetchSpy = vi.fn(async () => new Response("{}", { status: 500 }));
+const API = "https://api.agentmail.to/v0/inboxes/rhythmlab%40agentmail.to/messages/";
+const served = new Map<string, unknown>();
+const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+  const u = String(url);
+  const m = u.startsWith(API) ? served.get(decodeURIComponent(u.slice(API.length))) : undefined;
+  return m ? new Response(JSON.stringify(m), { status: 200 }) : new Response("{}", { status: 404 });
+});
+/** The fixture as AgentMail's API serves it, with another verdict. */
+const serve = (m: { message_id: string }, over: Record<string, unknown> = {}) => void served.set(m.message_id, { ...m, ...over });
 const logs: string[] = [];
 
 beforeEach(() => {
   convex.calls.length = 0;
   convex.rows.clear();
+  served.clear();
   fetchSpy.mockClear();
   vi.stubGlobal("fetch", fetchSpy);
   vi.stubEnv("AGENTMAIL_WEBHOOK_SECRET", SECRET);
   vi.stubEnv("AGENTMAIL_API_KEY", "am_test_key");
   vi.stubEnv("INBOX_TOKEN", "inbox-token-for-tests-0123456789abcdef");
   vi.stubEnv("RADAR_SENDERS", "tarik@radiomilwaukee.org, noreply@bandcamp.com");
-  vi.stubEnv("RADAR_AUTHSERV_ID", AUTHSERV);
   logs.length = 0;
   for (const m of ["log", "info", "warn", "error"] as const) {
     vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void logs.push(a.map(String).join(" ")));
@@ -55,8 +63,10 @@ afterEach(() => {
 
 const INBOX = "rhythmlab@agentmail.to";
 // Every delivery names its inbox; the fixtures are messages only, so the radar's inbox is added unless a test sets one.
-const event = (message: Record<string, unknown>, event_type = "message.received") =>
-  JSON.stringify({ event_type, message: { inbox_id: INBOX, ...message } });
+const event = (message: Record<string, unknown>, event_type = "message.received") => {
+  if (typeof message.message_id === "string" && !served.has(message.message_id)) serve(message as { message_id: string });
+  return JSON.stringify({ event_type, message: { inbox_id: INBOX, ...message } });
+};
 
 function signed(body: string, opts: { at?: Date; id?: string; secret?: string } = {}) {
   const id = opts.id ?? "msg_test_1";
@@ -161,24 +171,54 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     expect(calls()).toHaveLength(1);
   });
 
-  it("an allowlisted From whose DKIM failed → stored ignored with the reason and no body", async () => {
-    const m = fixture("cosign-forwarded.json");
-    m.headers["Authentication-Results"] = m.headers["Authentication-Results"].replace("dkim=pass", "dkim=fail");
-    const res = await post(event(m));
-    expect(res.status).toBe(200);
+  it("R12: an allowlisted From AgentMail's API does not confirm → stored ignored, even when the payload claims a pass", async () => {
+    const m = fixture("cosign-forwarded.json"); // the payload carries a passing authentication_results
+    const refusals: Record<string, unknown>[] = [
+      { authentication_results: { dmarc: "fail", dmarc_domain: "radiomilwaukee.org" } },
+      { authentication_results: { dmarc: "pass", dmarc_domain: "attacker.com" } },
+      { authentication_results: { dmarc: "pass", dmarc_domain: "org" } },
+      { labels: ["received", "unauthenticated"] },
+      { authentication_results: undefined },
+    ];
+    for (const [i, over] of refusals.entries()) {
+      const id = `<r12-${i}@test.invalid>`;
+      serve({ ...m, message_id: id }, over);
+      expect((await post(event({ ...m, message_id: id }))).status).toBe(200);
+    }
     const c = calls();
-    expect(c).toHaveLength(1);
-    expect(c[0]!.fn).toBe("radar:received");
-    expect(c[0]!.args.mail).toBeNull();
-    expect(c[0]!.args.ignoredReason).toBe("Sender's signature (DKIM) did not pass");
-    expect(c[0]!.args.subject).not.toMatch(/:\/\/|@/);
+    expect(c).toHaveLength(refusals.length);
+    for (const x of c) {
+      expect(x.fn).toBe("radar:received");
+      expect(x.args.mail).toBeNull();
+      expect(x.args.ignoredReason).toBe("AgentMail could not confirm the sender");
+      expect(x.args.subject).not.toMatch(/:\/\/|@/);
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(refusals.length);
     expect(logs).toContain("radar step=received fresh=true state=ignored");
   });
 
-  it("RADAR_AUTHSERV_ID unset → every sender ignored as not set up", async () => {
-    vi.stubEnv("RADAR_AUTHSERV_ID", "");
+  it("R12: the verdict comes from AgentMail's API, not the payload: a payload with none is kept when the API passes it", async () => {
+    const { authentication_results: _a, labels: _l, ...bare } = fixture("cosign-forwarded.json");
+    serve(bare, { authentication_results: fixture("cosign-forwarded.json").authentication_results, labels: ["received"] });
+    expect((await post(event(bare))).status).toBe(200);
+    expect(calls()[0]!.args.mail).not.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("R12: an allowlisted sender → AgentMail is always asked; its failure → 503, nothing written", async () => {
+    const m = fixture("cosign-forwarded.json");
+    served.set(m.message_id, undefined); // the API answers 404
+    expect((await post(event(m))).status).toBe(503);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(convex.calls).toHaveLength(0);
+    expect(logs).toEqual(["radar step=get-message ok=false"]);
+  });
+
+  it("RADAR_SENDERS unset → every sender ignored as not on the list, and AgentMail is never asked", async () => {
+    vi.stubEnv("RADAR_SENDERS", "");
     expect((await post(event(fixture("cosign-forwarded.json")))).status).toBe(200);
-    expect(calls()[0]!.args).toMatchObject({ mail: null, ignoredReason: "Air Check's sender check is not set up" });
+    expect(calls()[0]!.args).toMatchObject({ mail: null, ignoredReason: "Sender not on the list" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("a stranger's subject with links and addresses is cleaned before it is stored as ignored", async () => {
@@ -187,6 +227,14 @@ describe("POST /api/agentmail/inbound: spoofing (Review Focus 5)", () => {
     const c = calls()[0]!;
     expect(c.args).toMatchObject({ mail: null, ignoredReason: "Sender not on the list" });
     expect(c.args.subject).not.toMatch(/:\/\/|@|evil\.example/);
+    expect(fetchSpy).not.toHaveBeenCalled(); // a stranger costs no AgentMail call
+  });
+
+  it("a stranger whose body was left out is stored ignored without reading it", async () => {
+    const { text: _t, html: _h, ...bare } = fixture("cosign-forwarded.json");
+    expect((await post(event({ ...bare, from_: "Someone <x@evil.example>" }))).status).toBe(200);
+    expect(calls()[0]!.args).toMatchObject({ mail: null, ignoredReason: "Sender not on the list" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -227,9 +275,10 @@ describe("delivery (Review Focus 4)", () => {
 });
 
 describe("links (Review Focus 2)", () => {
-  it("7 links, one a Bandcamp album page: nothing fetched, nothing link-shaped stored", async () => {
+  it("7 links, one a Bandcamp album page: no link fetched (only AgentMail's API), nothing link-shaped stored", async () => {
     expect((await post(event(fixture("cosign-forwarded.json")))).status).toBe(200);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String((fetchSpy.mock.calls[0] as unknown[])[0])).toMatch(new RegExp(`^${API.replace(/[.?]/g, "\\$&")}`));
     const c = calls();
     expect(c).toHaveLength(1);
     const mail = c[0]!.args.mail as { body: string; subject: string; links: string[]; bandcampPages: string[]; tab: string };
@@ -268,8 +317,8 @@ describe("body over 1 MB (AgentMail leaves it out)", () => {
     return m;
   };
 
-  it("bodyMissing → one getMessage, then stored", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(fixture("cosign-forwarded.json")), { status: 200 }));
+  it("bodyMissing → one getMessage (body and verdict), then stored", async () => {
+    serve(fixture("cosign-forwarded.json"));
     expect((await post(event(bare()))).status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String((fetchSpy.mock.calls[0] as unknown[])[0])).toMatch(/\/inboxes\/rhythmlab%40agentmail\.to\/messages\//);
@@ -296,10 +345,12 @@ describe("only one Convex function", () => {
     }
   });
 
-  it("the route source names no other Convex function and no model, send or attachment call", () => {
-    const src = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
-    expect([...src.matchAll(/\bapi\.[\w.]+/g)].map((m) => m[0])).toEqual(["api.radar.received"]);
-    expect(src).not.toMatch(/fetchQuery|fetchAction|after\(|attachments|messages\/send|tokenfactory|openai|anthropic/i);
+  it("the route and its handler name no other Convex function and no model, send or attachment call", () => {
+    const route = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+    const handler = readFileSync(new URL("../../../../lib/radarInbound.ts", import.meta.url), "utf8");
+    expect([...route.matchAll(/\bapi\.[\w.]+/g)].map((m) => m[0])).toEqual(["api.radar.received"]);
+    expect([...handler.matchAll(/\bapi\.[\w.]+/g)]).toEqual([]);
+    for (const src of [route, handler]) expect(src).not.toMatch(/fetchQuery|fetchAction|after\(|attachments|messages\/send|tokenfactory|openai|anthropic/i);
   });
 
   it("Convex failing → 503 so Svix redelivers, with a bare log line", async () => {
