@@ -49,10 +49,12 @@ export type PlayerProps = {
   embedQueuedAt?: number;
   demo: boolean;
   onRetry: () => Promise<unknown>;
+  /** The listening queue's Play button already asked: show the player straight away, no second tap. */
+  autoPlay?: boolean;
 };
 
-export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry }: PlayerProps) {
-  const [playing, setPlaying] = useState(false);
+export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry, autoPlay = false }: PlayerProps) {
+  const [playing, setPlaying] = useState(autoPlay);
   const [retry, setRetry] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
   if (demo)
