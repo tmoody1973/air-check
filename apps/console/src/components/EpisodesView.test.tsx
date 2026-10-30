@@ -386,6 +386,19 @@ describe("EpisodesView research (Plan 7)", () => {
     expect(within(rowOf("2026-01-23")).queryByRole("button", { name: "Show notes" })).not.toBeInTheDocument();
   });
 
+  it("Oct 30: Draft now on a show waiting to draft starts it and opens its live run; not while drafting or with a package", async () => {
+    const draftNow = vi.fn(async () => ({ runId: "run-now1" }));
+    const openRun = vi.fn();
+    setup(
+      [ep("2026-10-23"), ep("2026-10-16", { openRun: true, openRunId: "run-old" } as Partial<EpisodeRow>), ep("2026-10-09", { packageStatus: "awaiting_review" } as Partial<EpisodeRow>), ep("2026-10-02", { status: "missing-audio", audio: { status: "none" } } as Partial<EpisodeRow>)],
+      { today: "2026-10-30", acts: actions({ draftNow, openRun }) },
+    );
+    await act(async () => fireEvent.click(within(rowOf("2026-10-23")).getByRole("button", { name: "Draft now" })));
+    expect(draftNow).toHaveBeenCalledWith({ showDate: "2026-10-23" });
+    expect(openRun).toHaveBeenCalledWith("run-now1");
+    for (const d of ["2026-10-16", "2026-10-09", "2026-10-02"]) expect(within(rowOf(d)).queryByRole("button", { name: "Draft now" })).not.toBeInTheDocument();
+  });
+
   it("a refused start says why in the row", async () => {
     const startShowNotes = vi.fn(async () => {
       throw new ConvexError({ code: "BAD_INPUT", message: "Show notes for 2026-01-09 are already being written." });

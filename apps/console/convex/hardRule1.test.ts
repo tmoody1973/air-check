@@ -60,7 +60,7 @@ test("the public writes are exactly the allowlist", async () => {
       // Plan 8: the console's inbound route (INBOX_TOKEN) stores a cleaned email; the ingest worker (INGEST_TOKEN) records
       // what it read and a Bandcamp player id; a signed-in human moves records. None can reach a package (Hard Rule 1).
       "radar.received", "radar.record", "radar.embedResult",
-      "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed", "radar.pastePlayer",
+      "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed", "radar.pastePlayer", "draftNow.draftNow",
       // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
       "radar.setFavorite",
       // Plan 7: a signed-in human (the demo actor in the demo workspace) starts and steers research. Research writes only
@@ -477,7 +477,7 @@ test("reopening an audio failure goes to preparing_audio, never approved, and ca
 // Plan 6: the ingest service and the Episodes page sit beside the publish path and must never reach it (source pins).
 // requestDraft only queues the same draft-package run the Tracklist page does: the agent drafts, Tarik approves.
 test("ingest and episodes code never reach the gate, decide, publish or description updates, and only read packages", () => {
-  for (const name of ["ingest", "episodes"]) {
+  for (const name of ["ingest", "episodes", "draftNow"]) {
     const text = src(name);
     for (const banned of ["decide", "claimForPublish", "recordResult", "attachAudio", "unclaim", "reopen", "confirmPosted", "gateFor", "ApprovalGate", "convexPackageStore", "compareAndSwap", "descriptionUpdates", "proposeUpdate", "scheduler"])
       expect(text, `${name}.ts mentions ${banned}`).not.toMatch(new RegExp(`\\b${banned}\\b`));
@@ -499,11 +499,19 @@ test("every ingest function checks INGEST_TOKEN first", () => {
   expect(text).not.toMatch(/\b(?:internalMutation|internalQuery|action|httpAction)\b/);
 });
 
-test("ingest.requestDraft writes only a draft-package run, through tracklist's queueDraft, in the real workspace", () => {
+test("ingest.requestDraft and Draft now write only a draft-package run, through tracklist's queueDraft, in the real workspace", () => {
+  // Oct 30: both go through draftNow.ts's draftIfReady; the ingest service keeps the pace, Tarik's Draft now skips it.
   const fn = fnBody(src("ingest"), "export const requestDraft = mutation(");
-  expect(fn.match(/queueDraft\(/g)).toEqual(["queueDraft("]);
-  expect(fn).toContain(`queueDraft(ctx, "real", `);
-  expect(fn).not.toMatch(/\.(?:insert|patch|replace|delete)\(/);
+  expect(fn).toContain("draftIfReady(ctx, showDate, { pace: true })");
+  expect(fn).not.toMatch(/queueDraft\(|\.(?:insert|patch|replace|delete)\(/);
+  const ready = fnBody(src("draftNow"), "export async function draftIfReady(");
+  expect(ready.match(/queueDraft\(/g)).toEqual(["queueDraft("]);
+  expect(ready).toContain(`queueDraft(ctx, "real", `);
+  expect(ready).not.toMatch(/\.(?:insert|patch|replace|delete)\(/);
+  const now = fnBody(src("draftNow"), "export const draftNow = mutation(");
+  expect(now).toMatch(/await requireRealHuman\(ctx\);/);
+  expect(now).toContain("draftIfReady(ctx, showDate, { pace: false })");
+  expect(now).not.toMatch(/\.(?:insert|patch|replace|delete)\(/);
   const helper = src("tracklist").slice(src("tracklist").indexOf("export function queueDraft("));
   expect(helper.slice(0, helper.indexOf("\n}\n"))).toMatch(/enqueueRun\(ctx, \{[^}]*kind: "draft-package"/);
 });

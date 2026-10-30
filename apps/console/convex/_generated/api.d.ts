@@ -17,6 +17,7 @@ import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as demoLimits from "../demoLimits.js";
 import type * as descriptionUpdates from "../descriptionUpdates.js";
+import type * as draftNow from "../draftNow.js";
 import type * as enqueue from "../enqueue.js";
 import type * as episodes from "../episodes.js";
 import type * as gate from "../gate.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   cutoff: typeof cutoff;
   demoLimits: typeof demoLimits;
   descriptionUpdates: typeof descriptionUpdates;
+  draftNow: typeof draftNow;
   enqueue: typeof enqueue;
   episodes: typeof episodes;
   gate: typeof gate;

@@ -62,6 +62,9 @@ export type EpisodeActions = {
   startShowNotes?: (a: { showDate: string }) => Promise<{ jobId: string }>;
   startVerify?: (a: { showDate: string }) => Promise<{ jobId: string }>;
   openResearch?: (jobId: string) => void;
+  /** Oct 30: Draft now on a show waiting to draft (skips the oldest-first order and the pace of 3), then its live run. */
+  draftNow?: (a: { showDate: string }) => Promise<{ runId: string }>;
+  openRun?: (runId: string) => void;
 };
 
 const SOURCE_SAID = { chat: "(you said, in Chat)", episodes: "(marked here)", detected: "(confirmed)" } as const;
@@ -226,6 +229,26 @@ export function AudioAsk({ showDate }: { showDate: string }) {
         </p>
       </details>
     </div>
+  );
+}
+
+/** Oct 30 (Tarik): Draft now on a show waiting to draft: the agent starts on it right away, and its live run opens. */
+export function DraftNowButton({ e, ctx, className }: { e: EpisodeRow; ctx: RowCtx; className: string }) {
+  const { busy, error, save } = useSave(ctx.announce);
+  const { draftNow, openRun } = ctx.actions;
+  if (!draftNow || !openRun || e.status !== "ready-to-draft" || e.openRun || e.packageStatus !== "none") return null;
+  return (
+    <>
+      <button
+        type="button"
+        className={className}
+        disabled={busy}
+        onClick={() => save(async () => openRun((await draftNow({ showDate: e.showDate })).runId), `Drafting ${showDateLabel(e.showDate)} now`)}
+      >
+        Draft now
+      </button>
+      {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
+    </>
   );
 }
 
