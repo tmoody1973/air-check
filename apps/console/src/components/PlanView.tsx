@@ -44,7 +44,7 @@ export function DeepDiveForm({ start, onStarted, authReady = true }: { start: St
   return (
     <section aria-labelledby="dd-h" className="rounded-card border border-line bg-surface p-5">
       <h2 id="dd-h" className="font-serif text-[22px] leading-tight">Deep dive</h2>
-      <p className="mt-1 text-sm text-ink-soft">A sourced brief on an artist, label or release: 5 to 8 facts, each with its sources. Never a script.</p>
+      <p className="mt-1 text-sm text-ink-soft">A sourced article on an artist, label or release, like your own Wikipedia page: a fact box, sections in prose and numbered references. Never a script.</p>
       <form onSubmit={submit} className="mt-4 flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-[10rem_1fr]">
           <div className="flex flex-col gap-2">
