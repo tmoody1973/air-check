@@ -1,10 +1,17 @@
 import type { ActiveEmbargo } from "../radar/embargo";
 
 export type ResearchKind = "show-notes" | "verify" | "deep-dive";
-/** Oct 29: chart, story, song, samples, video and fun-fact match the labeled bullets of Tarik's Paper notes. */
+/**
+ * Oct 29: chart, story, song, samples, video and fun-fact match the labeled bullets of Tarik's Paper notes.
+ * Oct 30 (decision 023): lead, origins, career, sound, records and legacy are a deep dive's article sections; infobox is
+ * one row of its infobox (text = an INFOBOX_FIELDS name, value = the value).
+ */
 export type ClaimKind =
   | "release" | "release-date" | "label" | "credit" | "track-number" | "length" | "bio" | "detail" | "thread" | "connection"
-  | "chart" | "story" | "song" | "samples" | "video" | "fun-fact";
+  | "chart" | "story" | "song" | "samples" | "video" | "fun-fact"
+  | "lead" | "origins" | "career" | "sound" | "records" | "legacy" | "infobox";
+/** The infobox rows a brief may hold: an artist's, a label's or a release's. */
+export const INFOBOX_FIELDS = ["Origin", "Years active", "Genres", "Labels", "Members", "Founded", "Founders", "Released", "Label", "Producer"] as const;
 /** The two-source rule: these need two publishers or one primary, non-aggregator source. */
 export const CRITICAL_KINDS: readonly ClaimKind[] = ["release-date", "label", "credit"];
 /** The source's own text must show the value. */

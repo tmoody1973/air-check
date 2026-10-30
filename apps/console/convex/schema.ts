@@ -93,6 +93,8 @@ export const claimKindV = v.union(
   v.literal("release"), v.literal("release-date"), v.literal("label"), v.literal("credit"), v.literal("track-number"), v.literal("length"),
   v.literal("bio"), v.literal("detail"), v.literal("thread"), v.literal("connection"),
   v.literal("chart"), v.literal("story"), v.literal("song"), v.literal("samples"), v.literal("video"), v.literal("fun-fact"),
+  // Oct 30 (decision 023): a deep dive's article sections and infobox rows.
+  v.literal("lead"), v.literal("origins"), v.literal("career"), v.literal("sound"), v.literal("records"), v.literal("legacy"), v.literal("infobox"),
 );
 export const judgedClaimV = v.object({
   kind: claimKindV,

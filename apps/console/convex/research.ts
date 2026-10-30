@@ -6,7 +6,10 @@ import {
   deepDiveMarkdown,
   embargoedSearch,
   embargoMatches,
+  crateOnlySubject,
+  deepDiveQueries,
   firstSearchQuery,
+  INFOBOX_FIELDS,
   secondSearchQuery,
   isShowDate,
   type JudgedClaim,
@@ -656,7 +659,10 @@ function blockProblems(job: Job, slot: Slot, input: Submit): string[] {
   const unknown = new Set<string>();
   for (const [field, label] of [["claims", "Claim"], ["threads", "Thread"]] as const) {
     const list = input[field] ?? [];
-    if (list.length > LIMITS.claimsPerBlock) problems.push(`At most ${LIMITS.claimsPerBlock} ${field} in one block.`);
+    if (slot.block === "brief") {
+      if (list.length > LIMITS.briefClaims) problems.push(`At most ${LIMITS.briefClaims} claims in the brief.`);
+    } else if (list.length > LIMITS.claimsPerBlock) problems.push(`At most ${LIMITS.claimsPerBlock} ${field} in one block.`);
+    if (slot.block !== "brief" && list.some((c) => c.kind === "infobox")) problems.push("Only a deep dive's brief takes infobox rows.");
     list.forEach((c, i) => {
       check(c.text, "claim", `${label} ${i + 1}`);
       // I1: value and says are model text too; they reach the export and the claim's check text.
@@ -679,7 +685,14 @@ function blockProblems(job: Job, slot: Slot, input: Submit): string[] {
 function briefProblems(job: Job, claims: ClaimIn[]): string[] {
   const problems: string[] = [];
   const connects = claims.filter((c) => c.kind === "connection");
-  if (claims.length - connects.length > LIMITS.deepDiveFactsMax) problems.push(`A brief has at most ${LIMITS.deepDiveFactsMax} facts.`);
+  const infobox = claims.filter((c) => c.kind === "infobox");
+  // Decision 023: the brief is an article. Section facts (any other kind, old briefs' included), infobox rows, connections.
+  if (claims.length - connects.length - infobox.length > LIMITS.briefFactsMax) problems.push(`A brief has at most ${LIMITS.briefFactsMax} section facts.`);
+  if (infobox.length > LIMITS.infoboxMax) problems.push(`A brief has at most ${LIMITS.infoboxMax} infobox rows.`);
+  for (const c of infobox) {
+    if (!(INFOBOX_FIELDS as readonly string[]).includes(c.text)) problems.push(`An infobox row's text is one of: ${INFOBOX_FIELDS.join(", ")}.`);
+    if (!c.value?.trim()) problems.push("An infobox row needs a value.");
+  }
   if (connects.length > LIMITS.connectsMax) problems.push(`A brief has at most ${LIMITS.connectsMax} connections.`);
   for (const c of connects) {
     const t = (job.tracks ?? []).find((x) => x.key === c.value);
@@ -772,6 +785,8 @@ export const countSearch = internalMutation({
  * bridge runs in code, each with its queries (core firstSearchQuery, and since Oct 30 secondSearchQuery). Only keys still to research (a Regenerate: its one
  * block); never a closing track (Hard Rule 4). An embargoed track is listed by key only, never searched (R2, R8). It
  * reads only: each search is still counted by countSearch before it runs.
+ * Oct 30 (decision 023): a deep dive's brief, while still to research, is one entry with core deepDiveQueries' five
+ * searches (query, query2, extra); a subject kept off web search (crateOnlySubject, as the prompt says) is key only.
  */
 export const prefetchPlan = internalQuery({
   args: { workspace: workspaceV, jobId: v.string() },
@@ -779,12 +794,19 @@ export const prefetchPlan = internalQuery({
     const job = await jobById(ctx, jobId);
     if (!job || job.workspace !== workspace) return { ok: false as const, status: 404 as const, error: "" };
     const no = (error: string) => ({ ok: false as const, status: 409 as const, error });
-    if (job.kind !== "show-notes") return no("Only show notes have first searches; use source_search.");
+    // The bridge reads "Only show notes" as "this job has none"; keep the sentence's start.
+    if (job.kind === "verify") return no("Only show notes and deep dives have first searches; use source_search.");
     if (job.status === "taken-over") return no("Tarik took over; stop now.");
     if (!ACTIVE.includes(job.status)) return no("This research job is not running.");
     const keys = new Set(job.scope ?? remainingKeys(job, await liveEntries(ctx, jobId)));
     const active = await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()));
-    const tracks: { key: string; query: string; query2: string }[] = [];
+    if (job.kind === "deep-dive") {
+      if (!keys.has("brief") || !job.subject) return { ok: true as const, tracks: [], embargoed: [] };
+      const q = deepDiveQueries(job.subject);
+      if (crateOnlySubject(job.subject.name, active) || q.some((x) => embargoedSearch(x, active))) return { ok: true as const, tracks: [], embargoed: ["brief"] };
+      return { ok: true as const, tracks: [{ key: "brief", query: q[0]!, query2: q[1]!, extra: q.slice(2) }], embargoed: [] };
+    }
+    const tracks: { key: string; query: string; query2: string; extra?: string[] }[] = [];
     const embargoed: string[] = [];
     for (const t of job.tracks ?? []) {
       if (t.closing || !keys.has(t.key)) continue;

@@ -76,11 +76,14 @@ export function verifyView(over: Partial<ResearchView> = {}): ResearchView {
 }
 
 export function deepDiveView(facts: number, over: Partial<ResearchView> = {}): ResearchView {
+  // Oct 30 (decision 023): an article. Facts cycle through the sections; the first is the lead.
+  const kinds = ["lead", "origins", "career", "sound", "records", "legacy"] as const;
   const claims: JudgedClaim[] = [
-    ...Array.from({ length: facts }, (_, i) => claim({ text: `Fact ${i + 1} about [Artist A].`, sources: [src(`f${i}`)] })),
+    claim({ kind: "infobox", text: "Origin", value: "[City]", sources: [src("o1")] }),
+    ...Array.from({ length: facts }, (_, i) => claim({ kind: kinds[i % kinds.length], text: `Fact ${i + 1} about [Artist A].`, sources: [src(`f${i}`)] })),
     claim({ kind: "connection", text: "Shares a producer with this track.", value: "H1.3", sources: [src("c1")] }),
     claim({ kind: "connection", text: "Never shown: a closing track.", value: "H1.4", sources: [src("c2")] }),
-    claim({ kind: "credit", text: "Played bass on [Album X].", status: "could-not-verify", sources: [src("x1")], check: "Only one source: example.org" }),
+    claim({ kind: "records", text: "Played bass on [Album X].", status: "could-not-verify", sources: [src("x1")], check: "Only one source: example.org" }),
   ];
   return {
     job: job({ kind: "deep-dive", status: "done", subject: { type: "artist", name: "[Artist A]" }, angles: false }),
