@@ -525,6 +525,28 @@ describe("pastePlayer (Oct 30: Bandcamp challenges the worker's page reads)", ()
     await t.mutation(api.radar.embedResult, { token: INGEST, releaseId, pageUrl: PAGE, result: { failed: "challenged" } });
     expect((await releases(t))[0]).toMatchObject({ embed: { kind: "album", id: "3847473100" }, embedState: "ready" });
   });
+  test("from the bookmarklet: the cover and the page are kept when they are Bandcamp's; anything else is ignored", async () => {
+    const t = convexTest(schema, modules);
+    const releaseId = await savedRelease(t, "m1", mail());
+    const art = "https://f4.bcbits.com/img/a1234567890_5.jpg";
+    await t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE, art, page: "https://deepheads.bandcamp.com/album/reset" });
+    expect((await releases(t))[0]).toMatchObject({ embedState: "ready", art, bandcampPage: "https://deepheads.bandcamp.com/album/reset" });
+    const other = await savedRelease(t, "m2", mail(), { artist: "Other", title: "Thing" });
+    await t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId: other, pasted: CODE, art: "https://evil.example/a.jpg", page: "https://evil.example/album/x" });
+    const row = (await releases(t)).find((r) => r._id === other)!;
+    expect(row).toMatchObject({ embedState: "ready" });
+    expect(row).not.toHaveProperty("art");
+    expect(row).not.toHaveProperty("bandcampPage");
+  });
+  test("attachCandidates: real releases whose title words match, both tabs; nothing for the demo", async () => {
+    const t = convexTest(schema, modules);
+    await savedRelease(t, "m1", mail());
+    const first = (await releases(t))[0]!;
+    const found = await t.withIdentity(human).query(api.radar.attachCandidates, { title: first.title });
+    expect(found.map((r) => r._id)).toEqual([first._id]);
+    expect(await t.withIdentity(human).query(api.radar.attachCandidates, { title: "zzzz nothing" })).toEqual([]);
+    expect(await t.withIdentity(demo).query(api.radar.attachCandidates, { title: first.title })).toEqual([]);
+  });
   test("a release with no Bandcamp link in its email can be given one too", async () => {
     const t = convexTest(schema, modules);
     const releaseId = await savedRelease(t, "m1", mail());

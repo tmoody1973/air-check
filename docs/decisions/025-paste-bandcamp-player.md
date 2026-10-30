@@ -15,4 +15,6 @@
 
 **How we'll know if this was right.** The ingest log's `bandcamp-embed` lines: if `code=challenged` stays at most of them for a week, the manual step is the normal path and is worth making faster; if they return to `ok=true`, the paste box becomes a rare fallback.
 
+**Addendum, Oct 30.** Tarik also wanted covers, which the embed code doesn't carry. A "Send to Air Check" bookmarklet now runs in his browser on a Bandcamp page he has open, reads the player URL, cover, title and address from the page's meta tags, and opens `/release-radar/attach` with them in the URL hash (never sent to a server). He picks the matching release and clicks Attach; `radar.pastePlayer` checks each field again (player id digits, cover only from `*.bcbits.com/img/`, page only a Bandcamp album or track page). Air Check still never fetches Bandcamp. TinyFish (cloud browsers) was considered and refused: it would get around the bot check from someone else's servers. Subsonic (Bandcamp's official collection service) only covers albums Tarik has bought; planned separately.
+
 **What actually happened.**
