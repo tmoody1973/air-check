@@ -323,6 +323,8 @@ export default defineSchema({
     playContext: v.optional(v.array(v.object({ artist: v.string(), station: v.union(v.literal("88nine"), v.literal("hyfin")), lastPlayed: v.optional(v.string()) }))),
     sessionKey: v.optional(v.string()),
     scope: v.optional(v.array(v.string())), // Regenerate: the one key this request covers, so it queues no continuation
+    // Regenerate confirmed over an edit that existed then: the agent's save may replace that edit. A newer edit drops the key.
+    overwriteKeys: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
     finishedAt: v.optional(v.number()),

@@ -405,11 +405,11 @@ export const takeOver = mutation({
   },
 });
 
-async function requeue(ctx: MutationCtx, job: Job, keys: string[], scope?: string[]): Promise<{ runId: string }> {
+async function requeue(ctx: MutationCtx, job: Job, keys: string[], scope?: string[], overwriteKeys?: string[]): Promise<{ runId: string }> {
   // R12: a demo Resume or Regenerate counts against the visitor who owns the job (ownJob checked it is the caller).
   const runId = await queueRun(ctx, job, keys, job.sessionKey);
   if (!runId) throw refuse(PAUSED, "PAUSED");
-  await ctx.db.patch(job._id, { status: "queued", runIds: [...job.runIds, runId], continuations: 0, scope, finishedAt: undefined, updatedAt: Date.now() });
+  await ctx.db.patch(job._id, { status: "queued", runIds: [...job.runIds, runId], continuations: 0, scope, overwriteKeys, finishedAt: undefined, updatedAt: Date.now() });
   return { runId };
 }
 
@@ -431,7 +431,8 @@ export const resume = mutation({
 
 /**
  * One block again (job.scope = [key]: no continuation). A block Tarik edited is regenerated only when he says so, and
- * his edit is cleared only when the new block is saved (submitEntry), so a stopped Regenerate keeps it (M4).
+ * his edit is cleared only when the new block is saved (submitEntry), so a stopped Regenerate keeps it (M4). Only an edit
+ * that existed when he confirmed may be replaced (job.overwriteKeys); one he makes during the run is kept (setOwn).
  */
 export const regenerate = mutation({
   args: { jobId: v.string(), key: v.string(), overwriteEdit: v.boolean() },
@@ -439,8 +440,9 @@ export const regenerate = mutation({
     const job = await ownJob(ctx, jobId);
     refuseActive(job, "Wait for this job to finish, or take over first.");
     slotFor(job, key);
-    if ((await entryAt(ctx, jobId, key))?.edited && !overwriteEdit) throw refuse("This block has your edits. Regenerate anyway?", "HAS_EDITS");
-    return requeue(ctx, job, [key], [key]);
+    const edited = !!(await entryAt(ctx, jobId, key))?.edited;
+    if (edited && !overwriteEdit) throw refuse("This block has your edits. Regenerate anyway?", "HAS_EDITS");
+    return requeue(ctx, job, [key], [key], edited ? [key] : undefined);
   },
 });
 
@@ -453,6 +455,8 @@ async function setOwn(ctx: MutationCtx, jobId: string, key: string, fields: Part
   const updatedAt = Date.now();
   if (entry) await ctx.db.patch(entry._id, { ...fields, updatedAt });
   else await ctx.db.insert("researchEntries", { workspace: job.workspace, jobId, key, block: slot.block, claims: [], ...fields, updatedAt });
+  // A new edit is newer than any Regenerate confirmation: the agent's save may no longer replace it (I2).
+  if (fields.edited && job.overwriteKeys?.includes(key)) await ctx.db.patch(job._id, { overwriteKeys: job.overwriteKeys.filter((k) => k !== key) });
 }
 
 /** Tarik's text replaces the block in every view; empty text removes his edit. */
@@ -533,8 +537,11 @@ export const get = query({
     const run = await runById(ctx, job.runIds.at(-1));
     const steps = (run?.state as RunState | undefined)?.steps ?? [];
     const running = ACTIVE.includes(job.status);
-    // ponytail: a straight-line estimate from the job's pace so far; good enough for "about N minutes".
-    const secondsLeft = running && done > 0 && done < todo.length ? Math.round(((Date.now() - job.createdAt) / done) * (todo.length - done) / 1000) : undefined;
+    // ponytail: a straight-line estimate from this run's pace (blocks saved since it was queued); good enough for "about N
+    // minutes". A Resume a day later is not paced from the job's creation.
+    const runStart = run ? createdAtOf(run) : job.createdAt;
+    const doneNow = todo.filter((s) => (byKey.get(s.key)?.savedAt ?? -1) >= runStart).length;
+    const secondsLeft = running && doneNow > 0 && done < todo.length ? Math.round(((Date.now() - runStart) / doneNow) * (todo.length - done) / 1000) : undefined;
     const { _id, _creationTime, sessionKey, ...fields } = job;
     return {
       job: fields,
@@ -695,8 +702,8 @@ export const submitEntry = internalMutation({
     if (!slot) return no(400, [`${input.key} is not a key in this job.`]);
     if (slot.closing) return no(409, [closingSlot(slot)]);
     const existing = await entryAt(ctx, job.jobId, slot.key);
-    // A Regenerate Tarik confirmed over his edit (job.scope) may replace it; nothing else may.
-    if (existing?.edited && !job.scope?.includes(slot.key)) return no(409, [`${slot.key} was edited by Tarik; skip it.`]);
+    // A Regenerate Tarik confirmed over his edit (job.overwriteKeys) may replace it; nothing else may.
+    if (existing?.edited && !job.overwriteKeys?.includes(slot.key)) return no(409, [`${slot.key} was edited by Tarik; skip it.`]);
     const problems = blockProblems(job, slot, input);
     if (problems.length) return no(400, problems);
 

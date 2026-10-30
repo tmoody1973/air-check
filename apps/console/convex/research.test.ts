@@ -330,6 +330,27 @@ describe("Tarik's edits are kept", () => {
     expect(after.claims[0]!.text).toBe("Fresh fact.");
   });
 
+  test("I2: an edit made while a Regenerate runs survives the agent's save of that block", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const { jobId, runId } = await startNotes(t);
+    await finishDone(t, jobId, runId);
+    // Regenerate an un-edited block, then Tarik edits it while the run goes.
+    await as.mutation(api.research.regenerate, { jobId, key: "H1.1", overwriteEdit: false });
+    await as.mutation(api.research.editEntry, { jobId, key: "H1.1", text: "Written during the run." });
+    expect(await submit(t, { job: jobId, key: "H1.1", claims: [detail("Fresh fact.")], sources: SOURCES })).toEqual({
+      status: 409, data: { error: "H1.1 was edited by Tarik; skip it." },
+    });
+    expect((await entries(t, jobId)).find((x) => x.key === "H1.1")!.edited?.text).toBe("Written during the run.");
+    // Confirmed over an older edit, then a newer edit during the run: the newer one is kept too.
+    await as.mutation(api.research.takeOver, { jobId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    await as.mutation(api.research.regenerate, { jobId, key: "H1.1", overwriteEdit: true });
+    await as.mutation(api.research.editEntry, { jobId, key: "H1.1", text: "Second thoughts." });
+    expect((await submit(t, { job: jobId, key: "H1.1", claims: [detail("Fresh fact.")], sources: SOURCES })).status).toBe(409);
+    expect((await entries(t, jobId)).find((x) => x.key === "H1.1")!.edited?.text).toBe("Second thoughts.");
+  });
+
   test("supplied notes and private marks survive an agent resubmit", async () => {
     const t = convexTest(schema, modules);
     const as = t.withIdentity(human);
@@ -394,6 +415,23 @@ describe("continuations", () => {
     vi.stubEnv("DEMO_LIVE_RUNS_PER_DAY", "1");
     await finishRun(t, runId);
     expect((await job(t, jobId))!).toMatchObject({ status: "stopped", lastProblems: ["The demo's live limit for today is reached."], runIds: [runId] });
+  });
+});
+
+describe("progress estimate", () => {
+  test("secondsLeft is paced from the current run's start, not the job's creation", async () => {
+    const t = convexTest(schema, modules);
+    const as = t.withIdentity(human);
+    const { jobId } = await startNotes(t);
+    await submit(t, { job: jobId, key: "H1.1", claims: [detail()], sources: SOURCES });
+    await as.mutation(api.research.takeOver, { jobId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.setSystemTime(Date.now() + 86_400_000); // a day later
+    await as.mutation(api.research.resume, { jobId });
+    vi.setSystemTime(Date.now() + 60_000);
+    await submit(t, { job: jobId, key: "H1.2", claims: [detail()], sources: SOURCES });
+    // 7 blocks to research, 2 done, 1 of them in this run's first minute: about 5 minutes left.
+    expect((await as.query(api.research.get, { jobId }))!.secondsLeft).toBe(300);
   });
 });
 
