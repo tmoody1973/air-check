@@ -1,9 +1,10 @@
 // Synthetic show-notes view behind fixtures/show-notes-sample.md (Sample Honesty: placeholders and example.org only).
 import type { CitedSource, JudgedClaim, ShowNotesView } from "../../src/index";
 
-const src = (path: string, extra: Partial<CitedSource> = {}): CitedSource => ({
-  url: `https://example.org/${path}`,
-  host: "example.org",
+/** `host` varies the subdomain so the golden shows the short link names (www.example.org -> example). */
+const src = (path: string, extra: Partial<CitedSource> = {}, host = "www.example.org"): CitedSource => ({
+  url: `https://${host}/${path}`,
+  host,
   title: `[Page ${path}]`,
   via: "tavily",
   primary: false,
@@ -21,7 +22,8 @@ export const sampleView: ShowNotesView = {
     { key: "H1.2", hour: 1, position: 2, artist: "[Artist B]", title: "[Title B]", closing: false },
     { key: "H1.3", hour: 1, position: 3, artist: "[Artist C]", title: "[Title C]", closing: true },
     { key: "H2.1", hour: 2, position: 1, artist: "[Artist D]", title: "[Title D]", closing: false },
-    { key: "H2.2", hour: 2, position: 2, artist: "[Artist E]", title: "[Title E]", closing: true },
+    { key: "H2.2", hour: 2, position: 2, artist: "[Artist F]", title: "[Title F]", closing: false },
+    { key: "H2.3", hour: 2, position: 3, artist: "[Artist E]", title: "[Title E]", closing: true },
   ],
   embargoes: [
     { artist: "[Artist B]", title: "[Title B]", until: "2026-11-06" },
@@ -31,16 +33,21 @@ export const sampleView: ShowNotesView = {
     { key: "H1.intro", claims: [], intro: "The hour moves from [Artist A]'s new single into older label cuts." },
     {
       key: "H1.threads",
-      claims: [claim({ kind: "thread", text: "[Artist A] and [Artist B] both recorded at [Studio], and [Artist B] wrote [Title B] there.", status: "sourced", sources: [src("studio")] })],
+      claims: [claim({ kind: "thread", text: "[Artist A] and [Artist B] both recorded at [Studio], and [Artist B] wrote [Title B] there.", status: "sourced", sources: [src("studio", {}, "en.example.org")] })],
     },
     {
       key: "H1.1",
       claims: [
         claim({ kind: "release", text: "[Title A] is the lead single from [Album A].", value: "[Album A]", status: "sourced", sources: [src("a1", { primary: true })] }),
-        claim({ kind: "label", text: "[Title A] is on [Label A].", value: "[Label A]", status: "confirmed", sources: [src("a1", { primary: true }), src("a2")] }),
-        claim({ kind: "release-date", text: "[Title A] came out on 2026-10-16.", value: "2026-10-16", status: "confirmed", sources: [src("a1", { primary: true }), src("a2")] }),
-        claim({ kind: "detail", text: "[Artist A] co-produced the track with [Producer].", status: "sourced", sources: [src("a2")] }),
-        claim({ kind: "bio", text: "[Artist A] is a bassist from [City].", status: "sourced", sources: [src("a3")] }),
+        claim({ kind: "label", text: "It came out on [Label A].", value: "[Label A]", status: "confirmed", sources: [src("a1", { primary: true }), src("a2", {}, "news.example.org")] }),
+        claim({ kind: "release-date", text: "[Title A] came out on 2026-10-16.", value: "2026-10-16", status: "confirmed", sources: [src("a1", { primary: true }), src("a2", {}, "news.example.org")] }),
+        claim({ kind: "credit", text: "[Artist A] co-produced the track with [Producer].", value: "[Producer]", status: "could-not-verify", sources: [src("a1")], check: "Only one source: example.org" }),
+        claim({ kind: "chart", text: "[Title A] was a [Magazine] track of the week.", status: "could-not-verify", sources: [], check: "No source found." }),
+        claim({ kind: "bio", text: "[Artist A] is a bassist from [City].", status: "sourced", sources: [src("a3", {}, "en.example.org")] }),
+        claim({ kind: "story", text: "[Artist A] wrote it after a tour of [Country].", status: "sourced", sources: [src("a2", {}, "news.example.org")] }),
+        claim({ kind: "samples", text: "It samples [Artist G]'s [Title G].", status: "sourced", sources: [src("a4", {}, "samples.example.org")] }),
+        claim({ kind: "video", text: "The video was shot in one take in [City].", status: "sourced", sources: [src("a5", {}, "video.example.org")] }),
+        claim({ kind: "fun-fact", text: "The drums were recorded in a stairwell.", status: "sourced", sources: [src("a3", {}, "en.example.org")] }),
       ],
       angle: "What does [Producer] bring to the low end here?",
       suppliedNote: "[Label A]'s one-sheet calls it a late-night record.",
@@ -53,9 +60,11 @@ export const sampleView: ShowNotesView = {
           text: "[Title B] came out on 2026-10-10.",
           value: "2026-10-10",
           status: "conflict",
-          sources: [src("b1", { says: "2026-10-10" }), src("b2", { says: "2026-10-17" })],
-          check: "Sources disagree: 2026-10-10 (example.org) vs 2026-10-17 (example.org)",
+          sources: [src("b1", { says: "2026-10-10" }), src("b2", { says: "2026-10-17" }, "news.example.org")],
+          check: "Sources disagree: 2026-10-10 (www.example.org) vs 2026-10-17 (news.example.org)",
         }),
+        claim({ kind: "bio", text: "[Artist B] leads a trio from [City].", status: "sourced", sources: [src("b3")] }),
+        claim({ kind: "song", text: "[Title B] is built on a [Instrument] loop.", status: "sourced", sources: [src("b3")] }),
       ],
     },
     { key: "H2.intro", claims: [], intro: "The second hour slows down around [Artist D]." },
@@ -67,6 +76,13 @@ export const sampleView: ShowNotesView = {
         claim({ kind: "bio", text: "[Artist D] leads a quartet from [City].", status: "sourced", sources: [src("d2")] }),
       ],
       angle: "Which earlier [Label D] record sets this one up?",
+    },
+    {
+      key: "H2.2",
+      claims: [
+        claim({ kind: "bio", text: "[Artist F] is a rapper from [City] who runs [Label F].", status: "sourced", sources: [src("f1", {}, "en.example.org")] }),
+        claim({ kind: "release-date", text: "[Title F] came out in September 2026.", value: "2026-09", status: "could-not-verify", sources: [], check: "No source found." }),
+      ],
     },
   ],
 };

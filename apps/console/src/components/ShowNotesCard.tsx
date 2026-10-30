@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import type { JudgedClaim } from "@aircheck/core";
+import { Fragment, useState, type ReactNode } from "react";
+import { disagreement, type JudgedClaim, linkedSources, noteBullets, noteName, reviewNotes } from "@aircheck/core";
 import {
-  codeOf, embargoOf, embargoWords, type Embargo, isActive, isSample, refusalText, type ResearchEntryRow, type ResearchView, trackName,
+  codeOf, embargoOf, embargoWords, type Embargo, isActive, isOpenClaim, isSample, refusalText, type ResearchEntryRow, type ResearchView,
 } from "@/lib/research";
-import { ClaimLine } from "./ClaimLine";
+import { ClaimLine, SourceChips, VERIFY_CHIP } from "./ClaimLine";
 import { Pill } from "./Pill";
 
-// Plan 7 show notes, in Tarik's Paper order: per hour an intro, the threads, then one block per track. Every sentence the
-// model wrote is plain text; headings, names, statuses and dates are code's. Every button calls a Convex mutation as the
-// signed-in person (injected as `actions`), never the model.
+// Plan 7 show notes, shaped like Tarik's Oct 23 Paper notes (Oct 29): per hour an intro and the hour thread, then one
+// block per track of labeled bullets in his order, and Notes for Your Review at the end. Every sentence the model wrote is
+// plain text; labels, names, statuses, links and dates are code's (core's noteBullets and reviewNotes, shared with the
+// Markdown export). Every button calls a Convex mutation as the signed-in person (injected as `actions`), never the model.
 
 export type BlockActions = {
   edit: (key: string, text: string) => Promise<unknown>;
@@ -112,22 +113,52 @@ export function BlockControls({ blockKey, name, entry, view, actions, note = fal
   );
 }
 
-/** The block's body: his edit in place of everything generated, else the claims (bio under Artist), note and angle. */
+/** One sentence as his notes show it: the text, a conflict's two versions, short host links, then [verify]. */
+function Sentence({ claim }: { claim: JudgedClaim }) {
+  const conflict = disagreement(claim);
+  return (
+    <span>
+      <span>{claim.text}</span>
+      {conflict && <>{" "}<span className="text-caution-text">{conflict}</span></>}
+      <SourceChips sources={linkedSources(claim)} short />
+      {isOpenClaim(claim) && <>{" "}<span className={VERIFY_CHIP}>[verify]</span></>}
+    </span>
+  );
+}
+
+function Prose({ claims }: { claims: JudgedClaim[] }) {
+  return <>{claims.map((c, i) => <Fragment key={i}>{i > 0 && " "}<Sentence claim={c} /></Fragment>)}</>;
+}
+
+/** A track's labeled bullets (or the could / couldn't verify pair), then his own note, the angle and the agent's note. */
+function TrackNotes({ entry, angles }: { entry: ResearchEntryRow; angles: boolean }) {
+  return (
+    <ul className="flex flex-col gap-2.5 text-sm [overflow-wrap:anywhere]">
+      {noteBullets(entry.claims).map((b) => (
+        <li key={b.label}>
+          <span className="font-semibold">{b.label}:</span>{" "}
+          {b.lead && <><span>{b.lead}</span>{" "}</>}
+          <Prose claims={b.claims} />
+        </li>
+      ))}
+      {entry.note && <li className="text-ink-soft"><span className="font-semibold">Note:</span> <span>{entry.note}</span></li>}
+      {angles && entry.angle && <li><span className="font-semibold">On-air angle:</span> <span>{entry.angle}</span></li>}
+    </ul>
+  );
+}
+
+/** The block's body: his edit in place of everything generated, else the intro, the hour thread or the track's notes. */
 function Body({ entry, angles }: { entry?: ResearchEntryRow; angles: boolean }) {
   if (!entry || (!entry.claims.length && !entry.edited && !entry.intro && !entry.angle && !entry.note && !entry.suppliedNote))
     return <p className="text-sm text-muted">Not researched yet.</p>;
   if (entry.edited) return <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{entry.edited.text}</p>;
-  const facts = entry.claims.filter((c) => c.kind !== "bio");
-  const bio = entry.claims.filter((c) => c.kind === "bio");
   return (
     <div className="flex flex-col gap-3 text-sm">
       {entry.intro && <p className="[overflow-wrap:anywhere]">{entry.intro}</p>}
-      <Claims claims={facts} />
-      {bio.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <p className={LABEL}>Artist</p>
-          <Claims claims={bio} />
-        </div>
+      {entry.block === "threads" ? (
+        entry.claims.length > 0 && <p className="[overflow-wrap:anywhere]"><Prose claims={entry.claims} /></p>
+      ) : (
+        (entry.claims.length > 0 || entry.note || (angles && entry.angle)) && <TrackNotes entry={entry} angles={angles} />
       )}
       {entry.suppliedNote && (
         <p className="rounded-control bg-surface-quiet px-3 py-2 [overflow-wrap:anywhere]">
@@ -136,11 +167,24 @@ function Body({ entry, angles }: { entry?: ResearchEntryRow; angles: boolean }) 
           <span>{entry.suppliedNote}</span>
         </p>
       )}
-      {angles && entry.angle && (
-        <p className="[overflow-wrap:anywhere]"><span className="font-medium">On-air angle: </span><span>{entry.angle}</span></p>
-      )}
-      {entry.note && <p className="text-ink-soft [overflow-wrap:anywhere]"><span className="font-medium">Note: </span><span>{entry.note}</span></p>}
     </div>
+  );
+}
+
+/** Every flag, one line per track or hour thread, with code's reason: what to check before air. */
+function ReviewNotes({ view }: { view: ResearchView }) {
+  const notes = reviewNotes(view.tracks, view.entries);
+  return (
+    <section aria-labelledby="review-notes" className="flex flex-col gap-3 rounded-card border border-line bg-surface px-5 py-4">
+      <h2 id="review-notes" className="font-serif text-[22px] leading-tight">Notes for Your Review</h2>
+      {notes.length ? (
+        <ul className="flex flex-col gap-2 text-sm [overflow-wrap:anywhere]">
+          {notes.map((n) => <li key={n.key}><span className="font-semibold">{n.name}:</span> <span>{n.items.join("; ")}.</span></li>)}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">Nothing to verify.</p>
+      )}
+    </section>
   );
 }
 
@@ -183,18 +227,18 @@ export function ShowNotesCard({ view, today, actions }: { view: ResearchView; to
               <Body entry={intro} angles={false} />
               <BlockControls blockKey={`H${h}.intro`} name={`Hour ${h} intro`} entry={intro} view={view} actions={actions} />
             </Block>
-            <Block label="Thread" name="Show thread" head={<BlockPills entry={threads} today={today} />}>
+            <Block label="Thread" name="Hour thread" head={<BlockPills entry={threads} today={today} />}>
               <Body entry={threads} angles={false} />
               <BlockControls blockKey={`H${h}.threads`} name={`Hour ${h} thread`} entry={threads} view={view} actions={actions} />
             </Block>
             {view.tracks.filter((t) => t.hour === h).map((t) => {
               const e = byKey.get(t.key);
               return t.closing ? (
-                <Block key={t.key} label={t.key} name={trackName(t)}>
+                <Block key={t.key} label={t.key} name={noteName(t)}>
                   <p className="text-sm text-muted">closing track, no notes</p>
                 </Block>
               ) : (
-                <Block key={t.key} label={t.key} name={trackName(t)} head={<BlockPills entry={e} embargo={embargoOf(t)} today={today} />}>
+                <Block key={t.key} label={t.key} name={noteName(t)} head={<BlockPills entry={e} embargo={embargoOf(t)} today={today} />}>
                   <Body entry={e} angles={view.job.angles} />
                   <BlockControls blockKey={t.key} name={t.key} entry={e} view={view} actions={actions} note />
                 </Block>
@@ -203,6 +247,7 @@ export function ShowNotesCard({ view, today, actions }: { view: ResearchView; to
           </section>
         );
       })}
+      <ReviewNotes view={view} />
     </div>
   );
 }

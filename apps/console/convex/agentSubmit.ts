@@ -137,6 +137,7 @@ export type ResearchSubmit = {
 // A Record keyed by core's type, so a kind added or removed in core fails the typecheck here.
 const CLAIM_KINDS: Record<ClaimKind, true> = {
   release: true, "release-date": true, label: true, credit: true, "track-number": true, length: true, bio: true, detail: true, thread: true, connection: true,
+  chart: true, story: true, song: true, samples: true, video: true, "fun-fact": true,
 };
 const MAX_ID = 40;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);

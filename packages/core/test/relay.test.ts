@@ -185,7 +185,7 @@ describe("researchInput", () => {
     expect(text).not.toContain("[Artist C]");
     expect(text).not.toContain("[Artist E]");
     expect(text).toMatch(/No web searches left today/);
-    const l = lines.find((x) => x.text.startsWith("- [Artist A] co-produced"))!;
+    const l = lines.find((x) => x.text.startsWith("- **Album and label:** [Title A]"))!;
     expect(text).toContain(`${l.id} [H1.1] ${l.text}`);
   });
 

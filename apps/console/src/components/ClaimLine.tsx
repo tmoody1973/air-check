@@ -1,4 +1,4 @@
-import type { JudgedClaim } from "@aircheck/core";
+import { type JudgedClaim, shortHost } from "@aircheck/core";
 import { isOpenClaim, safeHref } from "@/lib/research";
 
 // One claim: the agent's sentence as plain text (React escapes it; no HTML, no auto-linking), then code's own words:
@@ -9,12 +9,13 @@ export const NEUTRAL_CHIP = `${CHIP} border-line bg-surface text-ink-soft`;
 // Never combine neutral and caution colour utilities on one element; stylesheet order would decide.
 export const VERIFY_CHIP = `${CHIP} border-transparent bg-caution-bg text-caution-text`;
 
-export function SourceChips({ sources }: { sources: JudgedClaim["sources"] }) {
+/** `short`: inline after a sentence, named the way his Paper notes name links (en.wikipedia). */
+export function SourceChips({ sources, short = false }: { sources: JudgedClaim["sources"]; short?: boolean }) {
   const seen = new Set<string>();
   const unique = sources.filter((s) => !seen.has(s.url) && seen.add(s.url));
   if (!unique.length) return null;
   return (
-    <span className="flex flex-wrap gap-1.5">
+    <span className={short ? "ml-1 inline-flex flex-wrap gap-1 align-baseline" : "flex flex-wrap gap-1.5"}>
       {unique.map((s) => {
         const href = safeHref(s.url);
         return href ? (
@@ -23,10 +24,10 @@ export function SourceChips({ sources }: { sources: JudgedClaim["sources"] }) {
             // The chip stays small; the ::after box gives it a 44 px tall hit area (R12).
             className={`${NEUTRAL_CHIP} relative after:absolute after:-inset-y-2.5 after:inset-x-0 after:content-[''] hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal`}
           >
-            {s.host}
+            {short ? shortHost(s.host) : s.host}
           </a>
         ) : (
-          <span key={s.url} className={NEUTRAL_CHIP}>{s.host}</span>
+          <span key={s.url} className={NEUTRAL_CHIP}>{short ? shortHost(s.host) : s.host}</span>
         );
       })}
     </span>

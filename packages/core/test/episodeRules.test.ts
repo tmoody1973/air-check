@@ -162,9 +162,20 @@ test("paper: real show-notes structure (headings, en dash, links ignored)", () =
   expect(r.unreadable).toBe(false);
 });
 
-test("paper: the real format fixture file parses to its one placeholder track", () => {
+test("paper: the format fixture file parses to its placeholder tracks", () => {
   expect(parsePaperExport(readFixture("show-notes-format.md")).tracks).toEqual([
     { hour: 1, artist: "Artist", title: "Title" },
+    { hour: 1, artist: "Artist", title: "Title" },
+    { hour: 1, artist: "Artist", title: "Title" },
+  ]);
+});
+
+test("paper: Oct 29 headings 'N. Artist, \"Title\"' (his Oct 23 notes and Air Check's export) read too; a comma in a name stays", () => {
+  const r = parsePaperExport(['# Rhythm Lab Radio, Hour One: Show Notes', '### 1. Artist One, "First Song"', '- **Album and label:** a fact, "quoted" [[site](https://example.com)]', '### 2. Artist, Two & Three, "Second Song" feat. Guest', "# Rhythm Lab Radio, Hour Two: Show Notes", '### 1. Artist Four, “Fourth Song”'].join("\n"));
+  expect(r.tracks).toEqual([
+    { hour: 1, artist: "Artist One", title: "First Song" },
+    { hour: 1, artist: "Artist, Two & Three", title: "Second Song" },
+    { hour: 2, artist: "Artist Four", title: "Fourth Song" },
   ]);
 });
 

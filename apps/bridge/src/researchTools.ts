@@ -141,6 +141,12 @@ const KINDS: Record<ClaimKind, true> = {
   detail: true,
   thread: true,
   connection: true,
+  chart: true,
+  story: true,
+  song: true,
+  samples: true,
+  video: true,
+  "fun-fact": true,
 };
 const sourceRefProps: Record<keyof SourceRef, object> = {
   id: str("A source id from your search results, e.g. S7k2q"),

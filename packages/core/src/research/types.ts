@@ -1,7 +1,10 @@
 import type { ActiveEmbargo } from "../radar/embargo";
 
 export type ResearchKind = "show-notes" | "verify" | "deep-dive";
-export type ClaimKind = "release" | "release-date" | "label" | "credit" | "track-number" | "length" | "bio" | "detail" | "thread" | "connection";
+/** Oct 29: chart, story, song, samples, video and fun-fact match the labeled bullets of Tarik's Paper notes. */
+export type ClaimKind =
+  | "release" | "release-date" | "label" | "credit" | "track-number" | "length" | "bio" | "detail" | "thread" | "connection"
+  | "chart" | "story" | "song" | "samples" | "video" | "fun-fact";
 /** The two-source rule: these need two publishers or one primary, non-aggregator source. */
 export const CRITICAL_KINDS: readonly ClaimKind[] = ["release-date", "label", "credit"];
 /** The source's own text must show the value. */
