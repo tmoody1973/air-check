@@ -474,7 +474,7 @@ describe("deploy files", () => {
 
 // Plan 7 Task 6 step 0: the scripts Tarik runs to go live. Each runs here against stub commands, with fake secrets
 // that must never be printed.
-describe("Plan 7 go-live scripts", () => {
+describe("Plan 7 go-live scripts", { timeout: 30_000 }, () => {
   const stub = (dir: string, name: string, body: string) => {
     writeFileSync(join(dir, name), `#!/bin/bash\n${body}\n`);
     chmodSync(join(dir, name), 0o755);
@@ -497,40 +497,44 @@ describe("Plan 7 go-live scripts", () => {
     const OVERRIDE = 'SECRETS="${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"\nset -a; . "$SECRETS"; set +a';
     const ONBOARD_LOG = 'echo "secrets=$SECRETS mode=$(ls -l "$SECRETS" | cut -c1-10) search_key_lines=$(printenv | grep -c "^TAV[I]LY_API_KEY=") telegram=${TELEGRAM_BOT_TOKEN:+present}" >> "$HOME/onboard.log"'; // never names it, or the guard stops
 
-    const setup = (o: { reonboard?: string; busy?: boolean; policy?: string; gateway?: string; extraSkill?: string } = {}) => {
+    const setup = (
+      o: { reonboard?: string; busy?: boolean | "after-prompt"; policy?: string; gateway?: string; extraSkill?: string; status?: string; backupFails?: boolean; bridgeEnv?: string } = {},
+    ) => {
       const home = mkdtempSync(join(tmpdir(), "reonboard-"));
       const bin = join(home, ".local/bin");
       for (const d of [".local/bin", ".aircheck", ".airc", "fix/skills/rlr-show-notes"]) mkdirSync(join(home, d), { recursive: true });
       writeFileSync(join(home, "fix/config.yaml"), "skills:\n  write_approval: true\n");
       writeFileSync(join(home, "fix/skills/rlr-show-notes/SKILL.md"), "x");
       writeFileSync(join(home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nexport TAVILY_API_KEY=fake-tavily-value\nCOMPATIBLE_API_KEY=m\n");
-      writeFileSync(join(home, ".aircheck/bridge.env"), "CRATE_MCP_TOKEN=crate-token-value\nAIRCHECK_MCP_TOKEN=aircheck-token-value\n");
+      writeFileSync(join(home, ".aircheck/bridge.env"), o.bridgeEnv ?? "CRATE_MCP_TOKEN=crate-token-value\nAIRCHECK_MCP_TOKEN=aircheck-token-value\n");
       writeFileSync(join(home, ".aircheck/relay.env"), "CONVEX_URL=https://x\nAIRC_GATEWAY_TOKEN=old-gw-token\n");
       writeFileSync(join(home, ".aircheck/watchdog.sh"), read("hermes/watchdog.sh"));
       writeFileSync(join(home, ".aircheck/reonboard.sh"), `${o.reonboard ?? OVERRIDE}\n${ONBOARD_LOG}\n`);
       const row = (n: string) => `│ ${n} │ │ local │ local │ enabled │`;
       const listing = [...SKILLS, ...(o.extraSkill ? [o.extraSkill] : [])].map(row).join("\n");
       stub(bin, "id", '[ "$1" = -un ] && echo user || echo 1001');
-      stub(bin, "ss", o.busy ? 'echo "ESTAB 0 0 127.0.0.1:8642 127.0.0.1:50000"' : "true");
+      const estab = 'echo "ESTAB 0 0 127.0.0.1:8642 127.0.0.1:50000"';
+      // "after-prompt": quiet at the first look, busy at the second (a run started while Tarik read the prompt).
+      stub(bin, "ss", o.busy === "after-prompt" ? `echo x >> "${home}/ss.count"; [ "$(wc -l < "${home}/ss.count")" -ge 2 ] && ${estab}; true` : o.busy ? estab : "true");
       stub(bin, "sudo", `echo "$*" >> "${home}/sudo.log"`);
       stub(bin, "systemctl", "echo active");
       stub(bin, "curl", "echo 200");
       stub(bin, "timeout", 'shift; exec "$@"');
       stub(bin, "openshell", `case "$*" in
-  *tar*) tar -czf - -C "${home}/fix" config.yaml skills ;;
+  *tar*) ${o.backupFails ? 'echo "sandbox not found" >&2; exit 1' : `tar -czf - -C "${home}/fix" config.yaml skills`} ;;
   *"skills list"*) printf '%s\\n' '${listing}' ;;
   *"config get"*) printf '0\\ntrue\\n' ;;
 esac`);
       stub(bin, "nemohermes", `echo "$*" >> "${home}/nemohermes.log"
 case "$*" in
-  "airc status") echo "Phase: Ready"; echo "Policies: pypi, telegram" ;;
+  "airc status") echo "${o.status ?? "Phase: Ready"}"; echo "Policies: pypi, telegram" ;;
   "airc policy get") printf '%s\\n' '${o.policy ?? "network_policies:\\n  telegram_bot: {}"}' ;;
   "airc mcp status crate --json --tools") echo '{"registered": true, "state": "ready"}' ;;
   "airc mcp status aircheck --json --tools") echo '{"registered": true, "tools": ["package_submit", "source_search", "research_submit"]}' ;;
   "airc gateway-token --quiet") echo "${o.gateway ?? "new-gw-token"}" ;;
   *"skill list") printf '%s\\n' ${SKILLS.join(" ")} ;;
 esac`);
-      const go = () => run("hermes/reonboard-without-tavily.sh", [REPO], { HOME: home, PATH: `${bin}:${process.env.PATH}`, TAVILY_API_KEY: "fake-tavily-value" }, "rebuild\n");
+      const go = (...flags: string[]) => run("hermes/reonboard-without-tavily.sh", [...flags, REPO], { HOME: home, PATH: `${bin}:${process.env.PATH}`, TAVILY_API_KEY: "fake-tavily-value" }, "rebuild\n");
       const file = (f: string) => (existsSync(join(home, f)) ? readFileSync(join(home, f), "utf8") : "");
       return { home, go, file };
     };
@@ -623,6 +627,81 @@ esac`);
       expect(extra.code).toBe(1);
       expect(extra.err).toContain("a skill the repo did not install: mixcloud-package-submission");
     });
+
+    const AGAIN = "Run this script again (add --from-error if the sandbox is not Ready).";
+
+    it("a stop after the re-onboard step (or reonboard.sh failing) says to run this script again, never reonboard.sh", () => {
+      const tok = setup({ gateway: "" }).go();
+      expect(tok.code).toBe(1);
+      expect(tok.err).toContain(AGAIN);
+      const t = setup({ reonboard: `${OVERRIDE}\nexit 3` });
+      const r = t.go();
+      expect(r.code).not.toBe(0);
+      expect(r.err).toContain(AGAIN);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      expect(execFileSync("ls", [join(t.home, ".aircheck")], { encoding: "utf8" })).not.toContain("secrets.reonboard");
+      // A stop before the re-onboard step does not say it.
+      const before = setup({ busy: true }).go();
+      expect(before.err).not.toContain(AGAIN);
+      noSecrets(tok.out + tok.err + r.out + r.err);
+    });
+
+    it("an airc that is not Ready stops (Phase: *Ready, not a bare Ready) and points at --from-error", () => {
+      for (const status of ["Phase: Error", "Phase: Provisioning\nGateway: Ready"]) {
+        const t = setup({ status });
+        const r = t.go();
+        expect(r.code, status).toBe(1);
+        expect(r.err).toContain("--from-error");
+        expect(t.file("sudo.log")).toBe("");
+      }
+      expect(sh).toContain("'Phase: *Ready'");
+    });
+
+    it("--from-error skips the Ready check, goes on without a backup when airc is unreachable, and does the key-free rebuild", () => {
+      const t = setup({ status: "Phase: Error", backupFails: true });
+      const r = t.go("--from-error");
+      expect(r.err).not.toContain("STOP");
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("All checks passed.");
+      expect(r.out).toContain("no backup");
+      expect(t.file("onboard.log")).toMatch(/search_key_lines=0 telegram=present\n$/);
+      expect(existsSync(join(t.home, ".aircheck/agent-skill-backup")) ? execFileSync("ls", [join(t.home, ".aircheck/agent-skill-backup")], { encoding: "utf8" }) : "").toBe("");
+      const nh = t.file("nemohermes.log").split("\n");
+      expect(nh.filter((l) => l.startsWith("airc mcp add ")).map((l) => l.split(" ")[3])).toEqual(["crate", "aircheck"]);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      noSecrets(r.out + r.err);
+      // Without the flag, a failed backup still stops before the rebuild.
+      const strict = setup({ backupFails: true });
+      const s = strict.go();
+      expect(s.code).toBe(1);
+      expect(s.err).toContain("airc was not rebuilt");
+      expect(strict.file("onboard.log")).toBe("");
+    });
+
+    it("re-checks 8642 after the prompt, advises tmux before it, and stops kindly on a missing bridge token", () => {
+      const late = setup({ busy: "after-prompt" });
+      const l = late.go();
+      expect(l.code).toBe(1);
+      expect(l.err).toContain("a draft or research run is talking to Hermes on 8642");
+      expect(late.file("sudo.log")).toBe("");
+      expect(sh.indexOf("run inside tmux (or nohup)")).toBeGreaterThan(-1);
+      expect(sh.indexOf("run inside tmux (or nohup)")).toBeLessThan(sh.indexOf("Type rebuild"));
+      expect(l.out).toContain("a dropped SSH session mid-rebuild is the riskiest moment");
+      const tok = setup({ bridgeEnv: "CRATE_MCP_TOKEN=crate-token-value\n" });
+      const r = tok.go();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN");
+      expect(tok.file("sudo.log")).toBe("");
+      noSecrets(r.out + r.err);
+    });
+
+    it("DEPLOY rebuilds airc only through this script, Error section included", () => {
+      const deploy = read("../docs/DEPLOY.md");
+      const errSection = deploy.slice(deploy.indexOf("**If the sandbox is in `Error` anyway**"), deploy.indexOf("### The supervised forwards"));
+      expect(errSection).toContain("bash ~/air-check/deploy/hermes/reonboard-without-tavily.sh --from-error");
+      expect(deploy).not.toMatch(/[Rr]un `?~\/\.aircheck\/reonboard\.sh/);
+      expect(deploy).toContain(AGAIN);
+    });
   });
 
   it("install-skills.sh installs the two description skills and the three research skills (Plan 7)", () => {
@@ -681,6 +760,18 @@ esac`);
       expect(t.file(".aircheck/bridge.env")).toBe(env);
       expect(second.out.match(/already set in bridge.env, (left alone|key file left alone)/g)).toHaveLength(4);
       noSecrets(second.out);
+    });
+
+    it("a key file path from bridge.env.example whose file is missing counts as unset: writes the .p8 and keeps one line", () => {
+      expect(read("bridge/bridge.env.example").split("\n")).toContain("APPLE_MUSIC_KEY_FILE=");
+      const t = setup();
+      writeFileSync(join(t.home, ".aircheck/bridge.env"), "BRIDGE_HOST=10.0.0.9\nBRIDGE_PORT=8443\nAPPLE_MUSIC_KEY_FILE=/nowhere/AuthKey.p8\n");
+      const r = t.go();
+      expect(r.code).toBe(0);
+      const env = t.file(".aircheck/bridge.env");
+      expect(env.match(/^APPLE_MUSIC_KEY_FILE=.*$/gm)).toEqual([`APPLE_MUSIC_KEY_FILE=${t.home}/.aircheck/bridge/AuthKey.p8`]);
+      expect(t.file(".aircheck/bridge/AuthKey.p8")).toBe(readFileSync(t.p8, "utf8"));
+      noSecrets(r.out);
     });
   });
 });

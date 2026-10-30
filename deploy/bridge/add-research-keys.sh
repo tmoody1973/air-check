@@ -50,7 +50,13 @@ echo "== Apple Music ids (Mac to VM)"
 remote 'add_lines' <<<"$ids"
 
 echo "== MusicKit key file (Mac to VM)"
-remote 'if has APPLE_MUSIC_KEY_FILE; then cat >/dev/null; echo "APPLE_MUSIC_KEY_FILE: already set in bridge.env, key file left alone"; exit 0; fi
+remote 'cur="$(sed -n "s/^APPLE_MUSIC_KEY_FILE=//p" "$f" | head -n 1)"
+if [ -n "$cur" ] && [ -f "$cur" ]; then cat >/dev/null; echo "APPLE_MUSIC_KEY_FILE: already set in bridge.env, key file left alone"; exit 0; fi
+if [ -n "$cur" ]; then   # a path with no file behind it (the example value, say) counts as unset
+  grep -v "^APPLE_MUSIC_KEY_FILE=" "$f" > "$f.tmp" || true
+  cat "$f.tmp" > "$f" && rm -f "$f.tmp"
+  echo "APPLE_MUSIC_KEY_FILE: set, but no file there; replacing it"
+fi
 k="$HOME/.aircheck/bridge/AuthKey.p8"
 mkdir -p "$HOME/.aircheck/bridge"
 (umask 077; cat > "$k.tmp")

@@ -3,7 +3,9 @@
 # only through the bridge's source_search, so the sandbox's Tavily provider rule (which also allowed /extract, decision
 # 006 addendum) should be gone. Run on the VM as `user`, after `git pull` in ~/air-check and after the bridge holds
 # TAVILY_API_KEY (deploy/bridge/add-research-keys.sh):
-#   bash deploy/hermes/reonboard-without-tavily.sh [repo folder, default ~/air-check]
+#   bash deploy/hermes/reonboard-without-tavily.sh [--from-error] [repo folder, default ~/air-check]
+# --from-error: for an airc in Error (or left half-built by an earlier run). Skips the Ready check and goes on without
+# a backup if airc cannot be reached; the rest is the same key-free rebuild.
 # docs/DEPLOY.md, "Plan 7: sourced research", has the order. Hermes in airc loses its memory (like any re-onboard).
 # It never prints a secret. The Tavily key is never written anywhere: reonboard.sh gets a temporary copy of
 # ~/.airc/secrets.env without the TAVILY_API_KEY line (mode 600, deleted on exit); the original is not changed.
@@ -13,12 +15,15 @@ if [[ "$(id -un)" != "user" ]]; then
   exit 1
 fi
 export PATH="$HOME/.local/bin:$PATH:/usr/sbin" XDG_RUNTIME_DIR="/run/user/$(id -u)"
+FROM_ERROR=0
+[[ "${1:-}" == --from-error ]] && { FROM_ERROR=1; shift; }
 REPO="${1:-$HOME/air-check}"
 REONBOARD="$HOME/.aircheck/reonboard.sh"
 SECRETS="$HOME/.airc/secrets.env"
 BACKUP_DIR="$HOME/.aircheck/agent-skill-backup"
 STOPPED=0
 RESTORED=0
+REONBOARDING=0
 TMP_SECRETS=""
 
 stop() { echo "STOP: $*" >&2; exit 1; }
@@ -47,23 +52,36 @@ cleanup() {
     echo "== Restoring the forward, relay and watchdog after a stop" >&2
     restore || true
   fi
+  # Past this point airc may be destroyed or half-built. Never fall back to ~/.aircheck/reonboard.sh by itself: it
+  # would give the sandbox its Tavily key back from ~/.airc/secrets.env.
+  (( rc != 0 && REONBOARDING )) && echo "Run this script again (add --from-error if the sandbox is not Ready)." >&2
   exit "$rc"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+quiet_8642() {
+  [[ -z "$(ss -Htn state established '( sport = :8642 )' 2>/dev/null)" ]] ||
+    stop "a draft or research run is talking to Hermes on 8642. Wait for it to finish, then run this again. Nothing was changed."
+}
+
 echo "== 1. Preflight (changes nothing)"
-[[ -z "$(ss -Htn state established '( sport = :8642 )' 2>/dev/null)" ]] ||
-  stop "a draft or research run is talking to Hermes on 8642. Wait for it to finish, then run this again. Nothing was changed."
+quiet_8642
 grep -q 'rlr-show-notes' "$REPO/deploy/hermes/install-skills.sh" ||
   stop "$REPO is older than Plan 7 (install-skills.sh has no research skills). git pull first. Nothing was changed."
 cmp -s "$REPO/deploy/hermes/watchdog.sh" "$HOME/.aircheck/watchdog.sh" ||
   stop "the installed watchdog is not the repo copy, so it would call the new research skills agent-made. Run: bash $REPO/deploy/hermes/install-watchdog.sh, then this again. Nothing was changed."
 [[ -f "$REONBOARD" ]] || stop "$REONBOARD is missing. Nothing was changed."
 [[ -f "$SECRETS" ]] || stop "$SECRETS is missing. Nothing was changed."
-status="$(nemohermes airc status 2>&1 || true)"
-grep -q 'Ready' <<<"$status" ||
-  stop "airc is not Ready, and the destroy in reonboard.sh needs it running (docs/DEPLOY.md, 'If the sandbox is in Error'). Nothing was changed."
+grep -q '^CRATE_MCP_TOKEN=.' "$HOME/.aircheck/bridge.env" 2>/dev/null && grep -q '^AIRCHECK_MCP_TOKEN=.' "$HOME/.aircheck/bridge.env" ||
+  stop "bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN (step 6 needs both). Nothing was changed."
+if (( FROM_ERROR )); then
+  echo "--from-error: not checking that airc is Ready; the backup is best-effort"
+else
+  status="$(nemohermes airc status 2>&1 || true)"
+  grep -q 'Phase: *Ready' <<<"$status" ||
+    stop "airc is not Ready. If it is in Error, follow docs/DEPLOY.md 'If the sandbox is in Error': start its container, then run this script with --from-error. Nothing was changed."
+fi
 
 # How reonboard.sh reads secrets.env decides how it gets the copy: an env var or first argument it already supports
 # ("${NAME:-$HOME/.airc/secrets.env}" or "${1:-...}"). Comment lines are ignored; line numbers are the file's.
@@ -90,8 +108,10 @@ fi
 
 echo
 echo "This destroys and re-onboards airc (about a minute). Hermes in airc loses its memory. aircdemo is not touched."
+echo "run inside tmux (or nohup): a dropped SSH session mid-rebuild is the riskiest moment."
 read -r -p "Type rebuild to go on: " answer
 [[ "$answer" == rebuild ]] || stop "not confirmed. Nothing was changed."
+quiet_8642   # again: a run may have started while the prompt waited
 
 echo "== 2. Pause the watchdog, the relay and the airc forward"
 STOPPED=1
@@ -100,12 +120,19 @@ sudo systemctl stop aircheck-watchdog.timer aircheck-watchdog.service aircheck-r
 echo "== 3. Back up the airc skills and Hermes config"
 install -d -m 700 "$BACKUP_DIR"
 backup="$BACKUP_DIR/airc-$(date +%Y%m%d-%H%M%S).tgz"
-( umask 077; openshell sandbox exec -n airc -- bash -lc 'cd /sandbox/.hermes && tar -czf - config.yaml $(ls -d skills 2>/dev/null)' > "$backup" )
-saved="$(tar -tzf "$backup" || true)"
-grep -qx 'config.yaml' <<<"$saved" || stop "the backup $backup has no config.yaml; airc was not rebuilt."
-echo "saved $backup ($(grep -c '/SKILL.md$' <<<"$saved" || true) skills)"
+( umask 077; openshell sandbox exec -n airc -- bash -lc 'cd /sandbox/.hermes && tar -czf - config.yaml $(ls -d skills 2>/dev/null)' > "$backup" ) || true
+saved="$(tar -tzf "$backup" 2>/dev/null || true)"
+if grep -qx 'config.yaml' <<<"$saved"; then
+  echo "saved $backup ($(grep -c '/SKILL.md$' <<<"$saved" || true) skills)"
+elif (( FROM_ERROR )); then
+  rm -f "$backup"
+  echo "no backup: airc could not be read (--from-error). Going on; step 7 reinstalls the skills and config from the repo."
+else
+  stop "the backup $backup has no config.yaml; airc was not rebuilt."
+fi
 
 echo "== 4. Re-onboard airc without TAVILY_API_KEY (tavily preset left out)"
+REONBOARDING=1
 TMP_SECRETS="$(umask 077; mktemp "$HOME/.aircheck/secrets.reonboard.XXXXXX")"
 chmod 600 "$TMP_SECRETS"
 grep -vE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" > "$TMP_SECRETS" || true
@@ -135,8 +162,8 @@ fi
 unset NEW_TOK
 
 echo "== 6. Register the bridge tools again (crate with every deny, aircheck), then re-wire"
-CRATE_MCP_TOKEN="$(grep ^CRATE_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
-AIRCHECK_MCP_TOKEN="$(grep ^AIRCHECK_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2-)"
+CRATE_MCP_TOKEN="$(grep ^CRATE_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2- || true)"
+AIRCHECK_MCP_TOKEN="$(grep ^AIRCHECK_MCP_TOKEN= ~/.aircheck/bridge.env | cut -d= -f2- || true)"
 export CRATE_MCP_TOKEN AIRCHECK_MCP_TOKEN
 [[ -n "$CRATE_MCP_TOKEN" && -n "$AIRCHECK_MCP_TOKEN" ]] || stop "bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN."
 nemohermes airc mcp remove crate >/dev/null 2>&1 || true

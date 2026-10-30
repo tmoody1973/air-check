@@ -203,12 +203,19 @@ systemctl status aircheck-hermes            # expect active (exited)
 
 **If the sandbox is in `Error` anyway**
 
-`Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. Since Plan 7, rebuild `airc` with `deploy/hermes/reonboard-without-tavily.sh`, which does the steps below and keeps Tavily out of the sandbox (see "Plan 7: sourced research"). It calls `~/.aircheck/reonboard.sh`. It loads `~/.airc/secrets.env`, uses the same settings as the original install, and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about 45 seconds.
+`Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. Since Plan 7, rebuild `airc` only with `deploy/hermes/reonboard-without-tavily.sh`, never with `~/.aircheck/reonboard.sh` by itself: `~/.airc/secrets.env` still holds `TAVILY_API_KEY`, and a plain re-onboard would give the sandbox its own Tavily door back (see "Plan 7: sourced research"). The script calls `~/.aircheck/reonboard.sh` with a copy of `secrets.env` that has no Tavily key; `reonboard.sh` uses the same settings as the original install and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about a minute. Run it inside `tmux` (or with `nohup`): a dropped SSH session mid-rebuild is the riskiest moment.
 
-1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`.
-2. Stop the forward units first, so they do not fight the onboard over the ports: `sudo systemctl stop aircheck-hermes-forward aircheck-hermes-demo-forward`. Then run `~/.aircheck/reonboard.sh`. Start the units again only after step 4: `sudo systemctl start aircheck-hermes-forward aircheck-hermes-demo-forward`.
-3. Register the two bridge tools again with the `mcp add` commands under "Registering the bridge with Hermes". Unverified: whether onboarding keeps the earlier registration. Re-running is safe either way.
-4. Re-apply the agent config and install the station skills again: `bash ~/air-check/deploy/hermes/apply-agent-config.sh --with-skills`. A destroy loses both. It sets `skills.creation_nudge_interval: 0` and `skills.write_approval: true` in `/sandbox/.hermes/config.yaml` in `airc` and `aircdemo`, reads them back with `hermes config get`, and with `--with-skills` then runs `install-skills.sh` (see "Agent skills"). Run it the same way after `onboard-demo.sh`. Then start the forward units (step 2).
+1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`. (If an earlier run already destroyed it and there is no `airc` container, skip this. Unverified: how `reonboard.sh` handles a sandbox that is already gone; if it stops, send the output.)
+2. On the VM, as `user`, in `~/air-check` after `git pull`:
+
+   ```sh
+   bash ~/air-check/deploy/hermes/reonboard-without-tavily.sh --from-error
+   ```
+
+   `--from-error` skips the check that `airc` is Ready and goes on without a backup if the sandbox cannot be read. Everything else is the same as the checklist under "Re-onboard checklist": it pauses the watchdog, the relay and the `airc` forward, re-onboards without Tavily, updates the relay's gateway token, registers both bridge tools again, re-applies the skill-writing lock and the station skills in both sandboxes (`apply-agent-config.sh --with-skills`), starts the forward, relay and watchdog again, and runs the checks.
+3. If it stops after the re-onboard step, it says: "Run this script again (add --from-error if the sandbox is not Ready)." Do that. Do not finish the steps by hand with `reonboard.sh`.
+
+After a destroy and `onboard-demo.sh` for `aircdemo`, run `bash ~/air-check/deploy/hermes/apply-agent-config.sh --with-skills` too (see "Agent skills"); `aircdemo` never gets a Tavily key.
 
 **Hermes loses its memory when this runs.** A copy of the Hermes home from before the outage is at `~/.aircheck/hermes-backup-2026-10-27/` on the VM. It holds keys tied to that machine, so never copy it off the VM.
 
@@ -370,7 +377,7 @@ Check it:
 nemohermes airc mcp status crate --json --tools     # expect ready, and trustedPrivateTarget.state "match"
 ```
 
-Re-run both `mcp add` commands after any re-onboard (see the Hermes section for the unverified part).
+Re-run both `mcp add` commands after any re-onboard (see the Hermes section for the unverified part). For `airc`, `deploy/hermes/reonboard-without-tavily.sh` does it.
 
 ### Updating the bridge
 
@@ -604,15 +611,17 @@ From now on, rebuild `airc` only with `deploy/hermes/reonboard-without-tavily.sh
 
 For `airc`, the script does all of this and stops with a plain message at the first problem:
 
-1. **Preflight, changing nothing.** No open connection on 8642. The repo has the research skills. The installed watchdog equals the repo copy. `airc` is Ready (the destroy needs it running). `reonboard.sh` reads `secrets.env` through a setting the script can point at a copy, and names Tavily nowhere. Then it asks you to type `rebuild`.
+1. **Preflight, changing nothing.** No open connection on 8642. The repo has the research skills. The installed watchdog equals the repo copy. `bridge.env` has both MCP tokens. `airc` shows `Phase: Ready` (the destroy needs it running; with `--from-error` this check is skipped, see "If the sandbox is in `Error` anyway"). `reonboard.sh` reads `secrets.env` through a setting the script can point at a copy, and names Tavily nowhere. Then it asks you to type `rebuild` (run it inside `tmux` or with `nohup`; a dropped SSH session mid-rebuild is the riskiest moment), and looks at 8642 once more before it changes anything.
 2. **Pause** the watchdog timer (and any watchdog run in progress), the relay and `aircheck-hermes-forward`. A `trap` starts them again if anything fails later. The demo forward and `aircdemo` are not touched.
-3. **Back up** the sandbox's skills and Hermes config to `~/.aircheck/agent-skill-backup/airc-<date>-<time>.tgz`.
+3. **Back up** the sandbox's skills and Hermes config to `~/.aircheck/agent-skill-backup/airc-<date>-<time>.tgz`. With `--from-error`, an unreadable sandbox means no backup; it goes on (step 7 reinstalls skills and config from the repo).
 4. **Re-onboard** through `~/.aircheck/reonboard.sh` with a temporary copy of `secrets.env` that has no `TAVILY_API_KEY` line (mode 600, deleted on exit; the original is not changed), and with `TAVILY_API_KEY` unset in the shell. Telegram and the model key are passed as before. Hermes in `airc` loses its memory, as with any re-onboard.
 5. **Relay token.** If the new sandbox has a new gateway token, it updates `AIRC_GATEWAY_TOKEN` in `~/.aircheck/relay.env` (old file kept as `relay.env.pre-reonboard`). The value is never printed.
 6. **MCP tools.** Removes and re-adds `crate` (the exact command under "Registering the bridge with Hermes", with all nine `--deny-tool` flags) and `aircheck`, then `nemohermes airc mcp restart`.
 7. **Skills and the skill-writing lock:** `apply-agent-config.sh --with-skills` (sets and reads back `skills.creation_nudge_interval: 0` and `skills.write_approval: true` in both sandboxes, then reinstalls the five station skills).
 8. **Restore:** starts `aircheck-hermes-forward` (it adopts or replaces the forward the onboard started; a forward under 30 seconds old is left until it is older, so this can take about half a minute), then the relay and the watchdog timer.
 9. **Checks:** `nemohermes airc status` lists no `tavily` policy; `policy get` has no `_provider_airc_tavily_search` and no `api.tavily.com`; `mcp status crate` is registered with no mismatch; `mcp status aircheck --tools` lists `source_search` and `research_submit`; the skill list holds exactly the five station skills and no agent-made one; the two config values read back; `/health` on 8642 is 200. It ends with "All checks passed." Then send the Telegram bot a message and check it replies (by hand).
+
+If anything stops it after the re-onboard step (step 4 on), it restores the forward, relay and watchdog and prints: "Run this script again (add --from-error if the sandbox is not Ready)." Do exactly that; never fall back to `~/.aircheck/reonboard.sh` by itself.
 
 If the Tavily provider rule comes back after the re-onboard (from NemoClaw's saved registry), the script stops and prints it. Do not delete it by hand: send the output, and it goes in `docs/FRICTION_LOG.md` and decision 006's addendum first.
 
@@ -803,7 +812,7 @@ The bridge uses a private certificate authority (CA, the signer that vouches for
 
 | What | File | Made by | Expires | Renew |
 |---|---|---|---|---|
-| Private CA ("Air Check private CA", EC P-256) | `~/.aircheck/ca/ca.crt` and `ca.key` | `deploy/bridge/make-ca.sh` | 2031-10-26 | Needs a re-onboard of the sandbox |
+| Private CA ("Air Check private CA", EC P-256) | `~/.aircheck/ca/ca.crt` and `ca.key` | `deploy/bridge/make-ca.sh` | 2031-10-26 | Needs a re-onboard of the sandbox (`airc` only through `deploy/hermes/reonboard-without-tavily.sh`) |
 | Bridge leaf certificate (IP `10.104.0.41`) | `~/.aircheck/bridge/tls.crt` and `tls.key` | `deploy/bridge/make-leaf.sh 10.104.0.41` | **2027-10-27** | Re-run `make-leaf.sh 10.104.0.41`, then `sudo systemctl restart aircheck-bridge`. No sandbox rebuild, because the CA is the same |
 
 **Tarik: set a calendar reminder for early October 2027 to renew the leaf certificate.** If it lapses, Hermes cannot reach the bridge, and the watchdog will message you that the bridge is down.
