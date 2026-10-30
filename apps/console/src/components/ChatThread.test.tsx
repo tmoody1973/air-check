@@ -144,7 +144,7 @@ describe("ChatThread sending", () => {
 describe("ChatThread replies", () => {
   it("shows the empty state with no messages", () => {
     setup();
-    expect(screen.getByText(/ask air check/i, { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What you can ask" })).toBeInTheDocument();
   });
   it("a growing reply re-renders", () => {
     const runs = { r1: run() };
@@ -288,5 +288,20 @@ describe("ChatThread follow, not-found and input fixes", () => {
     type("にほん");
     fireEvent.keyDown(box(), { key: "Enter", keyCode: 229 });
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatThread: the guide on an empty conversation (Oct 30)", () => {
+  it("shows what the chat can do, with example questions; clicking one fills the box without sending", () => {
+    const { send } = setup({ authReady: true });
+    expect(screen.getByRole("heading", { name: "What you can ask" })).toBeInTheDocument();
+    expect(screen.getByText(/can't approve or publish anything/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show me the package for 2.27.26." }));
+    expect(box().value).toBe("Show me the package for 2.27.26.");
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("is gone once the conversation has messages", () => {
+    setup({ messages: [user("hi")], runs: {} });
+    expect(screen.queryByRole("heading", { name: "What you can ask" })).toBeNull();
   });
 });

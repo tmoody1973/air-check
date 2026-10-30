@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PackageRecord } from "@aircheck/core";
 import { chatErrorText, MAX_MESSAGE_CHARS, progressLine } from "../lib/chat";
+import { ChatGuide } from "./ChatGuide";
 import { ChatPackageCard } from "./ChatPackageCard";
 import { LiveTag } from "./RunProgressCard";
 import { SampleTag } from "./SampleTag";
@@ -126,7 +127,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
       <div role="log" aria-label="Conversation" className="mx-auto flex w-full max-w-[760px] min-w-0 flex-col gap-6">
         {messages === undefined && !shownPending && <p className="text-ink-soft">Loading…</p>}
         {!missing && messages?.length === 0 && !shownPending && (
-          <p className="text-[15px] leading-relaxed text-ink-soft">Ask Air Check to draft a package, check a tracklist or plan a show.</p>
+          <ChatGuide onPick={(q) => { setText(q); document.getElementById("ask")?.focus(); }} />
         )}
         {messages?.map((m) =>
           m.role === "user" ? (
@@ -161,7 +162,7 @@ export function ChatThread({ messages, send, useRun, usePackage, headerSlot, mis
             rows={1}
             value={text}
             disabled={!authReady}
-            placeholder="Ask Air Check to draft, check or plan a show"
+            placeholder="Ask about a package, an artist or the release radar"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void submit(); }
