@@ -5,6 +5,7 @@ import {
   type ClaimInput,
   EMBARGOED_SEARCH_REFUSAL,
   embargoedSearch,
+  deepDiveQueries,
   firstSearchQuery,
   secondSearchQuery,
   judgeClaim,
@@ -391,5 +392,31 @@ describe("firstSearchQuery (Oct 29 prefetch)", () => {
 describe("secondSearchQuery (Oct 30: Tarik asked for interviews, reviews, samples)", () => {
   it("names the artist and title, then what to look for", () => {
     expect(secondSearchQuery({ artist: "Bicep", title: "Glue" })).toBe('Bicep - "Glue" interviews, reviews and samples');
+  });
+});
+
+describe("deepDiveQueries (Oct 30: a deep dive reads like our own Wikipedia page)", () => {
+  it("is five searches per subject type, exactly these strings", () => {
+    expect(deepDiveQueries({ type: "artist", name: "Bicep" })).toEqual([
+      "Tell me about the artist Bicep",
+      "Bicep biography early life origins",
+      "Bicep interview",
+      "Bicep discography albums reviews",
+      "Bicep influences samples legacy",
+    ]);
+    expect(deepDiveQueries({ type: "label", name: "Ninja Tune" })).toEqual([
+      "Tell me about the record label Ninja Tune",
+      "Ninja Tune record label history founders",
+      "Ninja Tune label interview",
+      "Ninja Tune label key releases artists",
+      "Ninja Tune label influence legacy",
+    ]);
+    expect(deepDiveQueries({ type: "release", name: "Isles" })).toEqual([
+      "Tell me about Isles",
+      "Isles recording background",
+      "Isles interview",
+      "Isles review",
+      "Isles samples credits legacy",
+    ]);
   });
 });

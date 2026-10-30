@@ -10,6 +10,16 @@ export const trackKey = (hour: number, position: number) => `H${hour}.${position
 export const firstSearchQuery = (t: { artist: string; title: string }) => `Tell me about this artist and release ${t.artist} - "${t.title}"`;
 /** Oct 30: the second search code runs with the first, for what Tarik asked for: interviews, reviews and samples. */
 export const secondSearchQuery = (t: { artist: string; title: string }) => `${t.artist} - "${t.title}" interviews, reviews and samples`;
+/**
+ * Oct 30 (decision 023): a deep dive's five web searches, run by code when the job starts, in this order: overview,
+ * biography, interviews, records and reviews, influences and legacy (the bridge labels each block by its position).
+ */
+export function deepDiveQueries(subject: { type: "artist" | "label" | "release"; name: string }): string[] {
+  const n = subject.name;
+  if (subject.type === "artist") return [`Tell me about the artist ${n}`, `${n} biography early life origins`, `${n} interview`, `${n} discography albums reviews`, `${n} influences samples legacy`];
+  if (subject.type === "label") return [`Tell me about the record label ${n}`, `${n} record label history founders`, `${n} label interview`, `${n} label key releases artists`, `${n} label influence legacy`];
+  return [`Tell me about ${n}`, `${n} recording background`, `${n} interview`, `${n} review`, `${n} samples credits legacy`];
+}
 
 export function researchTracks(tracks: Track[]): ResearchTrack[] {
   return tracks.map((t) => ({
@@ -84,4 +94,10 @@ export function embargoedSearch(query: string, active: ActiveEmbargo[]): boolean
     const title = embargoTitle(e.title);
     return title !== "" && q.includes(` ${title} `) && q.includes(padded(e.artist));
   });
+}
+
+/** A deep-dive subject kept off web search (R2): its name matches an active embargo's release or artist, or names one. */
+export function crateOnlySubject(name: string, active: ActiveEmbargo[]): boolean {
+  const hit = embargoMatches({ description: name }, active);
+  return hit.blocking.length > 0 || hit.sameArtist.length > 0 || embargoedSearch(name, active);
 }

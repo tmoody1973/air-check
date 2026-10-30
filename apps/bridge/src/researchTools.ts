@@ -171,6 +171,13 @@ const KINDS: Record<ClaimKind, true> = {
   samples: true,
   video: true,
   "fun-fact": true,
+  lead: true,
+  origins: true,
+  career: true,
+  sound: true,
+  records: true,
+  legacy: true,
+  infobox: true,
 };
 const sourceRefProps: Record<keyof SourceRef, object> = {
   id: str("A source id from your search results, e.g. S7k2q"),
@@ -180,7 +187,7 @@ const sourceRefProps: Record<keyof SourceRef, object> = {
 const claimProps: Record<keyof ClaimInput, object> = {
   kind: { type: "string", enum: Object.keys(KINDS) },
   text: str("One sentence, at most 300 characters, no links"),
-  value: str("For release-date, label or credit: the exact value. For a connection: the track key it connects to"),
+  value: str("For release-date, label or credit: the exact value. For a connection: the track key it connects to. For an infobox row: the value"),
   sources: { type: "array", description: "Up to 4", items: { type: "object", properties: sourceRefProps, required: ["id"], additionalProperties: false } },
 };
 const claimsSchema = (description: string) => ({
@@ -191,7 +198,7 @@ const claimsSchema = (description: string) => ({
 const submitProps: Record<keyof SubmitInput, object> = {
   job: str("The research job id, e.g. rj-a1b2c3"),
   key: str("The block's key from the job: a track key (H1.4), H1.intro, H1.threads, a note line id (L23) or brief"),
-  claims: claimsSchema("Facts for this block, up to 12"),
+  claims: claimsSchema("Facts for this block, up to 12 (a deep dive's brief: up to 39)"),
   intro: str("Hour intro, at most 600 characters (key H<n>.intro)"),
   threads: claimsSchema("Threads across the hour (key H<n>.threads)"),
   angle: str("Optional one-line question or connection, at most 140 characters; never a script or talk"),
