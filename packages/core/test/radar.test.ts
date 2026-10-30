@@ -283,7 +283,7 @@ describe("stripLinks and cleanMail (Review Focus 2)", () => {
   test("cleanMail merges subject links into links and Bandcamp pages", () => {
     const m: InboundMail = { messageId: "x", from: "tarik@radiomilwaukee.org", subject: "Fwd: listen https://artist.bandcamp.com/album/x", text: "hi", hrefs: [], attachmentCount: 0, bodyMissing: false };
     const c = cleanMail(m, { ok: true, tab: "cosign", address: "tarik@radiomilwaukee.org" });
-    expect(c.subject).toBe("Fwd: listen [link]");
+    expect(c.subject).toBe("Fwd: listen [link 1]"); // decision 027: a kept link is numbered
     expect(c.links).toEqual(["https://artist.bandcamp.com/album/x"]);
     expect(c.bandcampPages).toEqual(["https://artist.bandcamp.com/album/x"]);
   });
@@ -874,7 +874,8 @@ describe("hosts and addresses that radar.received would refuse are dropped in co
     expect(c.hosts).toEqual(["good.example"]);
     expect(c.links).toEqual(["https://good.example/e"]);
     expect(c.body).not.toMatch(/foo_bar|localhost|2001|example\.com\./);
-    expect(c.body.match(/\[link\]/g)).toHaveLength(5);
+    expect(c.body.match(/\[link\]/g)).toHaveLength(4); // the four dropped ones
+    expect(c.body).toMatch(/and \[link 1\]$/); // decision 027: the kept one is numbered
   });
   test("an address over 254 characters is not an address (direct and forwarded senders)", () => {
     const long = `${"a".repeat(290)}@label.example`;

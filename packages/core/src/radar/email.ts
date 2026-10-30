@@ -1,3 +1,4 @@
+import { coverArtUrl } from "./art";
 import { BANDCAMP_DOMAIN, bandcampPageUrl } from "./bandcamp";
 
 /** As much of an AgentMail message as the radar reads. Attachments are counted, never read. */
@@ -7,6 +8,8 @@ export interface InboundMail {
   subject: string;
   text: string;
   hrefs: string[];
+  /** The raw HTML part, read again by cleanMail for covers (decision 027) once the sender is confirmed. */
+  html?: string;
   attachmentCount: number;
   bodyMissing: boolean;
 }
@@ -27,6 +30,8 @@ export interface CleanMail {
   subject: string;
   body: string;
   links: string[];
+  /** Decision 027: allowed cover addresses, in order; the body's [image N] is images[N-1]. Left out when there are none. */
+  images?: string[];
   bandcampPages: string[];
   hosts: string[];
 }
@@ -40,6 +45,7 @@ const MAX_FROM_CHARS = 998; // RFC 5322's line limit
 const MAX_VERDICT_CHARS = 255; // a DMARC result word or a domain name
 const MAX_LABELS = 100;
 const MAX_LINKS = 20;
+export const MAX_IMAGES = 20;
 const MAX_LINK_CHARS = 500;
 const MAX_PAGES = 3;
 const MAX_HOSTS = 3;
@@ -65,6 +71,7 @@ export function pickInbound(message: unknown): InboundMail | null {
     subject: str(m.subject) ?? "",
     text: text?.trim() ? text : (fromHtml?.text ?? ""),
     hrefs: fromHtml?.hrefs ?? [],
+    ...(html !== undefined && { html }),
     attachmentCount: Array.isArray(m.attachments) ? m.attachments.length : 0,
     bodyMissing: text === undefined && html === undefined, // AgentMail omits both over 1 MB
   };
@@ -94,7 +101,8 @@ function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]+);/gi, (whole, e: string) => {
     if (e[0] !== "#") return ENTITIES[e.toLowerCase()] ?? whole;
     const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    // Never the cleaner's own placeholder characters (decision 027): an email cannot forge a marker.
+    return code > 0 && code <= 0x10ffff && code !== 0xe000 && code !== 0xe001 ? String.fromCodePoint(code) : whole;
   });
 }
 
@@ -133,12 +141,18 @@ function dropBlocks(html: string): string {
 // ponytail: regex-based, fine for mail bodies. Swap to a parser if a real email breaks it.
 /** Plain text and every href from an HTML mail body. Script, style and head are dropped. */
 export function htmlToText(html: string): { text: string; hrefs: string[] } {
-  // [^<>] rather than [^>]: an unclosed "<" then scans only to the next tag, so a run of them stays linear.
-  const visible = dropBlocks(html).replace(/<(?:link|base)\b[^<>]*>/gi, " ");
+  const visible = visibleHtml(html);
   const hrefs = [...visible.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)]
     .map((m) => decodeEntities((m[1] ?? m[2] ?? m[3] ?? "").trim()))
     .filter(Boolean);
-  const text = decodeEntities(
+  return { text: tagsToText(visible), hrefs };
+}
+
+// [^<>] rather than [^>]: an unclosed "<" then scans only to the next tag, so a run of them stays linear.
+const visibleHtml = (html: string) => dropBlocks(html).replace(/<(?:link|base)\b[^<>]*>/gi, " ");
+
+function tagsToText(visible: string): string {
+  return decodeEntities(
     visible
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/?(?:p|div|tr|li|ul|ol|h[1-6]|table|blockquote|section|article|header|footer|hr)\b[^<>]*>/gi, "\n")
@@ -149,7 +163,38 @@ export function htmlToText(html: string): { text: string; hrefs: string[] } {
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return { text, hrefs };
+}
+
+// Decision 027: while one email is cleaned, a link or cover is a private-use placeholder (OPEN kind index CLOSE) until
+// the final lists are known; then it becomes [link N] or [image N]. Incoming text never holds these two characters.
+const OPEN = "\uE000";
+const CLOSE = "\uE001";
+const PLACEHOLDER_CHARS = /[\uE000\uE001]/g;
+const PLACEHOLDER = /\uE000([uai])(\d{1,6})\uE001/g;
+const placeholder = (kind: "u" | "a" | "i", i: number) => ` ${OPEN}${kind}${i}${CLOSE} `;
+const SRC = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
+const HREF = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
+// width="1", height=2 or style="width:1px": 3 or less is a tracking pixel or a spacer.
+const SIZE = /(?:\s(?:width|height)\s*=\s*["']?\s*|[\s;"'](?:width|height)\s*:\s*)(\d{1,6})/gi;
+
+const attr = (tag: string, re: RegExp) => {
+  const m = re.exec(tag);
+  return m ? decodeEntities((m[1] ?? m[2] ?? m[3] ?? "").trim()) : "";
+};
+const isPixel = (tag: string) => [...tag.matchAll(SIZE)].some((m) => Number(m[1]) <= 3);
+
+/**
+ * The HTML part as text with a placeholder where each link (`<a href>`) and each image was. `imageAt[k]` is image k's
+ * cover address when it passes coverArtUrl and is not a pixel, else null; `images` is the distinct kept covers, at most 20.
+ */
+function markedHtml(html: string): { text: string; anchors: string[]; imageAt: (string | null)[]; images: string[] } {
+  const anchors: string[] = [];
+  const imageAt: (string | null)[] = [];
+  const visible = visibleHtml(html.replace(PLACEHOLDER_CHARS, ""))
+    .replace(/<a\b[^<>]*>/gi, (tag) => placeholder("a", anchors.push(attr(tag, HREF)) - 1))
+    .replace(/<img\b[^<>]*>/gi, (tag) => placeholder("i", imageAt.push(isPixel(tag) ? null : coverArtUrl(attr(tag, SRC))) - 1));
+  const images = [...new Set(imageAt.filter((u): u is string => u !== null))].slice(0, MAX_IMAGES);
+  return { text: tagsToText(visible), anchors, imageAt, images };
 }
 
 /** Comma-separated, lowercased. Unset parses to nothing: an empty list is a closed door. */
@@ -276,11 +321,19 @@ function httpLink(raw: string): string | null {
  * the ones that pass bandcampPageUrl (at most 3) are the only links anything may fetch.
  */
 export function stripLinks(text: string, hrefs: string[] = []): { text: string; links: string[]; bandcampPages: string[]; hosts: string[] } {
+  const { found: _, ...r } = strip(text, hrefs, false);
+  return r;
+}
+
+type Stripped = ReturnType<typeof stripLinks> & { found: string[] };
+
+/** stripLinks; with `mark`, each http(s) URL becomes a placeholder for found[i] instead of [link] (decision 027). */
+function strip(text: string, hrefs: string[], mark: boolean): Stripped {
   const found: string[] = [];
   const toLink = (match: string) => {
     const core = match.replace(TRAILING, "");
-    found.push(core);
-    return "[link]" + match.slice(core.length);
+    const i = found.push(core) - 1;
+    return (mark ? placeholder("u", i).trim() : "[link]") + match.slice(core.length);
   };
   const asLink = (m: string) => "[link]" + m.slice(m.replace(TRAILING, "").length);
   // NFKC first, so fullwidth and small-form look-alikes (ｈttps, ：, ＠, ﹫) become the ASCII the patterns catch.
@@ -300,7 +353,7 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
   const pages = links.map((l) => [l, bandcampPageUrl(l)] as const);
   const bandcampPages = [...new Set(pages.flatMap(([, p]) => (p ? [p] : [])))].slice(0, MAX_PAGES);
   const hosts = [...new Set(pages.flatMap(([l, p]) => (p ? [] : [new URL(l).hostname])))].slice(0, MAX_HOSTS);
-  return { text: stripped, links, bandcampPages, hosts };
+  return { text: stripped, links, bandcampPages, hosts, found };
 }
 
 // Listening-queue brief C: an unsubscribe or preferences link (it can carry Tarik's address and a signature) is never kept.
@@ -343,23 +396,73 @@ function cutOnSpace(text: string, max: number): string {
   return space > 0 ? cut.slice(0, space) : cut;
 }
 
-/** The console's one call: unwrap the forward, strip links and addresses from body and subject, cap the body. */
+// An email's own "[image 2]" or "[link 1]" is flattened, so every numbered marker in stored text is the cleaner's.
+const flatten = (text: string) => text.replace(/\[(link|image)\s{0,3}\d{1,6}\]/gi, "[$1]");
+
+/** A link as it is stored (http(s), tracking stripped), so a placeholder finds its number in the final list. */
+const storedForm = (raw: string): string | undefined => {
+  const l = httpLink(raw);
+  return l ? tidyLinks([l])[0] : undefined;
+};
+
+/** Placeholders to markers: [link N] / [image N] where the address is in the final list; else [link] for a URL, nothing for a tag. */
+function numbered(text: string, found: string[], links: string[], html: ReturnType<typeof markedHtml> | null, images: string[]): string {
+  const linkNo = (raw: string | undefined) => {
+    const n = raw === undefined ? 0 : links.indexOf(storedForm(raw) ?? "") + 1;
+    return n ? `[link ${n}]` : null;
+  };
+  return text
+    .replace(PLACEHOLDER, (_, kind: string, i: string) => {
+      if (kind === "u") return linkNo(found[Number(i)]) ?? "[link]";
+      if (kind === "a") return linkNo(html?.anchors[Number(i)]) ?? "";
+      const n = images.indexOf(html?.imageAt[Number(i)] ?? "") + 1;
+      return n ? `[image ${n}]` : "";
+    })
+    .replace(PLACEHOLDER_CHARS, "");
+}
+
+/**
+ * The console's one call: unwrap the forward, strip links and addresses from body and subject, cap the body. Links are
+ * numbered [link N] (links[N-1]). Decision 027: a co-sign email whose HTML holds an allowed cover is read from the HTML,
+ * so each cover gets an [image N] (images[N-1]) where it was; any other email keeps its plain-text body.
+ */
 export function cleanMail(mail: InboundMail, decision: Extract<SenderDecision, { ok: true }>): CleanMail {
   const forward = unwrapForward(mail.text);
-  const subject = stripLinks(mail.subject.slice(0, MAX_SUBJECT_CHARS));
-  const body = stripLinks(cutOnSpace(forward.body, MAX_STORED_CHARS + BODY_MARGIN), [...mail.hrefs, ...subject.links]);
+  const html = decision.tab === "cosign" && mail.html ? markedHtml(mail.html) : null;
+  const fromHtml = html?.images.length ? html : null;
+  const source = fromHtml ? unwrapForward(fromHtml.text).body : forward.body.replace(PLACEHOLDER_CHARS, "");
+  const subject = strip(flatten(mail.subject.slice(0, MAX_SUBJECT_CHARS).replace(PLACEHOLDER_CHARS, "")), [], true);
+  const body = strip(cutOnSpace(flatten(source), MAX_STORED_CHARS + BODY_MARGIN), [...mail.hrefs, ...subject.links], true);
   const from = forward.sender ?? parseFrom(mail.from);
   const sender = {
     ...(from.name ? { name: stripLinks(from.name.slice(0, MAX_NAME_CHARS)).text.slice(0, MAX_NAME_CHARS) } : {}),
     ...(from.address ? { address: from.address } : {}),
   };
+  const links = tidyLinks(body.links);
+  const images = fromHtml?.images ?? [];
+  let text = numbered(body.text, body.found, links, fromHtml, images);
+  // Placeholders came with spaces around them; one dropped (an unkept tag) or repeated (a linked URL) is tidied.
+  if (fromHtml) text = text.replace(/(\[link \d+\])(?: \1)+/g, "$1").replace(/ {2,}/g, " ").replace(/ *\n */g, "\n");
   return {
     tab: decision.tab,
     ...(sender.name || sender.address ? { sender } : {}),
-    subject: subject.text,
-    body: body.text.slice(0, MAX_STORED_CHARS),
-    links: tidyLinks(body.links),
+    subject: numbered(subject.text, subject.found, links, null, []),
+    body: text.slice(0, MAX_STORED_CHARS),
+    links,
+    ...(images.length ? { images } : {}),
     bandcampPages: body.bandcampPages,
     hosts: body.hosts,
   };
+}
+
+/**
+ * Decision 027: one release's own cover and links from the marker numbers the reader gave, looked up in the stored
+ * email's lists. A number out of range, or a cover off the allowlist, gives nothing; no links at all leaves `links` out.
+ */
+export function markedMedia(f: { image?: number; links?: number[] }, images: string[], links: string[]): { art?: string; links?: string[] } {
+  const at = (list: string[], n: number) => (Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined);
+  const cover = f.image === undefined ? undefined : at(images, f.image);
+  const art = cover !== undefined && coverArtUrl(cover) === cover ? cover : undefined;
+  const own = tidyLinks((f.links ?? []).flatMap((n) => at(links, n) ?? []));
+  return { ...(art ? { art } : {}), ...(own.length ? { links: own } : {}) };
 }

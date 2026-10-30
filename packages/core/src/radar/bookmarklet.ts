@@ -1,5 +1,5 @@
 import { type BandcampEmbed, bandcampPageUrl, embedFromPaste } from "./bandcamp";
-import { bandcampArtUrl } from "./bandcampPage";
+import { bandcampArtUrl } from "./art";
 
 /**
  * Oct 30: the "Send to Air Check" bookmarklet. It runs in Tarik's own browser on a Bandcamp page he has open, reads the

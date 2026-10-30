@@ -1,6 +1,6 @@
 "use client";
 
-import { bandcampArtUrl, isEmbargoActive, type BandcampEmbed } from "@aircheck/core";
+import { coverArtUrl, isEmbargoActive, type BandcampEmbed } from "@aircheck/core";
 import { useId, useState, type FormEvent } from "react";
 import { chicagoDateLabel, showDateLabel } from "../lib/date";
 import { BandcampPlayer } from "./BandcampPlayer";
@@ -278,14 +278,15 @@ function Chevron({ turn }: { turn: string }) {
   );
 }
 
-const realArt = (r: Release) => !!r.art && bandcampArtUrl(r.art) === r.art;
+// Decision 027: Bandcamp's image host, or Mailchimp's for a cover kept from a co-sign email.
+const realArt = (r: Release) => !!r.art && coverArtUrl(r.art) === r.art;
 /**
- * Whether a block draws art: Bandcamp's own image host only, or the demo's placeholder on a bracketed Bandcamp sample.
+ * Whether a block draws art: an allowed image host (coverArtUrl) only, or the demo's placeholder on a bracketed Bandcamp sample.
  * Oct 30 (decision 026): the demo's real, already-released sample releases show their real cover.
  */
 const hasArt = (r: Release, ctx: ReleaseCtx) => realArt(r) || (ctx.demo && r.source !== "cosign");
 
-/** Cover art: a lazy image with no referrer, only from Bandcamp's image host. The demo shows a placeholder (copyright). */
+/** Cover art: a lazy image with no referrer, only from an allowed image host. The demo shows a placeholder (copyright). */
 function Art({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const box = "size-14 md:size-16 shrink-0 rounded-control";
   if (!hasArt(r, ctx)) return null;

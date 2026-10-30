@@ -1,5 +1,6 @@
 import { isShowDate } from "../episode/dates";
 import { metaTags } from "./bandcamp";
+import { bandcampArtUrl } from "./art";
 import { htmlToText, stripLinks } from "./email";
 
 // Plan 8 Task 6b: what the ingest worker keeps from the one Bandcamp page it already reads for the player id (no new
@@ -9,14 +10,11 @@ import { htmlToText, stripLinks } from "./email";
 export const MAX_TAGS = 12;
 export const MAX_TAG_CHARS = 40;
 export const MAX_ABOUT_CHARS = 2_000;
-const MAX_ART_CHARS = 500;
 const MAX_ABOUT_HTML = 20_000; // the about block is cut to this before it is read
 const MAX_TAG_LINKS = 200; // tag-class links looked at, at most (the scan itself is linear)
 
 export type BandcampDetails = { art?: string; tags?: string[]; about?: string; releasedOn?: string; pageArtist?: string };
 
-const ART_HOST = /^(?:[a-z0-9-]{1,63}\.){1,4}bcbits\.com$/;
-const ART_PATH = /^\/img\/[A-Za-z0-9_-]{1,100}\.(?:jpe?g|png|gif|webp)$/i;
 const TAG_CHARS = /^[\p{L}\p{N} &'\-/.]+$/u;
 // Bounded repeats: each "<a" scans at most ~1,200 characters, so a page of them stays linear.
 const TAG_LINK = /<a\b([^<>]{0,1000})>([^<>]{0,200})<\/a\s{0,20}>/gi;
@@ -32,20 +30,6 @@ const LINKISH = /:\/\/|@|\bwww\.|[a-z0-9-]\.[a-z]{2,}\//i;
 const MAX_ARTIST_CHARS = 200; // radar's field limit
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const ABOUT_OPEN = /class\s{0,20}=\s{0,20}"[^"<>]{0,200}\btralbum-about\b[^"<>]{0,200}"[^<>]{0,500}>/i;
-
-/** Cover art: an https image on a *.bcbits.com host (no query, port or credentials), else null. The URL only, never the image. */
-export function bandcampArtUrl(raw: string): string | null {
-  if (raw.length > MAX_ART_CHARS || raw.includes("?") || raw.includes("#")) return null;
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:" || u.username || u.password || u.port || !ART_HOST.test(u.hostname) || !ART_PATH.test(u.pathname)) return null;
-  const art = `https://${u.hostname}${u.pathname}`;
-  return art === raw ? art : null;
-}
 
 /**
  * One Bandcamp tag, lower-cased with its spaces collapsed, or null. Letters, numbers, space and & ' - / . only, at most

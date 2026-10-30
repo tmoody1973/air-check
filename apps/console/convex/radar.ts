@@ -3,6 +3,7 @@ import {
   bandcampPageUrl,
   embedFromPaste,
   chicagoDayKey,
+  coverArtUrl,
   agentEmbargoLines,
   bandcampArtUrl,
   bandcampPageForTitle,
@@ -15,6 +16,8 @@ import {
   isHostName,
   isShowDate,
   MAX_ABOUT_CHARS,
+  MAX_IMAGES,
+  markedMedia,
   MAX_RELEASES,
   MAX_STORED_CHARS,
   MAX_TAGS,
@@ -112,6 +115,7 @@ const cleanMailV = v.object({
   subject: v.string(),
   body: v.string(),
   links: v.array(v.string()),
+  images: v.optional(v.array(v.string())),
   bandcampPages: v.array(v.string()),
   hosts: v.array(v.string()),
 });
@@ -124,6 +128,9 @@ const releaseFieldsV = v.object({
   releasedOn: v.optional(v.string()),
   genre: v.optional(v.string()),
   embargo: v.optional(embargoV),
+  // Decision 027: marker numbers into the stored email's images and links, never addresses.
+  image: v.optional(v.number()),
+  links: v.optional(v.array(v.number())),
 });
 const outcomeV = v.union(
   // Decision 024: a roundup's other releases ride in `more`; a one-release email has no `more`.
@@ -153,9 +160,12 @@ function tidyMail(m: CleanMailArg): CleanMailArg {
   const { address, ...rest } = m.sender ?? {};
   const keep = address !== undefined && address.length <= MAX_SENDER_ADDRESS;
   const sender = { ...rest, ...(keep ? { address } : {}) };
-  const { sender: _, ...mail } = m;
+  const { sender: _, images, ...mail } = m;
+  // Decision 027: all or none, so an [image N] never points at a different cover than the one the console numbered.
+  const coversOk = images !== undefined && images.length > 0 && images.length <= MAX_IMAGES && images.every((i) => coverArtUrl(i) === i);
   return {
     ...mail,
+    ...(coversOk && { images }),
     ...(sender.name || sender.address ? { sender } : {}),
     // A non-http link stays, so mailProblem refuses it. Brief C: core's tidyLinks again, so a stored row never holds an
     // unsubscribe link, a bare site root or a tracking copy of a link it already has.
@@ -182,6 +192,7 @@ function releaseProblem(f: ReleaseFields): string | null {
     if (LINKISH.test(val)) return `The ${k} must not hold a link or address`;
   }
   if (!f.artist.trim() || !f.title.trim()) return "Artist and title are required";
+  if ((f.links?.length ?? 0) > MAX_LINKS) return `At most ${MAX_LINKS} links on one release`;
   if (f.releasedOn !== undefined && !isShowDate(f.releasedOn)) return "The release date must be a date, yyyy-mm-dd";
   if (!embargoDateOk(f.embargo)) return "The embargo date must be a date, yyyy-mm-dd";
   return null;
@@ -234,6 +245,7 @@ export const received = mutation({
       ...(m.sender && { sender: m.sender }),
       body: m.body,
       links: m.links,
+      ...(m.images && { images: m.images }),
       bandcampPages: m.bandcampPages,
       linkCount: m.links.length,
     });
@@ -321,14 +333,21 @@ function stricter(a: Embargo | undefined, b: Embargo | undefined): Embargo | und
   return { until: a.until > b.until ? a.until : b.until };
 }
 
-/** One record per release key. A merge fills only empty fields Tarik has not edited and leaves status and tab alone. */
-async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields, page: string | null): Promise<{ releaseId: Id<"releases">; merged: boolean }> {
+/**
+ * One record per release key. A merge fills only empty fields Tarik has not edited and leaves status and tab alone.
+ * Decision 027: the reader's image and link numbers become this release's own cover and links from the stored email;
+ * with no link numbers the release takes every link the email held, as before.
+ */
+async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, marked: ReleaseFields, page: string | null): Promise<{ releaseId: Id<"releases">; merged: boolean }> {
+  const { image, links: linkNumbers, ...f } = marked;
+  const media = markedMedia({ image, links: linkNumbers }, row.images ?? [], row.links ?? []);
+  const links = media.links ?? row.links ?? [];
   const key = releaseKey(f.artist, f.title);
   const sender = { ...row.sender, messageId: row.messageId, at: row.receivedAt };
   const queue = page ? { bandcampPage: page, embedState: "queued" as const, embedQueuedAt: Date.now() } : {};
   const cur = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
   if (!cur) {
-    const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as ReleaseFields;
+    const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as typeof f;
     const releaseId = await ctx.db.insert("releases", {
       workspace: "real",
       ...fields,
@@ -336,7 +355,8 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
       status: "new",
       source: row.tab ?? "cosign",
       senders: [sender],
-      links: row.links ?? [],
+      links,
+      ...(media.art && { art: media.art }),
       key,
       receivedAt: row.receivedAt,
       ...queue,
@@ -354,7 +374,8 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields
     ...(embargo && { embargo }),
     ...(tarikSet && f.embargo && { laterEmbargoNotice: { at: row.receivedAt, until: f.embargo.until } }),
     senders: [...(cur.senders ?? []), sender].slice(0, MAX_SENDERS),
-    links: [...new Set([...(cur.links ?? []), ...(row.links ?? [])])].slice(0, MAX_LINKS),
+    links: [...new Set([...(cur.links ?? []), ...links])].slice(0, MAX_LINKS),
+    ...(!cur.art && media.art && { art: media.art }),
     ...(!cur.bandcampPage && queue),
   });
   return { releaseId: cur._id, merged: true };
@@ -410,7 +431,8 @@ export const embedResult = mutation({
       // A re-read (radar.reparse, B2: the release already has a player) only adds what the page gave; a detail it did not
       // find this time is kept, never erased.
       const read = pageDetails(result);
-      const details = rel.embed ? Object.fromEntries(Object.entries(read).filter(([, val]) => val !== undefined)) : read;
+      // Decision 027: the page's cover replaces an email's; a page with none keeps it.
+      const details = rel.embed ? Object.fromEntries(Object.entries(read).filter(([, val]) => val !== undefined)) : { ...read, art: read.art ?? rel.art };
       // The page's release date fills an empty one only, never one Tarik set or cleared (as a merge fill). A bad date is
       // dropped, not thrown. Not part of searchText.
       const fillDate = result.releasedOn !== undefined && isShowDate(result.releasedOn) && rel.releasedOn === undefined && !(rel.editedFields ?? []).includes("releasedOn");

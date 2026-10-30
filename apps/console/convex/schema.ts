@@ -270,6 +270,8 @@ export default defineSchema({
     sender: v.optional(v.object({ name: v.optional(v.string()), address: v.optional(v.string()) })),
     body: v.optional(v.string()),
     links: v.optional(v.array(v.string())),
+    // Decision 027: allowed cover addresses, in the order of the body's [image N] markers. Never fetched by a server.
+    images: v.optional(v.array(v.string())),
     bandcampPages: v.optional(v.array(v.string())),
     reasons: v.optional(v.array(v.string())),
     releaseId: v.optional(v.id("releases")),
