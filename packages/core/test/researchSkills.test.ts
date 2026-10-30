@@ -29,7 +29,9 @@ describe("rlr-show-notes (Oct 29)", () => {
   const skill = RESEARCH_SKILL_TEXT["show-notes"];
 
   it("searches the web first with Tarik's query, at most 3 a track, and keeps unsourced facts as [verify]", () => {
-    expect(skill).toContain('`source_search` with exactly: `Tell me about this artist and release <Artist> - "<Title>"`');
+    // Oct 29 prefetch: Air Check runs the first search in code; the skill says to read it before searching.
+    expect(skill).toContain("Your first search for each track is already done; read it before searching.");
+    expect(skill).toContain('`first_search` with the job and the track key. Air Check ran exactly `Tell me about this artist and release <Artist> - "<Title>"`');
     expect(skill).toContain("At most 3 web searches a track");
     expect(skill).toContain('`source: "apple_music"`');
     expect(skill).toContain("submit it with `sources: []`");

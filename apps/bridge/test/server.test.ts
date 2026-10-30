@@ -153,9 +153,9 @@ describe("bridge HTTPS server", () => {
     expect(r.status).toBe(400);
   });
 
-  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun, radar_get, source_search and research_submit only", async () => {
+  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun, radar_get, source_search, first_search and research_submit only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
-    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "first_search", "research_submit"]);
   });
 
   it("/aircheck/mcp refuses an unknown tool name", async () => {
@@ -216,7 +216,7 @@ describe("bridge HTTPS server", () => {
 
   it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
     const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
-    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "first_search", "research_submit"]);
     convexHits.length = 0;
     const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
     const r = await send("/aircheck-demo/mcp", {
@@ -258,6 +258,13 @@ describe("bridge HTTPS server", () => {
   it("source_search without a Tavily key answers plainly and calls nothing", async () => {
     convexHits.length = 0;
     const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a" } }) });
+    expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
+    expect(convexHits).toHaveLength(0);
+  });
+
+  it("first_search without a Tavily key answers plainly and calls nothing", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "first_search", arguments: { job: "rj-abc123", key: "H1.1" } }) });
     expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
     expect(convexHits).toHaveLength(0);
   });

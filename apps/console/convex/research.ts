@@ -6,6 +6,7 @@ import {
   deepDiveMarkdown,
   embargoedSearch,
   embargoMatches,
+  firstSearchQuery,
   isShowDate,
   type JudgedClaim,
   judgeClaim,
@@ -609,12 +610,14 @@ export const notesForDraft = query({
   },
 });
 
-/** Web searches used today in the caller's workspace, and the cap. */
+/** Web searches used today in the caller's workspace, the cap, and (once the bridge reports any) Tavily credits spent. */
 export const searchUsage = query({
   args: { today: v.optional(v.string()) },
   handler: async (ctx, { today }) => {
     const ws = workspaceOf(await actorOf(ctx));
-    return ws ? { used: await webUsed(ctx, ws, dayOf(today)), cap: SEARCH_CAP[ws] } : null;
+    if (!ws) return null;
+    const row = await usageRow(ctx, ws, dayOf(today));
+    return { used: row?.count ?? 0, cap: SEARCH_CAP[ws], ...(row?.credits !== undefined && { credits: row.credits }) };
   },
 });
 
@@ -760,6 +763,49 @@ export const countSearch = internalMutation({
     if (row) await ctx.db.patch(row._id, { count: used + 1 });
     else await ctx.db.insert("searchUsage", { workspace, day, ...(source && { source }), count: 1 });
     return { allowed: true, used: used + 1, cap };
+  },
+});
+
+/**
+ * Oct 29 prefetch (POST /agent/research-prefetch): the tracks of a running show-notes job whose first web search the
+ * bridge runs in code, each with its query (core firstSearchQuery). Only keys still to research (a Regenerate: its one
+ * block); never a closing track (Hard Rule 4). An embargoed track is listed by key only, never searched (R2, R8). It
+ * reads only: each search is still counted by countSearch before it runs.
+ */
+export const prefetchPlan = internalQuery({
+  args: { workspace: workspaceV, jobId: v.string() },
+  handler: async (ctx, { workspace, jobId }) => {
+    const job = await jobById(ctx, jobId);
+    if (!job || job.workspace !== workspace) return { ok: false as const, status: 404 as const, error: "" };
+    const no = (error: string) => ({ ok: false as const, status: 409 as const, error });
+    if (job.kind !== "show-notes") return no("Only show notes have first searches; use source_search.");
+    if (job.status === "taken-over") return no("Tarik took over; stop now.");
+    if (!ACTIVE.includes(job.status)) return no("This research job is not running.");
+    const keys = new Set(job.scope ?? remainingKeys(job, await liveEntries(ctx, jobId)));
+    const active = await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()));
+    const tracks: { key: string; query: string }[] = [];
+    const embargoed: string[] = [];
+    for (const t of job.tracks ?? []) {
+      if (t.closing || !keys.has(t.key)) continue;
+      const query = firstSearchQuery(t);
+      if (trackEmbargo(t, active) || embargoedSearch(query, active)) embargoed.push(t.key);
+      else tracks.push({ key: t.key, query });
+    }
+    return { ok: true as const, tracks, embargoed };
+  },
+});
+
+/**
+ * Oct 29 prefetch (POST /agent/search-done): after a web search, or a prefetch batch, the bridge gives back the searches
+ * that failed (only successful ones count against the cap, never below zero) and adds the Tavily credits they cost.
+ */
+export const searchDone = internalMutation({
+  args: { workspace: workspaceV, refund: v.number(), credits: v.number() },
+  handler: async (ctx, { workspace, refund, credits }) => {
+    const day = chicagoDayKey(Date.now());
+    const row = await usageRow(ctx, workspace, day);
+    if (row) await ctx.db.patch(row._id, { count: Math.max(0, row.count - refund), credits: (row.credits ?? 0) + credits });
+    else if (credits > 0) await ctx.db.insert("searchUsage", { workspace, day, count: 0, credits });
   },
 });
 

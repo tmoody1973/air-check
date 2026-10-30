@@ -6,6 +6,9 @@ import type { EmbargoMark, NoteLine, ResearchTrack } from "./types";
 
 export const trackKey = (hour: number, position: number) => `H${hour}.${position}`;
 
+/** Oct 29 prefetch: each show-notes track's first web search, which code runs before the agent writes (skill rlr-show-notes). */
+export const firstSearchQuery = (t: { artist: string; title: string }) => `Tell me about this artist and release ${t.artist} - "${t.title}"`;
+
 export function researchTracks(tracks: Track[]): ResearchTrack[] {
   return tracks.map((t) => ({
     key: trackKey(t.hour, t.position),

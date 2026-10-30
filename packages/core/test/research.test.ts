@@ -5,6 +5,7 @@ import {
   type ClaimInput,
   EMBARGOED_SEARCH_REFUSAL,
   embargoedSearch,
+  firstSearchQuery,
   judgeClaim,
   LIMITS,
   normalize,
@@ -377,5 +378,11 @@ describe("embargoes in research (R2, R8)", () => {
     // Task 1 carry: a feat. clause in the query must not hide the words after it.
     expect(embargoedSearch("Artist A feat. B Up label", [{ artist: "Ãrtist A", title: "Up", until: null }])).toBe(true);
     expect(EMBARGOED_SEARCH_REFUSAL).not.toMatch(/embargo/i);
+  });
+});
+
+describe("firstSearchQuery (Oct 29 prefetch)", () => {
+  it("is Tarik's query, exactly as the skill writes it", () => {
+    expect(firstSearchQuery({ artist: "Bicep", title: "Glue" })).toBe('Tell me about this artist and release Bicep - "Glue"');
   });
 });

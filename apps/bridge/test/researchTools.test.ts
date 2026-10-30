@@ -175,6 +175,20 @@ describe("source_search", () => {
     expect(textOf(r)).toBe("Web search failed (HTTP 500). Try again later.");
   });
 
+  it("reports the credits Tavily says a search cost (Oct 29), and gives back a failed one: only successful searches count", async () => {
+    const ok = setup(undefined, () => json(200, { results, usage: { credits: 2 } }));
+    await ok.t.call({ query: "artist a album" });
+    const done = (f: typeof ok.fetch) =>
+      (f.mock.calls as unknown as [string, RequestInit][]).filter(([u]) => u === `${SITE}/agent/search-done`).map(([, init]) => JSON.parse(String(init.body)));
+    expect(done(ok.fetch)).toEqual([{ credits: 2 }]);
+    const failed = setup(undefined, () => json(400, {}));
+    await failed.t.call({ query: "artist a album" });
+    expect(done(failed.fetch)).toEqual([{ refund: 1 }]);
+    const free = setup(); // no usage in the answer: nothing to report
+    await free.t.call({ query: "artist a album" });
+    expect(done(free.fetch)).toEqual([]);
+  });
+
   it("logs time and result count, never the query", async () => {
     const { t } = setup();
     await t.call({ query: "secret artist query" });

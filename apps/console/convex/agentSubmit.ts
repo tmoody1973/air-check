@@ -193,6 +193,13 @@ export function pickResearch(body: unknown): { input: ResearchSubmit } | { probl
 }
 
 /** POST /agent/search-usage: `{ query }` (web) or `{ query, source: "apple_music" }`; anything else is null. */
+const countIn = (x: unknown, max: number) => x === undefined || (Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max);
+/** Oct 29 prefetch: failed searches to give back and Tavily credits spent, both whole numbers in a sane range. */
+export function pickSearchDone(body: unknown): { refund: number; credits: number } | null {
+  if (!isObj(body) || !countIn(body.refund, 100) || !countIn(body.credits, 10_000)) return null;
+  return { refund: (body.refund as number | undefined) ?? 0, credits: (body.credits as number | undefined) ?? 0 };
+}
+
 export function pickSearchUsage(body: unknown): { query: string; source?: "apple_music" } | null {
   if (!isObj(body) || typeof body.query !== "string" || body.query.length > 1_000) return null;
   if (body.source === undefined || body.source === "web") return { query: body.query };

@@ -18,7 +18,7 @@ function WebSearchUsage() {
     <section aria-labelledby="web-search-h" className="mx-auto w-full max-w-xl rounded-card border border-line bg-surface p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="web-search-h" className="text-base font-semibold">Web search (Tavily)</h2>
-        <p className="text-sm tabular-nums text-ink-soft">{usage.used} of {usage.cap} searches used today</p>
+        <p className="text-sm tabular-nums text-ink-soft">{`${usage.used} of ${usage.cap} searches used today${usage.credits !== undefined ? ` · ${usage.credits} credits` : ""}`}</p>
       </div>
       <p className="mt-1 text-[12.5px] text-muted">Research stops searching at the cap and marks what is left could-not-verify. Resets at midnight in Milwaukee.</p>
     </section>

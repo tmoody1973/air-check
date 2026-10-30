@@ -15,6 +15,7 @@ import { episodeMarkRerunTool, packageGetTool, packageReviseTool, packageSubmitT
 import { bearerOk } from "./auth.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import { createCrateProxy } from "./crateProxy.js";
+import { firstSearchTool } from "./prefetch.js";
 import { researchSubmitTool, sourceSearchTool } from "./researchTools.js";
 import { annotateCrateResult, createSourceLedger } from "./sources.js";
 
@@ -98,7 +99,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
 }
 
 /** The private HTTPS bridge: /crate/mcp (allowlisted Crate, each result's URLs given source ids) and /aircheck/mcp
- * (package_submit, package_revise, read-only package_get, episode_mark_rerun, radar_get, source_search, research_submit),
+ * (package_submit, package_revise, read-only package_get, episode_mark_rerun, radar_get, source_search, first_search,
+ * research_submit),
  * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   // One ledger for every route: ids Crate issues on /crate/mcp are cited on /aircheck/mcp. Shared by real and demo (R4).
@@ -107,7 +109,8 @@ export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   // Unconfigured or an unreadable key: source_search's apple_music option says so; the bridge still starts.
   const appleMusic = loadAppleMusic(config.appleMusic);
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
-    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool, researchSubmitTool].map((make) =>
+    // One set per route, made once: first_search keeps its job's searched answers across the agent's calls.
+    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool, firstSearchTool, researchSubmitTool].map((make) =>
       make({ siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey, appleMusic }),
     );
     return {

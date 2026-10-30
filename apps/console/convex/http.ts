@@ -2,7 +2,7 @@ import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { MAX_BODY_BYTES, MIN_TOKEN_LENGTH, pickInput, pickResearch, pickRevision, pickSearchUsage, privateTerms, readCapped, RESEARCH_BODY_BYTES, workspaceForToken } from "./agentSubmit";
+import { MAX_BODY_BYTES, MIN_TOKEN_LENGTH, pickInput, pickResearch, pickRevision, pickSearchDone, pickSearchUsage, privateTerms, readCapped, RESEARCH_BODY_BYTES, workspaceForToken } from "./agentSubmit";
 
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -134,6 +134,29 @@ const searchUsage = httpAction(async (ctx, req) => {
   return json(200, await ctx.runMutation(internal.research.countSearch, { workspace: got.workspace, ...picked }));
 });
 
+// Oct 29 prefetch: the bridge reads which tracks of a running show-notes job get a first search, and their queries, in
+// its token's workspace. Read-only: the only function this route may call is internal.research.prefetchPlan, a query.
+const researchPrefetch = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const job = (got.body as { job?: unknown } | null)?.job;
+  if (typeof job !== "string" || !job.trim() || job.length > 40) return json(400, { problems: ["body must be job"] });
+  const r = await ctx.runQuery(internal.research.prefetchPlan, { workspace: got.workspace, jobId: job });
+  if (r.ok) return json(200, { tracks: r.tracks, embargoed: r.embargoed });
+  return r.status === 404 ? json(404, { error: "NOT_FOUND" }) : json(409, { error: r.error });
+});
+
+// Oct 29 prefetch: after searching, the bridge gives back failed searches and reports Tavily credits, in its token's
+// workspace. The only function this route may call is internal.research.searchDone.
+const searchDone = httpAction(async (ctx, req) => {
+  const got = await agentRequest(req);
+  if (got instanceof Response) return got;
+  const picked = pickSearchDone(got.body);
+  if (!picked) return json(400, { problems: ["body must be refund and credits, whole numbers"] });
+  await ctx.runMutation(internal.research.searchDone, { workspace: got.workspace, ...picked });
+  return json(200, {});
+});
+
 const http = httpRouter();
 http.route({ path: "/agent/packages", method: "POST", handler: submitPackage });
 http.route({ path: "/agent/packages/revise", method: "POST", handler: revisePackage });
@@ -142,4 +165,6 @@ http.route({ path: "/agent/episodes/rerun", method: "POST", handler: markRerun }
 http.route({ path: "/agent/radar", method: "POST", handler: radarView });
 http.route({ path: "/agent/research", method: "POST", handler: submitResearch });
 http.route({ path: "/agent/search-usage", method: "POST", handler: searchUsage });
+http.route({ path: "/agent/research-prefetch", method: "POST", handler: researchPrefetch });
+http.route({ path: "/agent/search-done", method: "POST", handler: searchDone });
 export default http;
