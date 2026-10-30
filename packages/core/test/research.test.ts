@@ -71,6 +71,45 @@ describe("sourceSays", () => {
   });
 });
 
+describe("sourceSays near the track (Oct 29: 8,000-character page text)", () => {
+  const near = ["Alfa Mist", "Organic Rust"];
+  const filler = (n: number) => "Other records in the catalog. ".repeat(Math.ceil(n / 30)).slice(0, n);
+  it("on a long page a value counts only within 300 characters of the artist or title", () => {
+    const far = `Alfa Mist discography. ${filler(2_500)} Some other album came out October 10, 2026 on Label B.`;
+    expect(far.length).toBeGreaterThan(2_000);
+    expect(sourceSays(far, "release-date", "2026-10-10", near)).toBe(false);
+    expect(sourceSays(far, "label", "Label B", near)).toBe(false);
+    const close = `${filler(2_500)} Organic Rust is out October 10, 2026 on Label A. ${filler(1_000)}`;
+    expect(sourceSays(close, "release-date", "2026-10-10", near)).toBe(true);
+    expect(sourceSays(close, "label", "Label A", near)).toBe(true);
+    const after = `${filler(2_500)} Out October 10, 2026: ${"x".repeat(250)} the new one from ALFA MIST. ${filler(500)}`;
+    expect(sourceSays(after, "release-date", "2026-10-10", near)).toBe(true); // before the mention counts too, folded
+  });
+  it("a long page that never names the track shows nothing; a short text is read whole, as before", () => {
+    expect(sourceSays(`${filler(2_500)} Out October 10, 2026.`, "release-date", "2026-10-10", near)).toBe(false);
+    expect(sourceSays(`${filler(1_500)} Out October 10, 2026.`, "release-date", "2026-10-10", near)).toBe(true);
+    expect(sourceSays(`${filler(2_500)} Out October 10, 2026.`, "release-date", "2026-10-10")).toBe(true); // no names given
+  });
+  it("stays linear on a long page full of mentions", { timeout: 30_000 }, () => {
+    const page = "Alfa Mist ".repeat(800);
+    expect(fastest(() => sourceSays(page, "label", "Label A", near))).toBeLessThan(200);
+  });
+  it("two long pages that show the date only by coincidence, far from the track, do not confirm it", () => {
+    const page = `Alfa Mist. ${filler(2_500)} Unrelated reissue out October 10, 2026.`;
+    const sources = { S1: S("pitchfork.com", page), S2: S("stereogum.com", page) };
+    const j = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), sources, near);
+    expect(j.status).toBe("could-not-verify");
+    expect(j.sources.every((s) => !s.matched)).toBe(true);
+    const right = `${filler(2_500)} Alfa Mist's Organic Rust arrives October 10, 2026.`;
+    expect(judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: S("pitchfork.com", right), S2: S("stereogum.com", right) }, near).status).toBe("confirmed");
+  });
+  it("a year-only date needs its month near the track too", () => {
+    const page = `${filler(2_500)} Organic Rust (2026). ${filler(1_000)} Some tour dates: October 3, 2026.`;
+    const year = { kind: "release-date" as const, text: "It came out in 2026.", value: "2026", sources: [{ id: "S1" }, { id: "S2" }] };
+    expect(judgeClaim(year, { S1: S("a.com", page), S2: S("b.com", page) }, near)).toMatchObject({ status: "could-not-verify", check: "Only the year 2026 is shown; check the full date" });
+  });
+});
+
 describe("judgeClaim (Review Focus 1 and 2)", () => {
   it("confirms a date shown by two publishers", () => {
     const sources = { S1: S("example-label.bandcamp.com", "Out October 10, 2026"), S2: S("pitchfork.com", "Due October 10, 2026") };

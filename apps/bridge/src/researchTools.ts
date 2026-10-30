@@ -8,7 +8,8 @@ import { tavilySearch } from "./tavily.js";
 export const SEARCH_CAP_REACHED = "Daily research limit reached; finish with what you have, mark the rest could-not-verify.";
 export const EMBARGOED_SEARCH_REFUSAL = "Not searched. That track stays off web search for now; research it with Crate only.";
 export const MAX_QUERY = 300;
-export const MAX_SNIPPET = 600;
+/** Most of a result's text the agent sees: Tavily's advanced chunks (about 3 × 800 characters). Never the page text. */
+export const MAX_SNIPPET = 3_000;
 export const MAX_SOURCES_PER_BLOCK = 40;
 
 const NOT_CONFIGURED_SEARCH = "Web search is not configured on the bridge. Tell the operator; do not retry.";
@@ -48,7 +49,11 @@ export function sourceSearchTool(opts: ResearchToolOptions): PackageSubmitTool {
   async function find(apple: boolean, query: string): Promise<Found[]> {
     if (apple) return (await opts.appleMusic!.search(query)).map((r) => ({ ...r, snippet: r.text }));
     const found = await tavilySearch({ apiKey: opts.tavilyApiKey!, fetch: doFetch }, query);
-    return found.map((r) => ({ url: r.url, title: r.title, text: `${r.title}\n${r.content}`, snippet: r.content, published: r.publishedDate }));
+    // The ledger keeps title, chunks and page text (capped at LIMITS.sourceText) for code's fact check; the agent sees
+    // the chunks only (its context and speed).
+    return found.map((r) => ({
+      url: r.url, title: r.title, text: [r.title, r.content, r.rawContent ?? ""].join("\n").trimEnd(), snippet: r.content, published: r.publishedDate,
+    }));
   }
 
   async function search(args: unknown): Promise<{ text: string; isError: boolean; results: number; source: string }> {

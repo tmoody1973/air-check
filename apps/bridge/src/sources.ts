@@ -13,7 +13,7 @@ export interface SourceLedger {
 }
 
 /** core's LIMITS.sourceText (the bridge ships without core at runtime; a test pins them equal). */
-export const SOURCE_TEXT_MAX = 2_000;
+export const SOURCE_TEXT_MAX = 8_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
 

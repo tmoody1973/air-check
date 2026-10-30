@@ -164,7 +164,7 @@ test("the research routes each run one ctx.runMutation to their own function, an
   for (const [handler, ref, path] of [["submitResearch", "internal.research.submitEntry", "/agent/research"], ["searchUsage", "internal.research.countSearch", "/agent/search-usage"]] as const) {
     const body = fnBody(text, `const ${handler} = httpAction(`);
     expect([...body.matchAll(/ctx\.(\w+)\(([^,)]*)/g)].map((m) => `${m[1]} ${m[2]}`), handler).toEqual([`runMutation ${ref}`]);
-    expect(body, handler).toMatch(/await agentRequest\(req\)/);
+    expect(body, handler).toMatch(/await agentRequest\(req(, RESEARCH_BODY_BYTES)?\)/);
     expect(text).toContain(`path: "${path}", method: "POST", handler: ${handler}`);
   }
   const research = src("research");

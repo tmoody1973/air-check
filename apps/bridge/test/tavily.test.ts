@@ -8,12 +8,12 @@ const json = (status: number, body: unknown) =>
 afterEach(() => vi.restoreAllMocks());
 
 describe("tavilySearch", () => {
-  it("POSTs exactly the search body to /search with the bearer key and a 15-second timeout", async () => {
+  it("POSTs exactly the search body to /search with the bearer key and a 25-second timeout", async () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
     const fetch = vi.fn(async () =>
       json(200, {
         results: [
-          { title: "Album A", url: "https://example.org/a", content: "Out 2026-10-10", published_date: "2026-10-01", raw_content: "x" },
+          { title: "Album A", url: "https://example.org/a", content: "Out 2026-10-10", published_date: "2026-10-01", raw_content: "  Album A\n\n  is out\t2026-10-10  " },
           { title: "No date", url: "https://example.org/b", content: "c" },
         ],
       }),
@@ -26,17 +26,19 @@ describe("tavilySearch", () => {
     expect((init.headers as Record<string, string>).authorization).toBe("Bearer tvly-test");
     expect(JSON.parse(String(init.body))).toEqual({
       query: "artist a album release date",
-      search_depth: "basic",
+      // Oct 29 (Tarik): advanced depth (2 credits), up to 3 chunks per page, and each page's plain text (no extra credit).
+      search_depth: "advanced",
+      chunks_per_source: 3,
       max_results: 5,
       include_answer: false,
-      include_raw_content: false,
+      include_raw_content: "text",
       include_images: false,
       // Tavily returns published_date only when asked (docs.tavily.com, checked via Context7 on Oct 29).
       include_published_date: true,
     });
-    expect(timeout).toHaveBeenCalledWith(15_000);
+    expect(timeout).toHaveBeenCalledWith(25_000);
     expect(out).toEqual([
-      { url: "https://example.org/a", title: "Album A", content: "Out 2026-10-10", publishedDate: "2026-10-01" },
+      { url: "https://example.org/a", title: "Album A", content: "Out 2026-10-10", rawContent: "Album A is out 2026-10-10", publishedDate: "2026-10-01" },
       { url: "https://example.org/b", title: "No date", content: "c" },
     ]);
   });
@@ -68,11 +70,23 @@ describe("tavilySearch", () => {
     await expect(tavilySearch({ apiKey: "k", fetch: down }, "q")).rejects.toThrow("Web search could not be reached.");
   });
 
-  it("reads at most 256 KB of the answer; more is unreadable", async () => {
-    const big = JSON.stringify({ results: [{ title: "t", url: "https://example.org/a", content: "x".repeat(300_000) }] });
-    await expect(tavilySearch({ apiKey: "k", fetch: async () => new Response(big, { status: 200 }) }, "q")).rejects.toThrow("Web search gave an unreadable answer.");
-    const fits = JSON.stringify({ results: [{ title: "t", url: "https://example.org/a", content: "x".repeat(200_000) }] });
+  it("reads at most 2 MB of the answer (five pages of text); more is unreadable", async () => {
+    const page = (n: number) => ({ title: "t", url: "https://example.org/a", content: "c", raw_content: "x".repeat(n) });
+    const fits = JSON.stringify({ results: [page(1_500_000)] });
     expect(await tavilySearch({ apiKey: "k", fetch: async () => new Response(fits, { status: 200 }) }, "q")).toHaveLength(1);
+    const big = JSON.stringify({ results: [page(2_100_000)] });
+    await expect(tavilySearch({ apiKey: "k", fetch: async () => new Response(big, { status: 200 }) }, "q")).rejects.toThrow("Web search gave an unreadable answer.");
+  });
+
+  it("keeps at most 8,000 characters of each page's text, whitespace collapsed; no text means no rawContent", async () => {
+    const results = [
+      { title: "long", url: "https://example.org/a", content: "c", raw_content: `${"word \n\n ".repeat(3_000)}` },
+      { title: "none", url: "https://example.org/b", content: "c", raw_content: null },
+    ];
+    const [a, b] = await tavilySearch({ apiKey: "k", fetch: async () => json(200, { results }) }, "q");
+    expect(a!.rawContent).toHaveLength(8_000);
+    expect(a!.rawContent).not.toMatch(/\s\s|\n/);
+    expect(b).not.toHaveProperty("rawContent");
   });
 
   it("drops a result whose URL is over 2,048 characters", async () => {

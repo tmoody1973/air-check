@@ -29,14 +29,14 @@ describe("createSourceLedger", () => {
     expect(ledger.get(crate)!.text).toBe(text); // already there: not added twice
   });
 
-  it("caps text at 2,000 characters, and a repeat URL's new text still fits", () => {
+  it("caps text at 8,000 characters, and a repeat URL's new text still fits", () => {
     expect(SOURCE_TEXT_MAX).toBe(LIMITS.sourceText);
     const ledger = createSourceLedger();
-    const id = ledger.add(src("https://example.org/a", "a".repeat(5_000)));
-    expect(ledger.get(id)!.text).toHaveLength(2_000);
+    const id = ledger.add(src("https://example.org/a", "a".repeat(10_000)));
+    expect(ledger.get(id)!.text).toHaveLength(8_000);
     ledger.add(src("https://example.org/a", "released 2026-10-10"));
     const text = ledger.get(id)!.text;
-    expect(text.length).toBeLessThanOrEqual(2_000);
+    expect(text.length).toBeLessThanOrEqual(8_000);
     expect(text.endsWith("released 2026-10-10")).toBe(true);
   });
 

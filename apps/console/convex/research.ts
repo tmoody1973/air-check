@@ -118,6 +118,14 @@ function slotsOf(job: Pick<Job, "kind" | "tracks" | "lines">): Slot[] {
     ]);
 }
 
+/** Oct 29: the names a long source must mention near a value (core sourceSays): the block's track, or the deep dive's subject. */
+function namesFor(job: Pick<Job, "kind" | "subject" | "tracks" | "lines">, key: string): string[] {
+  if (job.kind === "deep-dive") return job.subject ? [job.subject.name] : [];
+  const trackKey = job.kind === "verify" ? job.lines?.find((l) => l.id === key)?.trackKey : key;
+  const track = job.tracks?.find((t) => t.key === trackKey);
+  return track ? [track.artist, track.title] : [];
+}
+
 /** Saved by the agent, or edited by Tarik: either way not researched again by a Resume or a continuation. */
 const isDone = (e: Entry | undefined) => !!e && (e.savedAt !== undefined || e.edited !== undefined);
 function remainingKeys(job: Job, entries: Entry[]): string[] {
@@ -708,10 +716,11 @@ export const submitEntry = internalMutation({
     if (problems.length) return no(400, problems);
 
     const sources = Object.fromEntries(input.sources.map(({ id, ...s }) => [id, s]));
+    const names = namesFor(job, slot.key);
     const dropped: string[] = [];
     const judged = (list: ClaimIn[] | undefined, label: string) =>
       (list ?? []).flatMap((c, i) => {
-        if (c.sources.length) return [judgeClaim(c, sources)];
+        if (c.sources.length) return [judgeClaim(c, sources, names)];
         dropped.push(`${label} ${i + 1} has no source. No source, no sentence.`);
         return [];
       });

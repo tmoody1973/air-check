@@ -2,7 +2,7 @@ import { httpRouter } from "convex/server";
 import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { MIN_TOKEN_LENGTH, pickInput, pickResearch, pickRevision, pickSearchUsage, privateTerms, readCapped, workspaceForToken } from "./agentSubmit";
+import { MAX_BODY_BYTES, MIN_TOKEN_LENGTH, pickInput, pickResearch, pickRevision, pickSearchUsage, privateTerms, readCapped, RESEARCH_BODY_BYTES, workspaceForToken } from "./agentSubmit";
 
 const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -12,13 +12,13 @@ const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
 const demoIdSuffix = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => BASE36[b % 36]).join("");
 
 /** The agent's token picks the workspace (real or demo); then the capped JSON body. A Response means refused. */
-async function agentRequest(req: Request): Promise<{ workspace: "real" | "demo"; body: unknown } | Response> {
+async function agentRequest(req: Request, maxBytes = MAX_BODY_BYTES): Promise<{ workspace: "real" | "demo"; body: unknown } | Response> {
   const tokens = { real: process.env.AGENT_SUBMIT_TOKEN, demo: process.env.DEMO_AGENT_SUBMIT_TOKEN };
   const usable = (t: string | undefined) => !!t && t.length >= MIN_TOKEN_LENGTH;
   if ((!usable(tokens.real) && !usable(tokens.demo)) || (tokens.real === tokens.demo)) return json(503, {}); // equal = misconfigured
   const workspace = workspaceForToken(req.headers.get("authorization"), tokens);
   if (!workspace) return json(401, {});
-  const text = await readCapped(req);
+  const text = await readCapped(req, maxBytes);
   if (text === null) return json(413, {});
   try {
     return { workspace, body: JSON.parse(text) };
@@ -114,7 +114,7 @@ const radarView = httpAction(async (ctx, req) => {
 // research rows and nothing else; every refusal is a plain sentence the bridge hands back (R8: they name only the key
 // and the agent's own words). The only function this route may call is internal.research.submitEntry.
 const submitResearch = httpAction(async (ctx, req) => {
-  const got = await agentRequest(req);
+  const got = await agentRequest(req, RESEARCH_BODY_BYTES); // a block carries its sources' text
   if (got instanceof Response) return got;
   const picked = pickResearch(got.body);
   if ("problems" in picked) return json(400, { problems: picked.problems });

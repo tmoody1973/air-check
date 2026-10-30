@@ -1,4 +1,4 @@
-import { EMBARGOED_SEARCH_REFUSAL as CORE_EMBARGOED, LIMITS, SEARCH_CAP_REACHED as CORE_CAP, type ResolvedSource } from "@aircheck/core";
+import { EMBARGOED_SEARCH_REFUSAL as CORE_EMBARGOED, LIMITS, SEARCH_CAP_REACHED as CORE_CAP, sourceSays, type ResolvedSource } from "@aircheck/core";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -32,13 +32,13 @@ describe("bridge copies of core's sentences and limits", () => {
     expect(EMBARGOED_SEARCH_REFUSAL).toBe(CORE_EMBARGOED);
     expect(MAX_QUERY).toBe(LIMITS.searchQuery);
     expect(MAX_SOURCES_PER_BLOCK).toBe(LIMITS.sourcesPerBlock);
-    expect(MAX_SNIPPET).toBe(600);
+    expect(MAX_SNIPPET).toBe(3_000);
   });
 });
 
 describe("source_search", () => {
   const results = [
-    { title: "Album A review", url: "https://pitchfork.example/a", content: `Released 2026-10-10. ${"x".repeat(900)}`, published_date: "2026-10-12" },
+    { title: "Album A review", url: "https://pitchfork.example/a", content: `Released 2026-10-10. ${"x".repeat(3_100)}`, published_date: "2026-10-12" },
     { title: "Label page", url: "https://label.example/release", content: "Album A out on Label A" },
   ];
   function setup(usage: () => Response | Promise<Response> = () => json(200, { allowed: true, used: 1, cap: 30 }), tavily = () => json(200, { results })) {
@@ -138,9 +138,34 @@ describe("source_search", () => {
     expect(first).toMatchObject({ url: "https://pitchfork.example/a", host: "pitchfork.example", title: "Album A review", via: "tavily" });
     expect(first.text).toContain("Released 2026-10-10.");
     expect(out).toContain("https://pitchfork.example/a\npublished: 2026-10-12\nReleased 2026-10-10.");
-    expect(out).not.toContain("x".repeat(600)); // snippet capped at 600 characters
-    expect(out).toContain("x".repeat(500));
+    expect(out).not.toContain("x".repeat(3_000)); // chunks capped at 3,000 characters
+    expect(out).toContain("x".repeat(2_900));
     expect(out).not.toMatch(/published: undefined/);
+  });
+
+  it("page text: the agent sees only the chunks; the ledger keeps chunks and page text up to 8,000 for the fact check", async () => {
+    const page = `${"Album A liner notes. ".repeat(250)}Released on October 10, 2026 by Label A. ${"More text. ".repeat(500)}`;
+    const answer = [{ title: "Album A", url: "https://label.example/a", content: "Album A chunk one [...] chunk two", raw_content: page }];
+    const { t, ledger } = setup(undefined, () => json(200, { results: answer }));
+    const out = textOf(await t.call({ query: "artist a album" }));
+    const id = out.match(/^\[(S[0-9a-z]{5})\]/m)![1]!;
+    expect(out.split("\n\n")[1]).toBe(`[${id}] Album A · label.example\nhttps://label.example/a\nAlbum A chunk one [...] chunk two`);
+    expect(out).not.toContain("liner notes"); // the page text never reaches the agent (context and speed)
+    const text = ledger.get(id)!.text;
+    expect(text.length).toBeLessThanOrEqual(LIMITS.sourceText);
+    expect(text.indexOf("October 10, 2026")).toBeGreaterThan(2_000); // beyond the old 2,000-character ledger
+    expect(sourceSays(text, "release-date", "2026-10-10")).toBe(true);
+    expect(sourceSays(text, "label", "Label A")).toBe(true);
+  });
+
+  it("five full pages give the agent the chunks only, about 12 KB", async () => {
+    const answer = Array.from({ length: 5 }, (_, i) => ({
+      title: `Page ${i}`, url: `https://example.org/${i}`, content: "c".repeat(2_400), raw_content: "p".repeat(8_000), published_date: "2026-10-01",
+    }));
+    const { t } = setup(undefined, () => json(200, { results: answer }));
+    const out = textOf(await t.call({ query: "artist a album" }));
+    expect(out).not.toContain("ppp");
+    expect(out.length).toBeLessThan(5 * (MAX_SNIPPET + 200));
   });
 
   it("a Tavily failure is a plain error result", async () => {

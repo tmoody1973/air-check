@@ -19,15 +19,15 @@ afterEach(cleanup);
 
 describe("Settings web search row (Plan 7)", () => {
   it("reads today's Tavily searches from research.searchUsage", () => {
-    results["research.searchUsage"] = { used: 12, cap: 30 };
+    results["research.searchUsage"] = { used: 12, cap: 100 };
     render(<SettingsPage />);
     expect(screen.getByText("Web search (Tavily)")).toBeInTheDocument();
-    expect(screen.getByText("12 of 30 searches used today")).toBeInTheDocument();
+    expect(screen.getByText("12 of 100 searches used today")).toBeInTheDocument();
   });
 
   it("the demo shows its own cap", () => {
-    results["research.searchUsage"] = { used: 1, cap: 10 };
+    results["research.searchUsage"] = { used: 1, cap: 20 };
     render(<SettingsPage />);
-    expect(screen.getByText("1 of 10 searches used today")).toBeInTheDocument();
+    expect(screen.getByText("1 of 20 searches used today")).toBeInTheDocument();
   });
 });
