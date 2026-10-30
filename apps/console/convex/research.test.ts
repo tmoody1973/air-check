@@ -276,7 +276,7 @@ describe("POST /agent/research (submitEntry)", () => {
     });
     expect(await submit(t, { job: jobId, key: "brief", claims: full, sources: SOURCES })).toMatchObject({ status: 200, data: { claims: LIMITS.briefClaims } });
     const tooMany = await submit(t, { job: jobId, key: "brief", claims: [...full, fact("career", 99)], sources: SOURCES });
-    expect(tooMany.data.problems).toEqual(expect.arrayContaining([`At most ${LIMITS.briefClaims} claims in the brief.`, `A brief has at most ${LIMITS.briefFactsMax} section facts.`]));
+    expect(tooMany.data.problems).toEqual(expect.arrayContaining([`At most ${LIMITS.briefClaims} claims in the brief.`, `A brief has at most ${LIMITS.briefFactsMax} section facts; you sent ${LIMITS.briefFactsMax + 1}. Keep your ${LIMITS.briefFactsMax} strongest sourced facts, drop only the rest, and submit again.`]));
     const nine = await submit(t, { job: jobId, key: "brief", claims: [...facts.slice(0, 10), ...infobox, { ...infobox[0]! }], sources: SOURCES });
     expect(nine.data.problems).toEqual([`A brief has at most ${LIMITS.infoboxMax} infobox rows.`]);
     const odd = await submit(t, { job: jobId, key: "brief", claims: [{ kind: "infobox", text: "Shoe size", value: "10", sources: [] }, { kind: "infobox", text: "Origin", sources: [] }], sources: SOURCES });
