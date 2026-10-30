@@ -6,7 +6,7 @@ I've hosted Rhythm Lab Radio on Radio Milwaukee for more than twenty years. Ever
 
 Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track.
 
-- **Demo video:** on the Devpost submission page
+- **Demo video (2:53):** https://youtu.be/OIWQ_VE_Frk
 - **Try it (no account needed):** https://aircheck.rhythmlabradio.com/demo — a sample workspace with its own sandboxed agent; it cannot publish. Open until Dec 15, 2026.
 
 ## What it does
