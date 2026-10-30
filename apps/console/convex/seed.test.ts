@@ -8,6 +8,7 @@ import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
 import { goldenPackageTitles } from "../../../packages/core/test/helpers/fixtures";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
+import { DEMO_RELEASES } from "./demoReleases";
 import { DEMO_MP3_SHA256, GOLDEN_ALTERNATES, GOLDEN_DESCRIPTION, GOLDEN_TAGS, GOLDEN_TITLE, GOLDEN_TRACKS } from "./seedData";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -26,7 +27,7 @@ describe("seedDemo", () => {
     expect(await counts(t)).toEqual(first);
     // Plan 7 Task 5: nothing reads `verifications` any more (Today counts open claims from research), so it is not seeded;
     // the wipe still empties old demo rows until Task 6 drops the table.
-    expect(first).toEqual({ packages: 2, activity: 9, verifications: 0, releases: 4, runs: 1 });
+    expect(first).toEqual({ packages: 2, activity: 9, verifications: 0, releases: 4 + DEMO_RELEASES.length, runs: 1 });
     // Web search goes through Air Check's bridge (decision 006), never straight to Tavily from the sandbox.
     const activity = await t.run((ctx) => ctx.db.query("activity").collect());
     expect(activity.map((a) => a.destination ?? "")).not.toContain("api.tavily.com");
@@ -35,8 +36,20 @@ describe("seedDemo", () => {
   test("demo releases: both tabs, a status and a source each, bracketed values, one undated embargo, no players", async () => {
     const t = convexTest(schema, modules);
     await t.mutation(internal.seed.seedDemo, {});
-    const rows = await t.run((ctx) => ctx.db.query("releases").collect());
-    expect(rows.every((r) => r.workspace === "demo")).toBe(true);
+    const all = await t.run((ctx) => ctx.db.query("releases").collect());
+    expect(all.every((r) => r.workspace === "demo")).toBe(true);
+    // Decision 026: the real, already-released rows have a player and nothing private; the rest are bracketed samples.
+    const real = all.filter((r) => !r.artist.startsWith("["));
+    expect(real).toHaveLength(DEMO_RELEASES.length);
+    for (const r of real) {
+      expect(r).toMatchObject({ embedState: "ready", source: expect.stringMatching(/^(bandcamp|cosign)$/) });
+      expect(r.embed?.id).toMatch(/^\d{1,12}$/);
+      expect(r).not.toHaveProperty("senders");
+      expect(r).not.toHaveProperty("links");
+      expect(r).not.toHaveProperty("embargo");
+      expect(r.releasedOn! <= "2026-10-30").toBe(true);
+    }
+    const rows = all.filter((r) => r.artist.startsWith("["));
     expect(new Set(rows.map((r) => r.source))).toEqual(new Set(["bandcamp", "cosign"]));
     for (const r of rows) {
       expect(r.status).toBeTruthy();

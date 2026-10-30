@@ -2,6 +2,8 @@ import { type PackageDraft, applyRunEvent, fingerprint, initialRun, type RunStat
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
+import { bandcampArtUrl, bandcampPageUrl } from "@aircheck/core";
+import { DEMO_RELEASES } from "./demoReleases";
 import { searchTextOf } from "./radar";
 import { createdAtOf, statusOf } from "./runDefaults";
 import { clearDemoResearch, seedSampleResearch } from "./seedResearch";
@@ -155,6 +157,22 @@ export const seedDemo = internalMutation({
       const sender = row.source === "cosign" ? { senders: [{ name: "[Label or PR company]", messageId: `demo-sample-${i}`, at }] } : {};
       const fields = { artist: "[Artist]", title: "[Release title]", label: "[Label]", ...row, ...("tags" in row && { tags: [...row.tags] }) };
       await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...sender, ...fields, searchText: searchTextOf(fields) });
+    }
+
+    // Decision 026: real, already-released releases with Bandcamp's own player, after the bracketed samples. Each URL
+    // passes the same rules as a real row; a row that fails one is left out rather than shown broken.
+    for (const [i, d] of DEMO_RELEASES.entries()) {
+      const at = newest - (SAMPLE_RELEASES.length + i) * 60_000;
+      const page = bandcampPageUrl(d.bandcampPage);
+      if (!page || !/^\d{1,12}$/.test(d.embed.id)) continue;
+      const art = d.art && bandcampArtUrl(d.art) === d.art ? d.art : undefined;
+      const fields = {
+        artist: d.artist, title: d.title, source: d.source ?? ("bandcamp" as const), status: "new" as const,
+        ...(d.label && { label: d.label }), ...(d.type && { type: d.type }), ...(d.genre && { genre: d.genre }), ...(d.releasedOn && { releasedOn: d.releasedOn }),
+        ...(d.tags && { tags: [...d.tags] }), ...(art && { art }),
+        bandcampPage: page, embed: { kind: d.embed.kind, id: d.embed.id }, embedState: "ready" as const,
+      };
+      await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...fields, searchText: searchTextOf(fields) });
     }
 
     await seedSampleResearch(ctx, now);

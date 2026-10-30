@@ -91,7 +91,8 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
   const [playing, setPlaying] = useState(autoPlay);
   const [retry, setRetry] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
-  if (demo)
+  // Decision 026: a demo release with a real player id plays like a real one; a bracketed sample shows the placeholder.
+  if (demo && !embed)
     return (
       <div className="flex min-h-11 items-center justify-between gap-3 rounded-control border border-dashed border-line-strong bg-surface-quiet px-4 text-sm text-muted">
         <span>[Bandcamp player]</span>

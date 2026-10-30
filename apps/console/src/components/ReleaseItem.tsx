@@ -278,14 +278,18 @@ function Chevron({ turn }: { turn: string }) {
   );
 }
 
-/** Whether a block draws art: Bandcamp's own image host only, or the demo's placeholder on a Bandcamp row. */
-const hasArt = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : !!r.art && bandcampArtUrl(r.art) === r.art);
+const realArt = (r: Release) => !!r.art && bandcampArtUrl(r.art) === r.art;
+/**
+ * Whether a block draws art: Bandcamp's own image host only, or the demo's placeholder on a bracketed Bandcamp sample.
+ * Oct 30 (decision 026): the demo's real, already-released sample releases show their real cover.
+ */
+const hasArt = (r: Release, ctx: ReleaseCtx) => realArt(r) || (ctx.demo && r.source !== "cosign");
 
 /** Cover art: a lazy image with no referrer, only from Bandcamp's image host. The demo shows a placeholder (copyright). */
 function Art({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const box = "size-14 md:size-16 shrink-0 rounded-control";
   if (!hasArt(r, ctx)) return null;
-  if (ctx.demo)
+  if (ctx.demo && !realArt(r))
     return (
       <span className={`${box} flex items-center justify-center border border-dashed border-line-strong text-center font-mono text-[10.5px] leading-tight text-muted`}>[Cover art]</span>
     );
@@ -335,7 +339,8 @@ function PlayButton({ open, controls, onClick }: { open: boolean; controls: stri
 
 /** Whether a player could open now: a stored id (ready, or being re-read), or the demo's placeholder on a Bandcamp row. */
 // A page re-queued for its date (radar.reparse, B2) keeps the player it already had: Play stays while it is re-read.
-const canPlay = (r: Release, ctx: ReleaseCtx) => (ctx.demo ? r.source !== "cosign" : !!r.embed && (r.embedState === "ready" || r.embedState === "queued"));
+const canPlay = (r: Release, ctx: ReleaseCtx) =>
+  (!!r.embed && (r.embedState === "ready" || r.embedState === "queued")) || (ctx.demo && !r.embed && r.source !== "cosign");
 
 function More({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const [editing, setEditing] = useState(false);

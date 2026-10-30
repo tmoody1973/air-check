@@ -90,7 +90,7 @@ A calm desk where one person checks work before it goes out. Warm paper ground, 
 ### Named Rules
 **One Signal Rule.** Green appears on at most one primary action per card and on state pills. Not as decoration.
 **Word Plus Color Rule.** Every pill, tag and row status carries a text label. Colors that must be told apart differ in lightness, not hue alone.
-**Sample Honesty Rule.** Anything not real data carries a visible "Sample" tag; unknown values are bracketed placeholders like [Label].
+**Sample Honesty Rule.** Anything not real data carries a visible "Sample" tag; unknown values are bracketed placeholders like [Label]. The demo's release radar also lists a few real, already-released releases from the station's radar, with Bandcamp's own player and cover (decision 026): public facts only, still tagged Sample, never embargoed.
 
 ## Typography
 
