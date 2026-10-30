@@ -29,4 +29,12 @@ Options for Plan 5: remove the Tavily credential (which also loses search), find
 
 Plan 7 took the first option above: the `airc` sandbox is rebuilt without its own Tavily key (`deploy/hermes/reonboard-without-tavily.sh`), and web search moves to the bridge's `source_search`, which holds the key (decision 019). The script stops and prints the provider rule if `_provider_airc_tavily_search` comes back after the rebuild.
 
-[to fill after the live re-onboard: did `nemohermes airc status` and `policy get` come back with no `tavily` policy, no `_provider_airc_tavily_search` and no `api.tavily.com`? Paste the script's last lines here.]
+**Done on Oct 29, about 21:20 CDT.** `airc` was re-onboarded without Tavily. It took two tries (see `docs/FRICTION_LOG.md`, Oct 29): `reonboard.sh` still pinned the Tavily provider and lacked `--fresh`, and leftover gateway providers blocked `mcp add`. Both are now handled by the script. Checked afterwards:
+
+- no `tavily` in `nemohermes airc status` or the policy;
+- `crate` ready, and the research tools listed;
+- the five `rlr-` skills installed, skill lock 0 / true;
+- `/health` on 8642 returned 200;
+- the Telegram bot replied.
+
+The fresh onboard reset the agent's memory, as expected.

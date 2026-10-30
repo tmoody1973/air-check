@@ -24,17 +24,23 @@ BACKUP_DIR="$HOME/.aircheck/agent-skill-backup"
 STOPPED=0
 RESTORED=0
 REONBOARDING=0
+ADDING=0
 TMP_SECRETS=""
 
 stop() { echo "STOP: $*" >&2; exit 1; }
-health() { curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1:8642/health || true; }
+# Piped as `ssh ... bash -s < script`, this script's own stdin is its text: a child that reads stdin eats the rest of it
+# (it happened with apply-agent-config.sh). No child here needs stdin, so these two never see it. `timeout` is a separate
+# program and cannot call them, so the timeout lines below redirect on their own.
+nemohermes() { command nemohermes "$@" </dev/null; }
+openshell() { command openshell "$@" </dev/null; }
+health() { curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1:8642/health </dev/null || true; }
 
 # Starts what step 2 stopped: the forward first (it adopts or replaces the forward the onboard started; a stray under
 # 30 s old is left alone and the unit retries every second), then the relay and the watchdog timer.
 restore() {
   (( STOPPED && ! RESTORED )) || return 0
   RESTORED=1
-  sudo systemctl start --no-block aircheck-hermes-forward || echo "could not start aircheck-hermes-forward" >&2
+  sudo systemctl start --no-block aircheck-hermes-forward </dev/null || echo "could not start aircheck-hermes-forward" >&2
   local code=000
   for _ in $(seq 1 90); do
     code="$(health)"
@@ -42,7 +48,7 @@ restore() {
     sleep 1
   done
   echo "aircheck-hermes-forward: $(systemctl is-active aircheck-hermes-forward || true), /health $code"
-  sudo systemctl start aircheck-relay aircheck-watchdog.timer || echo "could not start aircheck-relay or aircheck-watchdog.timer" >&2
+  sudo systemctl start aircheck-relay aircheck-watchdog.timer </dev/null || echo "could not start aircheck-relay or aircheck-watchdog.timer" >&2
   echo "aircheck-relay: $(systemctl is-active aircheck-relay || true), aircheck-watchdog.timer: $(systemctl is-active aircheck-watchdog.timer || true)"
 }
 cleanup() {
@@ -54,6 +60,7 @@ cleanup() {
   fi
   # Past this point airc may be destroyed or half-built. Never fall back to ~/.aircheck/reonboard.sh by itself: it
   # would give the sandbox its Tavily key back from ~/.airc/secrets.env.
+  (( rc != 0 && ADDING )) && echo "mcp add failed (its output is above). A leftover gateway provider is the usual cause: openshell --gateway nemoclaw provider list" >&2
   (( rc != 0 && REONBOARDING )) && echo "Run this script again (add --from-error if the sandbox is not Ready)." >&2
   exit "$rc"
 }
@@ -83,9 +90,28 @@ else
     stop "airc is not Ready. If it is in Error, follow docs/DEPLOY.md 'If the sandbox is in Error': start its container, then run this script with --from-error. Nothing was changed."
 fi
 
+rb_code="$(grep -nvE '^[[:space:]]*#' "$REONBOARD" || true)"
+# Two edits to reonboard.sh that a live run on Oct 29 showed are needed: it must not pin the Tavily web-search provider
+# (the onboard then fails AFTER destroy, leaving no airc), and its onboard must be --fresh (no resume of the old registry).
+# File-wide check for --fresh, so an onboard command split over lines with a backslash is not refused by mistake.
+bad_provider="$(grep 'NEMOCLAW_WEB_SEARCH_PROVIDER=tavily' <<<"$rb_code" || true)"
+bad_onboard=""
+if grep -qE 'nemohermes[[:space:]]+onboard' <<<"$rb_code" && ! grep -q -- '--fresh' <<<"$rb_code"; then
+  bad_onboard="$(grep -E 'nemohermes[[:space:]]+onboard' <<<"$rb_code")"
+fi
+if [[ -n "$bad_provider" || -n "$bad_onboard" ]]; then
+  [[ -z "$bad_provider" ]] || { echo "reonboard.sh pins the Tavily web-search provider (values hidden):" >&2; sed -E 's/=[^[:space:]]*/=<hidden>/g' <<<"$bad_provider" >&2; }
+  [[ -z "$bad_onboard" ]] || { echo "reonboard.sh runs onboard without --fresh:" >&2; echo "$bad_onboard" >&2; }
+  echo "Three edits to $REONBOARD (copy kept as $REONBOARD.pre-plan7):" >&2
+  echo "  1. the secrets.env path becomes \"\${AIRC_SECRETS_FILE:-\$HOME/.airc/secrets.env}\"" >&2
+  echo "  2. delete NEMOCLAW_WEB_SEARCH_PROVIDER=tavily from the export line" >&2
+  echo "  3. nemohermes onboard becomes nemohermes onboard --fresh" >&2
+  echo "All three, if the secrets path is written as \"\$HOME/.airc/secrets.env\":" >&2
+  echo "  sed -i.pre-plan7 -E -e '/AIRC_SECRETS_FILE/!s#\"\\\$HOME/\.airc/secrets\.env\"#\"\${AIRC_SECRETS_FILE:-\$HOME/.airc/secrets.env}\"#' -e 's/[[:space:]]+NEMOCLAW_WEB_SEARCH_PROVIDER=tavily//' -e '/--fresh/!s/nemohermes onboard/nemohermes onboard --fresh/' $REONBOARD" >&2
+  stop "fix $REONBOARD as above, then run this script again. Nothing was changed."
+fi
 # How reonboard.sh reads secrets.env decides how it gets the copy: an env var or first argument it already supports
 # ("${NAME:-$HOME/.airc/secrets.env}" or "${1:-...}"). Comment lines are ignored; line numbers are the file's.
-rb_code="$(grep -nvE '^[[:space:]]*#' "$REONBOARD" || true)"
 refs="$(grep 'secrets\.env' <<<"$rb_code" || true)"
 override="$(grep -oE '\$\{([A-Za-z_][A-Za-z0-9_]*|1):[-=][^}]*secrets\.env\}' <<<"$refs" | head -n 1 | sed -E 's/^\$\{([A-Za-z0-9_]+):.*/\1/' || true)"
 if [[ -z "$override" ]] || grep -vqF "\${$override:" <<<"$refs"; then
@@ -115,7 +141,7 @@ quiet_8642   # again: a run may have started while the prompt waited
 
 echo "== 2. Pause the watchdog, the relay and the airc forward"
 STOPPED=1
-sudo systemctl stop aircheck-watchdog.timer aircheck-watchdog.service aircheck-relay aircheck-hermes-forward
+sudo systemctl stop aircheck-watchdog.timer aircheck-watchdog.service aircheck-relay aircheck-hermes-forward </dev/null
 
 echo "== 3. Back up the airc skills and Hermes config"
 install -d -m 700 "$BACKUP_DIR"
@@ -138,9 +164,9 @@ chmod 600 "$TMP_SECRETS"
 grep -vE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" > "$TMP_SECRETS" || true
 echo "secrets copy: $(grep -c '=' "$TMP_SECRETS" || true) settings, $(grep -cE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" || true) TAVILY_API_KEY line(s) left out"
 if [[ "$override" == 1 ]]; then
-  env -u TAVILY_API_KEY bash "$REONBOARD" "$TMP_SECRETS"
+  env -u TAVILY_API_KEY bash "$REONBOARD" "$TMP_SECRETS" </dev/null
 else
-  env -u TAVILY_API_KEY "$override=$TMP_SECRETS" bash "$REONBOARD"
+  env -u TAVILY_API_KEY "$override=$TMP_SECRETS" bash "$REONBOARD" </dev/null
 fi
 rm -f "$TMP_SECRETS"
 TMP_SECRETS=""
@@ -168,13 +194,24 @@ export CRATE_MCP_TOKEN AIRCHECK_MCP_TOKEN
 [[ -n "$CRATE_MCP_TOKEN" && -n "$AIRCHECK_MCP_TOKEN" ]] || stop "bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN."
 nemohermes airc mcp remove crate >/dev/null 2>&1 || true
 nemohermes airc mcp remove aircheck >/dev/null 2>&1 || true
+# `destroy --no-cleanup-gateway` leaves these two OpenShell gateway providers behind, and `mcp remove` does not clear them.
+# With a provider but no policy, `mcp add` refuses ("non-prefix partial state"). Exact names only, nothing else is touched.
+providers="$(NO_COLOR=1 openshell --gateway nemoclaw provider list 2>&1)" || { echo "$providers" >&2; stop "openshell --gateway nemoclaw provider list failed."; }
+for p in airc-mcp-crate airc-mcp-aircheck; do
+  if tr -c 'A-Za-z0-9._-' '\n' <<<"$providers" | grep -qxF "$p"; then
+    echo "deleting the leftover gateway provider $p"
+    openshell --gateway nemoclaw provider delete "$p" || stop "could not delete the gateway provider $p."
+  fi
+done
+ADDING=1
 nemohermes airc mcp add crate --url https://10.104.0.41:8443/crate/mcp --env CRATE_MCP_TOKEN --trusted-private-host 10.104.0.41 --deny-tool "telegraph_*" --deny-tool "tumblr_*" --deny-tool "browser_*" --deny-tool "whosampled_*" --deny-tool bandcamp_get_fan_collection --deny-tool bandcamp_get_artist_page --deny-tool bandcamp_get_album --deny-tool bandcamp_get_artist_tracks --deny-tool bandcamp_get_bandcamp_editorial
 nemohermes airc mcp add aircheck --url https://10.104.0.41:8443/aircheck/mcp --env AIRCHECK_MCP_TOKEN --trusted-private-host 10.104.0.41
+ADDING=0
 unset CRATE_MCP_TOKEN AIRCHECK_MCP_TOKEN
-timeout 120 nemohermes airc mcp restart
+timeout 120 nemohermes airc mcp restart </dev/null
 
 echo "== 7. Skill-writing lock and station skills (both sandboxes)"
-bash "$REPO/deploy/hermes/apply-agent-config.sh" --with-skills "$REPO"
+bash "$REPO/deploy/hermes/apply-agent-config.sh" --with-skills "$REPO" </dev/null
 
 echo "== 8. Start the forward, then the relay and the watchdog timer"
 restore
@@ -200,7 +237,7 @@ grep -q 'source_search' <<<"$tools" && grep -q 'research_submit' <<<"$tools" ||
   stop "mcp status aircheck --tools does not list source_search and research_submit. Is the bridge deployed (Plan 7)?"
 echo "ok: mcp status aircheck --tools lists source_search and research_submit"
 want=($(sed -n 's/^SKILLS=(\(.*\))$/\1/p' "$REPO/deploy/hermes/install-skills.sh"))
-listing="$(timeout 45 openshell sandbox exec -n airc -- bash -lc 'COLUMNS=200 hermes skills list --source local' 2>/dev/null || true)"
+listing="$(timeout 45 openshell sandbox exec -n airc -- bash -lc 'COLUMNS=200 hermes skills list --source local' 2>/dev/null </dev/null || true)"
 have="$(grep -E '[│|] *local *[│|]' <<<"$listing" | sed -E 's/^[│| ]*([A-Za-z0-9_.-]+(…)?).*/\1/' || true)"
 for s in "${want[@]}"; do grep -qxF "$s" <<<"$have" || stop "skill list in airc lacks $s. Run: bash $REPO/deploy/hermes/install-skills.sh"; done
 for s in $have; do [[ " ${want[*]} " == *" $s "* ]] || stop "skill list in airc has a skill the repo did not install: $s. Check it before the next draft."; done
