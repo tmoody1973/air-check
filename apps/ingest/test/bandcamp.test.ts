@@ -185,3 +185,10 @@ describe("embedPass", () => {
     expect(logs[0]).toMatch(/^ingest step=bandcamp-embed ok=false code=record_failed ms=\d+$/);
   });
 });
+
+describe("Oct 30: Bandcamp's bot check", () => {
+  test("a Client Challenge page is its own failure, challenged, not no_player", async () => {
+    const challenge = "<!DOCTYPE html><html><head><title>Client Challenge</title></head><body><noscript>JavaScript is disabled</noscript></body></html>";
+    expect(await bandcampEmbed(stubHttp(() => page(challenge)).http, ALBUM)).toEqual({ failed: "challenged" });
+  });
+});

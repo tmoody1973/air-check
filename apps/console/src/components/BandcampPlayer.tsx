@@ -1,8 +1,8 @@
 "use client";
 
 import { bandcampEmbedSrc, type BandcampEmbed } from "@aircheck/core";
-import { useState } from "react";
-import { SECONDARY, errorText } from "./EpisodeControls";
+import { useId, useState } from "react";
+import { FIELD, PRIMARY, SECONDARY, errorText } from "./EpisodeControls";
 import { SampleTag } from "./SampleTag";
 
 // Plan 8: Bandcamp's own player on a release. The iframe src is built in code from the stored {kind, id} only (core's
@@ -18,6 +18,7 @@ const FAILED: Record<string, string> = {
   not_html: "the link wasn't a web page",
   too_large: "the page was over 2 MB",
   no_player: "the page has no player",
+  challenged: "Bandcamp asked for a human check, so Air Check could not read the page. Paste the player instead",
   timeout: "Bandcamp took longer than 15 seconds",
   network: "Bandcamp couldn't be reached",
   bad_id: "the stored player id isn't valid",
@@ -51,9 +52,42 @@ export type PlayerProps = {
   onRetry: () => Promise<unknown>;
   /** The listening queue's Play button already asked: show the player straight away, no second tap. */
   autoPlay?: boolean;
+  /** Oct 30: saves Bandcamp's Share → Embed code Tarik pasted (radar.pastePlayer). Absent: no paste box. */
+  onPaste?: (pasted: string) => Promise<unknown>;
 };
 
-export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry, autoPlay = false }: PlayerProps) {
+/** Oct 30: Bandcamp challenges the ingest worker, so Tarik can paste the player from Bandcamp's Share → Embed. */
+function PastePlayer({ onPaste }: { onPaste: (pasted: string) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const id = useId();
+  if (!open) return <button type="button" className={`${SECONDARY} self-start`} onClick={() => setOpen(true)}>Paste player</button>;
+  const save = async () => {
+    setState({ busy: true, error: null });
+    try {
+      await onPaste(code);
+      setState({ busy: false, error: null });
+      setOpen(false);
+    } catch (e) {
+      setState({ busy: false, error: errorText(e) });
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className="font-medium">Bandcamp embed code</label>
+      <p className="text-muted">On the Bandcamp page: Share, then Embed, then copy the code.</p>
+      <textarea id={id} rows={3} maxLength={5_000} value={code} onChange={(e) => setCode(e.target.value)} className={`${FIELD} py-2 font-mono text-xs`} />
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={PRIMARY} disabled={state.busy || !code.trim()} onClick={save}>Save player</button>
+        <button type="button" className={SECONDARY} disabled={state.busy} onClick={() => (setOpen(false), setState({ busy: false, error: null }))}>Cancel</button>
+      </div>
+      {state.error && <p role="alert" className="text-problem-text">{state.error}</p>}
+    </div>
+  );
+}
+
+export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry, autoPlay = false, onPaste }: PlayerProps) {
   const [playing, setPlaying] = useState(autoPlay);
   const [retry, setRetry] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
@@ -72,6 +106,7 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
       <div className="flex flex-col gap-1 text-sm text-muted">
         <p>Getting the Bandcamp player…</p>
         {stale && <p>Older than 10 minutes: the ingest worker may be down.</p>}
+        {onPaste && <PastePlayer onPaste={onPaste} />}
       </div>
     );
   }
@@ -92,9 +127,17 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
           <button type="button" className={SECONDARY} disabled={retry.busy} onClick={again}>Try again</button>
         </div>
         {retry.error && <p role="alert" className="text-problem-text">{retry.error}</p>}
+        {onPaste && <PastePlayer onPaste={onPaste} />}
       </div>
     );
   }
+  if (!embed && embedState === undefined && onPaste)
+    return (
+      <div className="flex flex-col gap-2 text-sm">
+        <p className="text-ink-soft">No Bandcamp link in the email.</p>
+        <PastePlayer onPaste={onPaste} />
+      </div>
+    );
   if (!embed || embedState === undefined) return null; // ready, or queued for a re-read with the id it already had
   const src = playerSrc(embed);
   if (!src) return <p className="text-sm text-ink-soft">No player: {embedErrorText("bad_id")}</p>;

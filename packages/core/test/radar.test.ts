@@ -19,6 +19,7 @@ import {
   parseBandcampEmail,
   pickInbound,
   readBandcampEmbed,
+  embedFromPaste,
   releaseKey,
   senderDecision,
   stripLinks,
@@ -430,6 +431,18 @@ describe("bandcampPageUrl (Review Focus 2)", () => {
     "not a url",
   ])("refuses %s", (u) => {
     expect(bandcampPageUrl(u)).toBeNull();
+  });
+});
+
+describe("embedFromPaste (Oct 30: Tarik pastes Bandcamp's Share → Embed code)", () => {
+  test("reads the iframe code, the bare player URL and the WordPress shortcode; a track's id wins over its album", () => {
+    expect(embedFromPaste('<iframe style="border: 0; width: 350px; height: 470px;" src="https://bandcamp.com/EmbeddedPlayer/album=3847473100/size=large/bgcol=ffffff/linkcol=0687f5/tracklist=false/transparent=true/" seamless><a href="https://deepheads.bandcamp.com/album/reset">Reset by Versa</a></iframe>')).toEqual({ kind: "album", id: "3847473100" });
+    expect(embedFromPaste("https://bandcamp.com/EmbeddedPlayer/album=1/size=large/track=22/")).toEqual({ kind: "track", id: "22" });
+    expect(embedFromPaste("[bandcamp width=350 height=470 album=3847473100 size=large bgcol=ffffff linkcol=0687f5 tracklist=false]")).toEqual({ kind: "album", id: "3847473100" });
+  });
+  test("anything else is null: a page link, another host's player, a malformed id, too-long ids", () => {
+    for (const bad of ["https://deepheads.bandcamp.com/album/reset", '<iframe src="https://evil.example/EmbeddedPlayer/album=1/">', "https://bandcamp.com/EmbeddedPlayer/album=abc/", "https://bandcamp.com/EmbeddedPlayer/album=1234567890123/", "", "album=12"])
+      expect(embedFromPaste(bad)).toBeNull();
   });
 });
 

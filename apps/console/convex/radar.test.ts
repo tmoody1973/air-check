@@ -514,6 +514,33 @@ describe("player queue (Review Focus 2)", () => {
   });
 });
 
+describe("pastePlayer (Oct 30: Bandcamp challenges the worker's page reads)", () => {
+  const CODE = '<iframe src="https://bandcamp.com/EmbeddedPlayer/album=3847473100/size=large/"></iframe>';
+  const PAGE = "https://palesignal.bandcamp.com/album/glass-weather";
+  test("a pasted embed code gives the release its player; a late worker result cannot undo it", async () => {
+    const t = convexTest(schema, modules);
+    const releaseId = await savedRelease(t, "m1", mail({ bandcampPages: [PAGE] }));
+    await t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE });
+    expect((await releases(t))[0]).toMatchObject({ embed: { kind: "album", id: "3847473100" }, embedState: "ready" });
+    await t.mutation(api.radar.embedResult, { token: INGEST, releaseId, pageUrl: PAGE, result: { failed: "challenged" } });
+    expect((await releases(t))[0]).toMatchObject({ embed: { kind: "album", id: "3847473100" }, embedState: "ready" });
+  });
+  test("a release with no Bandcamp link in its email can be given one too", async () => {
+    const t = convexTest(schema, modules);
+    const releaseId = await savedRelease(t, "m1", mail());
+    await t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE });
+    expect((await releases(t))[0]).toMatchObject({ embedState: "ready", embed: { id: "3847473100" } });
+  });
+  test("not an embed code, too long, or the demo: refused, nothing changes", async () => {
+    const t = convexTest(schema, modules);
+    const releaseId = await savedRelease(t, "m1", mail());
+    expect(await errorCode(t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: "https://deepheads.bandcamp.com/album/reset" }))).toBe("BAD_INPUT");
+    expect(await errorCode(t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE + " ".repeat(5_001) }))).toBe("BAD_INPUT");
+    expect(await errorCode(t.withIdentity(demo).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE }))).toBe("FORBIDDEN");
+    expect((await releases(t))[0]).not.toHaveProperty("embed");
+  });
+});
+
 describe("human mutations", () => {
   test("setStatus, edit and setEmbargo (incl. Clear embargo)", async () => {
     const t = convexTest(schema, modules);

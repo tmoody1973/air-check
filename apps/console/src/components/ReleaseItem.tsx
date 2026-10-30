@@ -54,6 +54,7 @@ export type RadarActions = {
   setEmbargo: (a: { releaseId: string; embargo: Embargo | null }) => Promise<unknown>;
   retry: (a: { messageId: string }) => Promise<unknown>;
   retryEmbed: (a: { releaseId: string }) => Promise<unknown>;
+  pastePlayer: (a: { releaseId: string; pasted: string }) => Promise<unknown>;
   setFavorite: (a: { releaseId: string; favorite: boolean }) => Promise<unknown>;
 };
 export type ReleaseCtx = {
@@ -386,8 +387,8 @@ export function ReleaseItem({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const embargo = embargoLabel(r.embargo, ctx.today);
   const open = ctx.playing === r._id;
   const playable = canPlay(r, ctx);
-  // No player yet (or it failed): the player's own reason line, as before. The demo has none.
-  const reason = !ctx.demo && ((r.embedState === "queued" && !r.embed) || r.embedState === "failed");
+  // No player yet, it failed, or the email had no Bandcamp link (Oct 30: then the paste box). The demo has none.
+  const reason = !ctx.demo && !r.embed;
   const meta = [
     r.type && TYPE[r.type],
     r.genre,
@@ -398,7 +399,7 @@ export function ReleaseItem({ r, ctx }: { r: Release; ctx: ReleaseCtx }) {
   const move = (status: ReleaseStatus, done: string) => save(() => ctx.actions.setStatus({ releaseId: r._id, status }), `${said(r)} ${done}`);
   const s = r.status;
   const player = (autoPlay: boolean) => (
-    <BandcampPlayer artist={r.artist} title={r.title} embed={r.embed} embedState={r.embedState} embedError={r.embedError} embedQueuedAt={r.embedQueuedAt} demo={ctx.demo} autoPlay={autoPlay} onRetry={() => ctx.actions.retryEmbed({ releaseId: r._id })} />
+    <BandcampPlayer artist={r.artist} title={r.title} embed={r.embed} embedState={r.embedState} embedError={r.embedError} embedQueuedAt={r.embedQueuedAt} demo={ctx.demo} autoPlay={autoPlay} onRetry={() => ctx.actions.retryEmbed({ releaseId: r._id })} onPaste={(pasted) => ctx.actions.pastePlayer({ releaseId: r._id, pasted })} />
   );
 
   return (

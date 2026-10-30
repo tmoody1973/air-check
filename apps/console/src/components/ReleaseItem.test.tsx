@@ -30,7 +30,7 @@ const PAGE = "https://nova.bandcamp.com/album/low-tide";
 const READY = { bandcampPage: PAGE, links: [PAGE], embed: { kind: "album" as const, id: "42" }, embedState: "ready" as const };
 const noop = async () => undefined;
 const acts = (over: Partial<RadarActions> = {}): RadarActions => ({
-  setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), setFavorite: vi.fn(noop), ...over,
+  setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), pastePlayer: vi.fn(noop), setFavorite: vi.fn(noop), ...over,
 });
 function setup(r: Release, { actions = acts(), demo = false, tag = undefined as string | undefined, playing = undefined as string | undefined, showStatus = false } = {}) {
   const ctx: ReleaseCtx = { actions, announce: vi.fn(), today: TODAY, demo, tab: r.source ?? "bandcamp", tag, onTag: vi.fn(), playing, onPlay: vi.fn(), showStatus };

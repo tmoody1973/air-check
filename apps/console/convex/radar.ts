@@ -1,6 +1,7 @@
 import {
   type ActiveEmbargo,
   bandcampPageUrl,
+  embedFromPaste,
   chicagoDayKey,
   agentEmbargoLines,
   bandcampArtUrl,
@@ -553,6 +554,23 @@ export const retry = mutation({
     const row = await inboxByMessageId(ctx, messageId);
     if (!row || (row.state !== "refused" && row.state !== "failed")) throw badInput("only an email that was refused or failed can be read again");
     await ctx.db.patch(row._id, { state: "received", reasons: undefined });
+  },
+});
+
+/**
+ * Oct 30: Tarik pastes the player code from Bandcamp's Share → Embed, because Bandcamp answers the ingest worker's page
+ * reads with a bot check. Read in code (core embedFromPaste); nothing is fetched. A late worker result is ignored
+ * (embedResult acts only on a queued release).
+ */
+export const pastePlayer = mutation({
+  args: { releaseId: v.id("releases"), pasted: v.string() },
+  handler: async (ctx, { releaseId, pasted }) => {
+    await requireRealHuman(ctx);
+    await ownRelease(ctx, releaseId);
+    if (pasted.length > 5_000) throw badInput("That is too long for Bandcamp's embed code.");
+    const embed = embedFromPaste(pasted);
+    if (!embed) throw badInput("That isn't Bandcamp's embed code. On the Bandcamp page: Share, then Embed, then copy the code.");
+    await ctx.db.patch(releaseId, { embed, embedState: "ready", embedError: undefined });
   },
 });
 

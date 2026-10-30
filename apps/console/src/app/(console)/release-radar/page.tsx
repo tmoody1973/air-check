@@ -45,6 +45,7 @@ function RadarBody() {
   const setEmbargo = useMutation(api.radar.setEmbargo);
   const retry = useMutation(api.radar.retry);
   const retryEmbed = useMutation(api.radar.retryEmbed);
+  const pastePlayer = useMutation(api.radar.pastePlayer);
   const setFavorite = useMutation(api.radar.setFavorite);
   const id = (releaseId: string) => releaseId as Id<"releases">;
   const actions: RadarActions = {
@@ -53,6 +54,7 @@ function RadarBody() {
     setEmbargo: (a) => setEmbargo({ ...a, releaseId: id(a.releaseId) }),
     retry,
     retryEmbed: (a) => retryEmbed({ releaseId: id(a.releaseId) }),
+    pastePlayer: (a) => pastePlayer({ releaseId: id(a.releaseId), pasted: a.pasted }),
     setFavorite: (a) => setFavorite({ ...a, releaseId: id(a.releaseId) }),
   };
   return (
