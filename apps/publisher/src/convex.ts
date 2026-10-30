@@ -4,6 +4,8 @@ import { anyApi, type FunctionReference } from "convex/server"; // untyped on pu
 
 export interface QueueItem { packageId: string; showDate: string; decidedAt?: string; draft: PackageDraft; fingerprint?: string; coverStorageId?: string }
 export interface ReviewItem { packageId: string; title: string; trackCount: number; flagCount: number }
+/** Plan 7: a finished pre-air check. Counts only, never the report's text. */
+export interface ResearchItem { jobId: string; showDate: string; changes: number; open: number }
 /** Hard Rule 2: state, account name, time and a short error code. Never a credential. */
 export interface MixcloudStatus { state: "connected" | "needs_reconnect" | "not_connected"; account?: string; connectedAt?: number; lastError?: string }
 /** Plan 5c Task 4: an approved description update, claimed (now pushing). `showUrl` is the package's own receipt URL. */
@@ -22,6 +24,7 @@ export interface PublisherConvex {
   coverUrl(storageId: string): Promise<string>;
   setMixcloud(status: MixcloudStatus): Promise<void>;
   awaitingReview(): Promise<ReviewItem[]>;
+  researchReady(): Promise<ResearchItem[]>;
   claimUpdate(): Promise<UpdateClaim | null>;
   recordUpdate(id: string, outcome: UpdateOutcome): Promise<void>;
 }
@@ -30,7 +33,7 @@ export const CONVEX_TIMEOUT_MS = 15_000;
 
 export function connectConvex(url: string, token: string): PublisherConvex {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(CONVEX_TIMEOUT_MS) }) });
-  const p = anyApi.publisher as unknown as Record<"queue" | "coverUrl" | "awaitingReview", FunctionReference<"query">> &
+  const p = anyApi.publisher as unknown as Record<"queue" | "coverUrl" | "awaitingReview" | "researchReady", FunctionReference<"query">> &
     Record<"claim" | "result" | "unclaim" | "reconcile" | "setMixcloud", FunctionReference<"mutation">>;
   const u = anyApi.descriptionUpdates as unknown as Record<"claim" | "record", FunctionReference<"mutation">>;
   return {
@@ -42,6 +45,7 @@ export function connectConvex(url: string, token: string): PublisherConvex {
     coverUrl: (storageId) => client.query(p.coverUrl, { token, storageId }),
     setMixcloud: async (status) => void (await client.mutation(p.setMixcloud, { token, ...status })),
     awaitingReview: () => client.query(p.awaitingReview, { token }),
+    researchReady: () => client.query(p.researchReady, { token }),
     claimUpdate: () => client.mutation(u.claim, { token }),
     recordUpdate: async (id, outcome) => void (await client.mutation(u.record, { token, id, outcome })),
   };

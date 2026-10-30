@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PackageDraft } from "@aircheck/core";
 import { goldenDraft } from "../../../packages/core/test/helpers/goldens";
-import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem, ReviewItem, UpdateClaim, UpdateOutcome } from "../src/convex.js";
+import type { MixcloudStatus, PublisherConvex, PublishResult, QueueItem, ResearchItem, ReviewItem, UpdateClaim, UpdateOutcome } from "../src/convex.js";
 
 export const ACCESS_TOKEN = "mc-access-token-SECRET-1234567890";
 export const BOT_TOKEN = "123456:telegram-bot-SECRET";
@@ -89,7 +89,7 @@ export const okUpload = recordUpload(200, SUCCESS);
 export const okEdit = recordUpload(200, { result: { success: true, message: "Cloudcast updated" } });
 
 /** A fake Convex that keeps package statuses like the gate does, and records every call. */
-export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; coverBase?: string; review?: ReviewItem[]; updates?: UpdateClaim[] } = {}) {
+export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; coverBase?: string; review?: ReviewItem[]; updates?: UpdateClaim[]; research?: ResearchItem[] } = {}) {
   const status = new Map<string, string>(items.map((p) => [p.packageId, "approved"]));
   const updates = opts.updates ?? [];
   const updateStatus = new Map<string, string>(updates.map((u) => [u.id, "approved"]));
@@ -115,6 +115,7 @@ export function fakeConvex(items: QueueItem[], opts: { publishedToday?: number; 
     async coverUrl(storageId) { calls.push(["coverUrl", storageId]); return `${opts.coverBase}/cover/${storageId}`; },
     async setMixcloud(s: MixcloudStatus) { calls.push(["setMixcloud", s]); },
     async awaitingReview() { calls.push(["awaitingReview"]); return opts.review ?? []; },
+    async researchReady() { calls.push(["researchReady"]); return opts.research ?? []; },
     async claimUpdate() {
       calls.push(["claimUpdate"]);
       const u = updates.find((x) => updateStatus.get(x.id) === "approved");

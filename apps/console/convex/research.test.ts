@@ -30,9 +30,14 @@ beforeEach(() => {
   vi.stubEnv("AGENT_SUBMIT_TOKEN", AGENT);
   vi.stubEnv("DEMO_AGENT_SUBMIT_TOKEN", DEMO_AGENT);
   vi.stubEnv("RELAY_TOKEN", RELAY);
+  // Plan 7 Task 5: a done real verify job schedules play-history lookups. No test reaches the network.
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("no network in tests");
+  });
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -672,5 +677,144 @@ describe("R11: the demo sample and other visitors' jobs cannot be changed", () =
     const { runId } = await a.mutation(api.research.resume, { jobId });
     const run = (await runs(t)).find((r) => r.runId === runId)!;
     expect(run.sessionKey).toBe("sA");
+  });
+});
+
+// Plan 7 Task 5: Thursday and Friday at 9 am in Chicago, the pre-air check for the coming show queues itself.
+describe("scheduledVerify (cron)", () => {
+  const THU_9 = Date.UTC(2026, 9, 29, 14); // Thu Oct 29, 9 am CDT
+  // convex-test never lets a transaction's time go back past the last commit, so each test only moves the clock forward.
+  const at = (ms: number) => vi.setSystemTime(ms);
+  const verifyJobs = async (t: T) => (await t.run((ctx) => ctx.db.query("research").collect())).filter((j) => j.kind === "verify");
+  const cron = (t: T) => t.mutation(internal.research.scheduledVerify, {});
+
+  test("Thursday 9 am queues a verify of the Paper notes for Friday's show; 8 am, a Wednesday and a second run that day do not", async () => {
+    const t = convexTest(schema, modules);
+    at(Date.UTC(2026, 9, 28, 14)); // Wednesday 9 am
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    await cron(t);
+    at(THU_9 - 3_600_000);
+    await cron(t);
+    expect(await verifyJobs(t)).toEqual([]);
+    at(THU_9 + 60_000);
+    await cron(t);
+    const [j] = await verifyJobs(t);
+    expect(j).toMatchObject({ workspace: "real", showDate: DATE, notesSource: "paper", status: "queued" });
+    expect(j!.lines!.some((l) => l.closing)).toBe(true);
+    expect((await runs(t)).filter((r) => r.kind === "research")).toHaveLength(1);
+    // The run ends; the same morning's next tick (or a later one that day) starts nothing more.
+    await finishRun(t, j!.runIds[0]!, "failed");
+    at(THU_9 + 30 * 60_000);
+    await cron(t);
+    expect(await verifyJobs(t)).toHaveLength(1);
+  });
+
+  test("Friday 9 am checks that day's show (CST after the clocks change too)", async () => {
+    const t = convexTest(schema, modules);
+    at(Date.UTC(2026, 10, 6, 14)); // Fri Nov 6, 8 am CST
+    await t.run((ctx) => ctx.db.insert("episodes", episode({ showDate: "2026-11-06" }) as never));
+    await cron(t);
+    expect(await verifyJobs(t)).toEqual([]);
+    at(Date.UTC(2026, 10, 6, 15)); // 9 am CST
+    await cron(t);
+    expect((await verifyJobs(t)).map((j) => j.showDate)).toEqual(["2026-11-06"]);
+  });
+
+  test("no notes anywhere (or notes but no tracklist): nothing queued, nothing thrown", async () => {
+    const t = convexTest(schema, modules);
+    at(THU_9);
+    await cron(t);
+    await t.run((ctx) => ctx.db.insert("episodes", episode({ notes: { status: "missing" } }) as never));
+    await cron(t);
+    expect(await verifyJobs(t)).toEqual([]);
+    expect(await runs(t)).toEqual([]);
+  });
+
+  test("Air Check's newest done show notes come before the Paper notes", async () => {
+    const t = convexTest(schema, modules);
+    at(THU_9 - 2 * 3_600_000);
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId, runId } = await startNotes(t);
+    await finishDone(t, jobId, runId, { "H1.1": "Air Check fact." });
+    at(THU_9);
+    await cron(t);
+    const [j] = await verifyJobs(t);
+    expect(j).toMatchObject({ notesSource: "air-check", showDate: DATE });
+    expect(j!.lines!.map((l) => l.text).join("\n")).toMatch(/Air Check fact\./);
+  });
+
+  test("the demo workspace is never checked by the cron", async () => {
+    const t = convexTest(schema, modules);
+    at(THU_9 - 2 * 3_600_000);
+    await startNotes(t, t.withIdentity(demo()));
+    at(THU_9);
+    await cron(t);
+    expect(await verifyJobs(t)).toEqual([]);
+  });
+});
+
+// Plan 7 Task 5 (P6): a finished real verify job gets 88Nine and HYFIN last-played dates, looked up in code.
+describe("playContext", () => {
+  type Call = { station: string; q: string };
+  function fakePlays(played: Record<string, number>) {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const { args } = JSON.parse(String(init.body)) as { args: { stationSlug: string; q: string } };
+      calls.push({ station: args.stationSlug, q: args.q });
+      const at = played[`${args.stationSlug}|${args.q}`];
+      return new Response(JSON.stringify({ status: "success", value: at ? [{ artist: args.q, artistRaw: args.q, title: "T", playedAt: at }] : [] }));
+    });
+    return calls;
+  }
+  const finishVerify = async (t: T, jobId: string, runId: string, token = AGENT) => {
+    for (const l of (await job(t, jobId))!.lines!.filter((x) => !x.closing)) await submit(t, { job: jobId, key: l.id, claims: [detail()], sources: SOURCES }, token);
+    await finishRun(t, runId);
+  };
+
+  test("a done real verify job: one lookup per distinct artist and station, never a closing track's artist; found dates saved", async () => {
+    const t = convexTest(schema, modules);
+    const calls = fakePlays({ "88nine|Alfa Mist": Date.UTC(2026, 9, 20, 18), "hyfin|Yussef Dayes": Date.UTC(2026, 9, 2, 3) });
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId, runId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    await finishVerify(t, jobId, runId);
+    const j = (await job(t, jobId))!;
+    expect(j.status).toBe("done");
+    expect(calls).toEqual([
+      { station: "88nine", q: "Alfa Mist" }, { station: "hyfin", q: "Alfa Mist" },
+      { station: "88nine", q: "Yussef Dayes" }, { station: "hyfin", q: "Yussef Dayes" },
+    ]);
+    expect(j.playContext).toEqual([
+      { artist: "Alfa Mist", station: "88nine", lastPlayed: "2026-10-20" },
+      { artist: "Yussef Dayes", station: "hyfin", lastPlayed: "2026-10-01" },
+    ]);
+  });
+
+  test("a lookup that fails leaves that artist out; the rest are still saved", async () => {
+    const t = convexTest(schema, modules);
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const { args } = JSON.parse(String(init.body)) as { args: { stationSlug: string; q: string } };
+      calls.push(args.q);
+      if (args.q === "Alfa Mist") throw new Error("down");
+      return new Response(JSON.stringify({ status: "success", value: [{ artist: args.q, title: "T", playedAt: Date.UTC(2026, 9, 20, 18) }] }));
+    });
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId, runId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    await finishVerify(t, jobId, runId);
+    expect(calls).toHaveLength(4);
+    expect((await job(t, jobId))!.playContext!.map((p) => `${p.artist}|${p.station}`)).toEqual(["Yussef Dayes|88nine", "Yussef Dayes|hyfin"]);
+  });
+
+  test("the demo never looks anything up (Hard Rule 9), and show notes jobs do not either", async () => {
+    const t = convexTest(schema, modules);
+    const calls = fakePlays({});
+    const d = t.withIdentity(demo());
+    const v = await d.mutation(api.research.startVerify, { showDate: DATE, notes: { from: "pasted", text: "## 1. Alfa Mist – Organic Rust\nOut Oct 10." }, tracklistText: TRACKLIST });
+    await finishVerify(t, v.jobId, v.runId, DEMO_AGENT);
+    expect((await job(t, v.jobId))!.status).toBe("done");
+    const n = await startNotes(t);
+    await finishDone(t, n.jobId, n.runId);
+    expect(calls).toEqual([]);
+    expect((await job(t, v.jobId))!.playContext).toBeUndefined();
   });
 });

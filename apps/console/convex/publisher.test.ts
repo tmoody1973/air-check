@@ -286,6 +286,52 @@ describe("publisher.awaitingReview", () => {
   });
 });
 
+// Plan 7 Task 5: the publisher's Telegram line for a finished pre-air check. Counts and the job id only, never text.
+describe("publisher.researchReady", () => {
+  const HOUR = 3_600_000;
+  const NOW = Date.UTC(2026, 9, 29, 15);
+  const claim = (status: "confirmed" | "could-not-verify", text: string) => ({
+    kind: "detail" as const, text, status, sources: [{ url: "https://label.example/x", host: "label.example", title: "X", via: "tavily", primary: true, matched: status === "confirmed" }],
+  });
+  const lines = [
+    { id: "L1", text: "Out Oct 10 on Label A.", trackKey: "H1.1", closing: false },
+    { id: "L2", text: "Recorded in Lisbon.", trackKey: "H1.1", closing: false },
+    { id: "L3", text: "A closing note.", trackKey: "H1.2", closing: true },
+  ];
+  async function verifyJob(t: T, over: Record<string, unknown> = {}) {
+    const jobId = (over.jobId as string) ?? "rj-aaaaaa";
+    await t.run(async (ctx) => {
+      await ctx.db.insert("research", {
+        workspace: "real", jobId, kind: "verify", showDate: "2026-10-30", lines, angles: false, status: "done", runIds: ["r1"], continuations: 0,
+        createdAt: NOW - 2 * HOUR, updatedAt: NOW - HOUR, finishedAt: NOW - HOUR, ...over,
+      } as never);
+      await ctx.db.insert("researchEntries", { workspace: (over.workspace as "real") ?? "real", jobId, key: "L1", block: "line", claims: [claim("confirmed", "Out Oct 10 on Label A.")], replacement: "Out Oct 10 on Label A.", savedAt: 1, updatedAt: 1 });
+      await ctx.db.insert("researchEntries", { workspace: (over.workspace as "real") ?? "real", jobId, key: "L2", block: "line", claims: [claim("could-not-verify", "Recorded in Lisbon (private detail).")], savedAt: 1, updatedAt: 1 });
+    });
+    return jobId;
+  }
+
+  test("done real verify jobs from the last 48 hours: job id, show date, changes and open counts only", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const t = convexTest(schema, modules);
+    const id = await verifyJob(t);
+    await verifyJob(t, { jobId: "rj-running", status: "running", finishedAt: undefined });
+    await verifyJob(t, { jobId: "rj-old", finishedAt: NOW - 49 * HOUR });
+    await verifyJob(t, { jobId: "rj-demo", workspace: "demo" });
+    await verifyJob(t, { jobId: "rj-notes", kind: "show-notes", lines: undefined });
+    const ready = await t.query(api.publisher.researchReady, { token: PUB });
+    expect(ready).toEqual([{ jobId: id, showDate: "2026-10-30", changes: 1, open: 1 }]);
+    expect(JSON.stringify(ready)).not.toMatch(/Lisbon|Label A|private/);
+    // The running one is listed once it finishes.
+    await t.run(async (ctx) => {
+      const j = (await ctx.db.query("research").withIndex("by_jobId", (q) => q.eq("jobId", "rj-running")).unique())!;
+      await ctx.db.patch(j._id, { status: "done", finishedAt: NOW });
+    });
+    expect((await t.query(api.publisher.researchReady, { token: PUB })).map((r: { jobId: string }) => r.jobId).sort()).toEqual([id, "rj-running"]);
+  });
+});
+
 describe("fail closed", () => {
   const snapshot = (t: T) => t.run(async (ctx) => [await ctx.db.query("packages").collect(), await ctx.db.query("mixcloudStatus").collect()]);
   const calls = async (t: T, token: string, id: string) => {
@@ -299,6 +345,7 @@ describe("fail closed", () => {
       t.mutation(api.publisher.setMixcloud, { token, state: "connected", account: "rhythmlab" }),
       t.mutation(api.publisher.unclaim, { token, packageId: id }),
       t.query(api.publisher.awaitingReview, { token }),
+      t.query(api.publisher.researchReady, { token }),
     ];
   };
 

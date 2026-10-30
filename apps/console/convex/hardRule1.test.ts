@@ -74,6 +74,8 @@ test("the public writes are exactly the allowlist", async () => {
       "episodes.agentMarkRerun", "packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo",
       // Plan 7: the agent's research route, its search counter, and the hook relay.finished schedules for research runs.
       "research.submitEntry", "research.countSearch", "research.onRunFinished",
+      // Plan 7 Task 5: the Thursday/Friday cron's verify start, and the play-history lookup with its one save.
+      "research.scheduledVerify", "research.playContext", "research.savePlayContext",
     ].sort(),
   );
 });
@@ -164,7 +166,11 @@ test("the research routes each run one ctx.runMutation to their own function, an
   }
   const research = src("research");
   for (const banned of ["packages", "descriptionUpdates", "gateFor", "ApprovalGate", "publisher", "runAction", "fetch("]) expect(research, `research.ts mentions ${banned}`).not.toContain(banned);
-  for (const name of ["submitEntry", "countSearch", "onRunFinished"]) expect(research).toMatch(new RegExp(`export const ${name} = internalMutation\\(`));
+  for (const name of ["submitEntry", "countSearch", "onRunFinished", "scheduledVerify", "savePlayContext"]) expect(research).toMatch(new RegExp(`export const ${name} = internalMutation\\(`));
+  // Plan 7 Task 5: the one network use is play history, through core's lastPlayed (Hard Rule 3 is checked there).
+  expect(research).toMatch(/export const playContext = internalAction\(/);
+  expect([...research.matchAll(/\bfetch\b/g)]).toHaveLength(research.match(/lastPlayed\(fetch, /g)?.length ?? -1);
+  expect(research.match(/lastPlayed\(fetch, /g)).toHaveLength(1);
 });
 
 test("packages.revise (the agent's) calls only gateFor(ctx).revise, after the workspace check", () => {
@@ -377,6 +383,7 @@ test("the relay's, the agent's and the ingest service's tokens are refused by ev
       t.mutation(api.publisher.setMixcloud, { token, state: "connected" }),
       t.mutation(api.publisher.unclaim, { token, packageId: id }),
       t.query(api.publisher.awaitingReview, { token }),
+      t.query(api.publisher.researchReady, { token }),
       t.query(api.media.statuses, { token, packageIds: [id] }),
       t.mutation(api.descriptionUpdates.claim, { token }),
     ];

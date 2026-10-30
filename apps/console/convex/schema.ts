@@ -205,6 +205,7 @@ export default defineSchema({
     allowedHosts: v.number(),
     at: v.number(),
   }).index("by_workspace", ["workspace"]),
+  // unused since Plan 7; dropped in Task 6 after the demo reseed empties it
   verifications: defineTable({
     workspace: workspaceV,
     claim: v.string(),

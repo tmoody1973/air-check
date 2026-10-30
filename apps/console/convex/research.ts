@@ -9,6 +9,7 @@ import {
   isShowDate,
   type JudgedClaim,
   judgeClaim,
+  lastPlayed,
   LIMITS,
   MAX_CONTINUATIONS,
   normalize,
@@ -30,8 +31,9 @@ import {
   verifyReport,
 } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, type MutationCtx, query, type QueryCtx } from "./_generated/server";
 import { sessionKeyOf } from "./demoLimits";
 import { enqueueLiveRun } from "./enqueue";
 import { episodeByDate, isOpenRun, requireRealHuman } from "./episodes";
@@ -42,7 +44,7 @@ import { createdAtOf } from "./runDefaults";
 import { stopRun } from "./runs";
 import { claimKindV, workspaceV } from "./schema";
 import { SAMPLE_JOB_PREFIX } from "./seedResearch";
-import { MAX_TRACKLIST } from "./tracklist";
+import { MAX_NOTES, MAX_TRACKLIST } from "./tracklist";
 
 // Plan 7: sourced research jobs. A job is a Hermes run (kind `research`) whose prompt is built here, in code. The agent
 // saves blocks through POST /agent/research -> submitEntry, which writes research rows in its token's workspace and
@@ -287,11 +289,28 @@ async function pastShows(ctx: QueryCtx, job: Job, today: string): Promise<{ coun
   return { count: played.length, year: Number(year), ...(played.length && { last: played.at(-1)!.showDate }) };
 }
 
-/** P10: the plain helper ingest (Task 5) and the query share. The newest done show-notes job, rendered by core. */
+/**
+ * P10: the plain helper ingest (Task 5) and the query share. The newest done show-notes job, rendered by core, held to
+ * the draft form's notes cap (D14).
+ */
 export async function draftNotesFromResearch(ctx: QueryCtx, workspace: Workspace, showDate: string): Promise<string> {
   const job = await doneNotesJob(ctx, workspace, showDate);
   if (!job) return "";
-  return renderNotesForDraft(notesView(job, await liveEntries(ctx, job.jobId), await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()))));
+  return renderNotesForDraft(notesView(job, await liveEntries(ctx, job.jobId), await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now())))).slice(0, MAX_NOTES);
+}
+
+/**
+ * Task 5: real verify jobs that ended done since `since`, as counts only (changes offered, claims still open), for the
+ * Telegram line that links to the report. Never a line, claim or source.
+ */
+export async function finishedVerifyCounts(ctx: QueryCtx, since: number): Promise<{ jobId: string; showDate: string; changes: number; open: number }[]> {
+  // ponytail: reads every real verify job (two a week); add a by-finishedAt index if that ever grows.
+  const jobs = await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) => q.eq("workspace", "real").eq("kind", "verify")).collect();
+  const done = jobs.filter((j) => j.status === "done" && (j.finishedAt ?? 0) >= since);
+  return Promise.all(done.map(async (j) => {
+    const { changes, open } = verifyReport({ lines: j.lines ?? [], entries: (await liveEntries(ctx, j.jobId)).map(forView), tracks: j.tracks });
+    return { jobId: j.jobId, showDate: j.showDate ?? "", changes: changes.length, open: open.length };
+  }));
 }
 
 // ---- public: start ----
@@ -315,12 +334,16 @@ export const startShowNotes = mutation({
 
 const notesFromV = v.union(v.object({ from: v.literal("air-check") }), v.object({ from: v.literal("paper") }), v.object({ from: v.literal("pasted"), text: v.string() }));
 
+type NotesText = { text: string; tracks?: ResearchTrack[] };
+/** The real episode's Paper notes. Callers decide who may read them (Hard Rule 9: never the demo). */
+const paperText = async (ctx: QueryCtx, showDate: string) => (await episodeByDate(ctx, showDate))?.notes.text || undefined;
+
 /** The notes to check, snapshotted now. Air Check's own come as the agent copy (D3: no PRIVATE marker lines). */
-async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: Infer<typeof notesFromV>): Promise<{ text: string; tracks?: ResearchTrack[] }> {
+async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: Infer<typeof notesFromV>): Promise<NotesText> {
   if (notes.from === "pasted") return { text: notes.text };
   if (notes.from === "paper") {
     await requireRealHuman(ctx);
-    const text = (await episodeByDate(ctx, showDate))?.notes.text;
+    const text = await paperText(ctx, showDate);
     if (!text) throw refuse(`No Paper notes for ${showDate}.`);
     return { text };
   }
@@ -331,17 +354,21 @@ async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: 
   return { text: showNotesMarkdown(view, { forAgent: true }), tracks: job.tracks };
 }
 
+type NotesFrom = Infer<typeof notesFromV>["from"];
+async function beginVerify(ctx: MutationCtx, ws: Workspace, showDate: string, from: NotesFrom, { text, tracks: ownTracks }: NotesText, tracklistText?: string) {
+  if (!text.trim()) throw refuse("The notes are empty.");
+  if (new TextEncoder().encode(text).length > MAX_NOTES_BYTES) throw refuse("The notes are over 64 KB. Check them in parts.");
+  const tracks = ownTracks ?? (await showTracks(ctx, ws, showDate, tracklistText));
+  if (!tracks) throw refuse("Add the tracklist first, so closing tracks are skipped.");
+  return startJob(ctx, ws, { kind: "verify", showDate, tracks, lines: numberLines(text, tracks), notesSource: from, angles: false });
+}
+
 export const startVerify = mutation({
   args: { showDate: v.string(), notes: notesFromV, tracklistText: v.optional(v.string()) },
   handler: async (ctx, { showDate, notes, tracklistText }) => {
     const ws = await callerWorkspace(ctx);
     requireShowDate(showDate);
-    const { text, tracks: ownTracks } = await notesText(ctx, ws, showDate, notes);
-    if (!text.trim()) throw refuse("The notes are empty.");
-    if (new TextEncoder().encode(text).length > MAX_NOTES_BYTES) throw refuse("The notes are over 64 KB. Check them in parts.");
-    const tracks = ownTracks ?? (await showTracks(ctx, ws, showDate, tracklistText));
-    if (!tracks) throw refuse("Add the tracklist first, so closing tracks are skipped.");
-    return startJob(ctx, ws, { kind: "verify", showDate, tracks, lines: numberLines(text, tracks), notesSource: notes.from, angles: false });
+    return beginVerify(ctx, ws, showDate, notes.from, await notesText(ctx, ws, showDate, notes), tracklistText);
   },
 });
 
@@ -727,7 +754,7 @@ export const countSearch = internalMutation({
  */
 export const onRunFinished = internalMutation({
   args: { runId: v.string() },
-  handler: async (ctx, { runId }) => {
+  handler: async (ctx, { runId }): Promise<void> => {
     const run = await runById(ctx, runId);
     const job = run?.jobId ? await jobById(ctx, run.jobId) : null;
     if (!run || !job || job.runIds.at(-1) !== runId || ![...ACTIVE, "taken-over"].includes(job.status)) return;
@@ -736,7 +763,11 @@ export const onRunFinished = internalMutation({
       ctx.db.patch(job._id, { status, finishedAt: now, updatedAt: now, ...(lastProblems && { lastProblems }) });
     const entries = await liveEntries(ctx, job.jobId);
     const left = remainingKeys(job, entries);
-    if (!left.length) return end("done");
+    if (!left.length) {
+      // P6: a finished real pre-air check gets 88Nine and HYFIN context, looked up in code after it is saved.
+      if (job.kind === "verify" && job.workspace === "real") await ctx.scheduler.runAfter(0, internal.research.playContext, { jobId: job.jobId });
+      return end("done");
+    }
     if (job.status === "taken-over" || run.status === "cancelled") return end("stopped");
     if (!entries.some((e) => (e.savedAt ?? -1) >= createdAtOf(run))) return end("failed");
     if (job.scope) return end("stopped");
@@ -749,5 +780,93 @@ export const onRunFinished = internalMutation({
     }
     if (!next) return end("stopped", [DEMO_LIMIT]);
     await ctx.db.patch(job._id, { status: "queued", runIds: [...job.runIds, next], continuations: job.continuations + 1, updatedAt: now });
+  },
+});
+
+// ---- Task 5: the Thursday and Friday pre-air check, and station play context ----
+
+const clock = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short", hour: "numeric", hourCycle: "h23" });
+/** The America/Chicago weekday ("Thu") and hour (0-23) of an instant. */
+function chicagoClock(ms: number): { weekday: string; hour: number } {
+  const p = Object.fromEntries(clock.formatToParts(ms).map((x) => [x.type, x.value]));
+  return { weekday: p.weekday ?? "", hour: Number(p.hour) };
+}
+const nextDay = (day: string) => new Date(Date.parse(`${day}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+const VERIFY_HOUR = 9;
+
+/**
+ * Hourly (crons.ts). At 9 am in Chicago on a Thursday or a Friday it checks the notes for the next show (Friday's: the
+ * coming one on Thursday, today's on Friday), in the real workspace only, unless a check for that show was already
+ * started today (by this or by Tarik). Notes: the newest done Air Check show notes, else the episode's Paper notes, else
+ * nothing. A refusal (busy, no tracklist, too long) queues nothing; the answer is a code, never notes text (Hard Rule 8).
+ */
+export const scheduledVerify = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ queued: boolean; reason?: string }> => {
+    const now = Date.now();
+    const { weekday, hour } = chicagoClock(now);
+    if (hour !== VERIFY_HOUR || (weekday !== "Thu" && weekday !== "Fri")) return { queued: false, reason: "not-now" };
+    const today = chicagoDayKey(now);
+    const showDate = weekday === "Fri" ? today : nextDay(today);
+    const earlier = await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) => q.eq("workspace", "real").eq("kind", "verify").eq("showDate", showDate)).collect();
+    if (earlier.some((j) => chicagoDayKey(j.createdAt) === today)) return { queued: false, reason: "started-today" };
+    const ownNotes = await doneNotesJob(ctx, "real", showDate);
+    const paper = ownNotes ? undefined : await paperText(ctx, showDate);
+    if (!ownNotes && !paper) return { queued: false, reason: "no-notes" };
+    try {
+      const got = ownNotes ? await notesText(ctx, "real", showDate, { from: "air-check" }) : { text: paper! };
+      await beginVerify(ctx, "real", showDate, ownNotes ? "air-check" : "paper", got);
+      return { queued: true };
+    } catch (e) {
+      if (e instanceof ConvexError) return { queued: false, reason: "refused" };
+      throw e;
+    }
+  },
+});
+
+const stationV = v.union(v.literal("88nine"), v.literal("hyfin"));
+const STATIONS = ["88nine", "hyfin"] as const;
+const playRowV = v.object({ artist: v.string(), station: stationV, lastPlayed: v.optional(v.string()) });
+
+/** The artists a done real verify job asks play history about: each distinct one, never a closing track's (Hard Rule 4). */
+export const playArtists = internalQuery({
+  args: { jobId: v.string() },
+  handler: async (ctx, { jobId }): Promise<string[]> => {
+    const job = await jobById(ctx, jobId);
+    if (!job || job.workspace !== "real" || job.kind !== "verify" || job.status !== "done") return [];
+    const byName = new Map<string, string>();
+    for (const t of job.tracks ?? []) if (!t.closing && normalize(t.artist) && !byName.has(normalize(t.artist))) byName.set(normalize(t.artist), t.artist);
+    return [...byName.values()];
+  },
+});
+
+/**
+ * P6, scheduled by onRunFinished for a done real verify job. One lookup per distinct artist and station (88nine and
+ * hyfin only, Hard Rule 3, checked again in core's lastPlayed), one at a time. Only days found are kept: a failed lookup
+ * or no play in the window says nothing, so no row claims an artist was never played (Hard Rule 10). The demo never
+ * gets here (Hard Rule 9).
+ */
+export const playContext = internalAction({
+  args: { jobId: v.string() },
+  handler: async (ctx, { jobId }): Promise<void> => {
+    const artists: string[] = await ctx.runQuery(internal.research.playArtists, { jobId });
+    if (!artists.length) return;
+    const found: Infer<typeof playRowV>[] = [];
+    for (const artist of artists) {
+      for (const station of STATIONS) {
+        const day = await lastPlayed(fetch, station, artist).catch(() => null);
+        if (day) found.push({ artist, station, lastPlayed: day });
+      }
+    }
+    await ctx.runMutation(internal.research.savePlayContext, { jobId, playContext: found });
+  },
+});
+
+export const savePlayContext = internalMutation({
+  args: { jobId: v.string(), playContext: v.array(playRowV) },
+  handler: async (ctx, { jobId, playContext }): Promise<void> => {
+    const job = await jobById(ctx, jobId);
+    if (!job || job.workspace !== "real" || job.kind !== "verify") return;
+    await ctx.db.patch(job._id, { playContext, updatedAt: Date.now() });
   },
 });

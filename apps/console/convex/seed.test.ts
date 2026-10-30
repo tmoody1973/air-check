@@ -24,7 +24,12 @@ describe("seedDemo", () => {
     const first = await counts(t);
     await t.mutation(internal.seed.seedDemo, {});
     expect(await counts(t)).toEqual(first);
-    expect(first).toEqual({ packages: 2, activity: 9, verifications: 2, releases: 4, runs: 1 });
+    // Plan 7 Task 5: nothing reads `verifications` any more (Today counts open claims from research), so it is not seeded;
+    // the wipe still empties old demo rows until Task 6 drops the table.
+    expect(first).toEqual({ packages: 2, activity: 9, verifications: 0, releases: 4, runs: 1 });
+    // Web search goes through Air Check's bridge (decision 006), never straight to Tavily from the sandbox.
+    const activity = await t.run((ctx) => ctx.db.query("activity").collect());
+    expect(activity.map((a) => a.destination ?? "")).not.toContain("api.tavily.com");
   });
 
   test("demo releases: both tabs, a status and a source each, bracketed values, one undated embargo, no players", async () => {
@@ -58,6 +63,13 @@ describe("seedDemo", () => {
     for (const r of rows.filter((x) => x.source === "cosign")) expect(r.senders?.map((s) => [s.name, s.address])).toEqual([["[Label or PR company]", undefined]]);
     // The demo has no inbox (Hard Rule 9: inbound mail writes the real workspace only).
     expect(await t.run((ctx) => ctx.db.query("inbox").collect())).toEqual([]);
+  });
+
+  test("an old demo verifications row is wiped and none is written back", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("verifications", { workspace: "demo", claim: "old", status: "conflict" }));
+    await t.mutation(internal.seed.seedDemo, {});
+    expect(await t.run((ctx) => ctx.db.query("verifications").collect())).toEqual([]);
   });
 
   test("seedDemo never touches real rows", async () => {

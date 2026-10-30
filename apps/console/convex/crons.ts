@@ -8,4 +8,8 @@ const crons = cronJobs();
 // seedDemo is internal, touches only the "demo" workspace, keeps visitors' rows for 24 h and never deletes a live run.
 crons.interval("reseed demo workspace", { hours: 1 }, internal.seed.seedDemo, {});
 
+// Plan 7: at 9 am in Chicago on Thursdays and Fridays, the pre-air check for the next show queues itself. The function
+// checks the Chicago hour and weekday, so the UTC hour this fires at can shift with daylight saving time.
+crons.hourly("pre-air verify", { minuteUTC: 0 }, internal.research.scheduledVerify, {});
+
 export default crons;

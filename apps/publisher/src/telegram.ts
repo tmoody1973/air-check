@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { readyCard } from "@aircheck/core";
+import { readyCard, researchCard } from "@aircheck/core";
 import type { PublisherConvex } from "./convex.js";
 import type { StateBox } from "./state.js";
 import { timed } from "./log.js";
@@ -43,7 +43,7 @@ export function telegramSender(secretsFile: string, apiBase = TELEGRAM_API): (te
 }
 
 export interface CardDeps {
-  convex: Pick<PublisherConvex, "awaitingReview">; state: StateBox; appUrl: string;
+  convex: Pick<PublisherConvex, "awaitingReview" | "researchReady">; state: StateBox; appUrl: string;
   send: (text: string) => Promise<boolean>; log: (line: string) => void;
 }
 
@@ -62,4 +62,21 @@ export async function sendReadyCards(deps: CardDeps): Promise<void> {
   const ids = new Set(waiting.map((p) => p.packageId));
   if (deps.state.get().sentCards.some((id) => !ids.has(id)))
     await deps.state.update((s) => ({ ...s, sentCards: s.sentCards.filter((id) => ids.has(id)) }));
+}
+
+/**
+ * Plan 7: one line per finished pre-air check (done in the last 48 hours), with a link to its report in the signed-in
+ * console. Never the report's text. Sent ids live in their own list (D12), pruned only against researchReady, so a
+ * restart or a ready-card pass never re-sends one; a failed send is tried again next time.
+ */
+export async function sendResearchCards(deps: CardDeps): Promise<void> {
+  const ready = await deps.convex.researchReady();
+  for (const r of ready) {
+    if (deps.state.get().sentResearch.includes(r.jobId)) continue;
+    const ok = await timed(deps.log, { research: r.jobId }, "research_card", () => deps.send(researchCard({ ...r, appUrl: deps.appUrl })), (sent) => sent);
+    if (ok) await deps.state.update((s) => ({ ...s, sentResearch: [...s.sentResearch, r.jobId] }));
+  }
+  const ids = new Set(ready.map((r) => r.jobId));
+  if (deps.state.get().sentResearch.some((id) => !ids.has(id)))
+    await deps.state.update((s) => ({ ...s, sentResearch: s.sentResearch.filter((id) => ids.has(id)) }));
 }
