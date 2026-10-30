@@ -216,7 +216,7 @@ Tarik plans each show ahead and voice-tracks it, so planning is the weekly workf
 - The release radar (`releases` with status `new` or `considering`, label, release date, embargo) and the morning digest.
 - Tarik's Bandcamp collection (`collection` table, metadata only, from the ingest worker's nightly Subsonic sync) so candidates can be tagged `in your collection`. See `docs/BANDCAMP_COLLECTION.md`.
 - 88Nine and HYFIN play history from Convex, as context only ("already in heavy rotation"). Never the `rhythmlab` stream, and never as a record of what the show played.
-- Crate lookups and Tavily for facts that make a theme work.
+- Crate lookups and `source_search` (web search through the bridge; the sandbox has no Tavily key since Plan 7) for facts that make a theme work.
 
 The agent writes 3 to 5 theme cards (working title, pitch, evidence links, 8 to 12 candidate tracks marked past / radar / research, embargo and rotation flags, what is unverified). Picking a card seeds the draft tracklist. Picks, rejections and edits go to memory so the next batch improves.
 

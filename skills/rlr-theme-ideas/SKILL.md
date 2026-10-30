@@ -14,7 +14,7 @@ Tarik plans each show ahead of time and voice-tracks it. This skill gives him st
 - Morning digest items.
 - Station play history for `88nine` and `hyfin` only, as context ("already in heavy rotation on HYFIN"). Never the `rhythmlab` stream, and never as a record of what the show played.
 - The `collection` table (metadata of Tarik's purchased Bandcamp items), when present: tag candidates `in your collection`, and note owned items Rhythm Lab has not played. Never claim ownership without a matching row.
-- Crate lookups (MusicBrainz, Discogs, Wikipedia) and Tavily for facts that make a theme work.
+- Crate lookups (MusicBrainz, Discogs, Wikipedia) and source_search (web search through Air Check) for facts that make a theme work.
 
 ## Output: 3 to 5 ideas, each with
 1. A working title and a one-sentence pitch.
