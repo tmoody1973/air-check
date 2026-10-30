@@ -2,7 +2,9 @@
 import { readFileSync } from "node:fs";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { LIMITS } from "@aircheck/core";
 import { api, internal } from "./_generated/api";
+import { RESEARCH_BODY_BYTES } from "./agentSubmit";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -193,6 +195,34 @@ describe("POST /agent/research (submitEntry)", () => {
     expect(e!.claims[0]!.sources[0]).toMatchObject({ url: "https://label-a.example/organic-rust", matched: true });
   });
 
+  test("a block citing 40 sources of 8,000 characters each saves, even at JSON's worst 6 bytes a character; past the route's cap is 413", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await startNotes(t);
+    const ids = Array.from({ length: LIMITS.sourcesPerBlock }, (_, i) => `S${String(i).padStart(5, "0")}`);
+    const worst = "\u0001"; // a control character: JSON writes it as \u0001, six bytes
+    const sources = Object.fromEntries(ids.map((id, i) => [id, {
+      url: `https://example.org/${i}/${"a".repeat(2_000)}`, host: "example.org", title: worst.repeat(200), via: "tavily", text: worst.repeat(LIMITS.sourceText),
+    }]));
+    const claims = Array.from({ length: 10 }, (_, i) => ({ kind: "detail", text: "Recorded in London.", sources: ids.slice(i * 4, i * 4 + 4).map((id) => ({ id })) }));
+    const body = { job: jobId, key: "H1.1", claims, sources };
+    expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeGreaterThan(1_900_000);
+    expect(await submit(t, body)).toMatchObject({ status: 200, data: { saved: "H1.1", claims: 10 } });
+    const res = await post(t, "/agent/research", { ...body, pad: "x".repeat(RESEARCH_BODY_BYTES) });
+    expect(res.status).toBe(413);
+  });
+
+  test("Oct 29: on a long page a date counts only near the block's track (Alfa Mist, Organic Rust)", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await startNotes(t);
+    const filler = "Other records in the catalog. ".repeat(90);
+    const page = (text: string) => ({ url: "https://news.example/a", host: "news.example", title: "News", via: "tavily", text });
+    const claim = { kind: "release-date", text: "Released on 2026-10-10.", value: "2026-10-10", sources: [{ id: "S3cccc" }] };
+    await submit(t, { job: jobId, key: "H1.1", claims: [claim], sources: { S3cccc: page(`Alfa Mist news. ${filler} A reissue out October 10, 2026.`) } });
+    expect((await entries(t, jobId))[0]!.claims[0]!.sources[0]!.matched).toBe(false);
+    await submit(t, { job: jobId, key: "H1.1", claims: [claim], sources: { S3cccc: page(`${filler} Organic Rust is out October 10, 2026.`) } });
+    expect((await entries(t, jobId))[0]!.claims[0]!.sources[0]!.matched).toBe(true);
+  });
+
   test("a closing track's key is 409 with the plain sentence", async () => {
     const t = convexTest(schema, modules);
     const { jobId } = await startNotes(t);
@@ -215,11 +245,22 @@ describe("POST /agent/research (submitEntry)", () => {
     expect(await entries(t, jobId)).toEqual([]);
   });
 
-  test("a sourceless claim is dropped and named; the rest is saved", async () => {
+  test("Oct 29 (Tarik): a sourceless fact in show notes or a deep dive is kept as could-not-verify, 'No source found.'", async () => {
     const t = convexTest(schema, modules);
     const { jobId } = await startNotes(t);
     const r = await submit(t, { job: jobId, key: "H1.2", claims: [detail(), { kind: "bio", text: "Born in Leeds.", sources: [] }], sources: SOURCES });
-    expect(r).toEqual({ status: 200, data: { saved: "H1.2", claims: 1, verify: 0, dropped: ["Claim 2 has no source. No source, no sentence."] } });
+    expect(r).toEqual({ status: 200, data: { saved: "H1.2", claims: 2, verify: 1, dropped: [] } });
+    expect((await entries(t, jobId))[0]!.claims[1]).toEqual({ kind: "bio", text: "Born in Leeds.", status: "could-not-verify", sources: [], check: "No source found." });
+    const dive = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    expect(await submit(t, { job: dive.jobId, key: "brief", claims: [{ kind: "bio", text: "Born in London.", sources: [] }], sources: SOURCES })).toMatchObject({ status: 200, data: { claims: 1, verify: 1, dropped: [] } });
+  });
+
+  test("a pre-air check still drops a sourceless claim and names it: checking a line needs a source", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    const r = await submit(t, { job: jobId, key: "L2", claims: [detail(), { kind: "bio", text: "Born in Leeds.", sources: [] }], sources: SOURCES });
+    expect(r).toEqual({ status: 200, data: { saved: "L2", claims: 1, verify: 0, dropped: ["Claim 2 has no source. A pre-air check needs one."] } });
   });
 
   test("a claim's value and a source's says pass the same text checks as the claim (I1)", async () => {
@@ -533,16 +574,16 @@ describe("search caps (POST /agent/search-usage)", () => {
     return { status: res.status, data: (await res.json()) as Record<string, unknown> };
   };
 
-  test("30 real and 10 demo per Chicago day, separate per workspace, then allowed: false without counting; the next day starts again", async () => {
+  test("100 real and 20 demo per Chicago day, separate per workspace, then allowed: false without counting; the next day starts again", async () => {
     const t = convexTest(schema, modules);
-    for (let i = 1; i <= 30; i++) expect((await usage(t, { query: `q${i}` })).data).toEqual({ allowed: true, used: i, cap: 30 });
-    expect((await usage(t, { query: "one more" })).data).toEqual({ allowed: false, used: 30, cap: 30 });
-    for (let i = 1; i <= 10; i++) await usage(t, { query: `d${i}` }, DEMO_AGENT);
-    expect((await usage(t, { query: "one more" }, DEMO_AGENT)).data).toEqual({ allowed: false, used: 10, cap: 10 });
-    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 30, cap: 30 });
-    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 10, cap: 10 });
+    for (let i = 1; i <= 100; i++) expect((await usage(t, { query: `q${i}` })).data).toEqual({ allowed: true, used: i, cap: 100 });
+    expect((await usage(t, { query: "one more" })).data).toEqual({ allowed: false, used: 100, cap: 100 });
+    for (let i = 1; i <= 20; i++) await usage(t, { query: `d${i}` }, DEMO_AGENT);
+    expect((await usage(t, { query: "one more" }, DEMO_AGENT)).data).toEqual({ allowed: false, used: 20, cap: 20 });
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 100, cap: 100 });
+    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 20, cap: 20 });
     vi.setSystemTime(Date.UTC(2026, 9, 31, 5, 30)); // 00:30 Oct 31 in Chicago
-    expect((await usage(t, { query: "new day" })).data).toEqual({ allowed: true, used: 1, cap: 30 });
+    expect((await usage(t, { query: "new day" })).data).toEqual({ allowed: true, used: 1, cap: 100 });
   });
 
   test("a query naming an active embargo is refused without counting and names nothing", async () => {
@@ -550,21 +591,21 @@ describe("search caps (POST /agent/search-usage)", () => {
     await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Alfa Mist", title: "Organic Rust", embargo: { until: "2026-11-07" } }));
     expect(await usage(t, { query: "Alfa Mist Organic Rust release date" })).toEqual({ status: 200, data: { allowed: false, embargoed: true } });
     expect((await usage(t, { query: "Alfa Mist Organic Rust" }, DEMO_AGENT)).data).toMatchObject({ allowed: true }); // other workspace
-    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 30 });
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100 });
   });
 
   test("Apple Music lookups count apart from web search (60 real per day)", async () => {
     const t = convexTest(schema, modules);
     expect((await usage(t, { query: "Organic Rust", source: "apple_music" })).data).toEqual({ allowed: true, used: 1, cap: 60 });
-    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 30 });
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100 });
     expect((await usage(t, { query: "x", source: "spotify" })).status).toBe(400);
     expect((await usage(t, {})).status).toBe(400);
   });
 
   test("countSearch is concurrency-safe: parallel calls never pass the cap", async () => {
     const t = convexTest(schema, modules);
-    const all = await Promise.all(Array.from({ length: 12 }, (_, i) => t.mutation(internal.research.countSearch, { workspace: "demo", query: `q${i}` })));
-    expect(all.filter((r) => r.allowed)).toHaveLength(10);
+    const all = await Promise.all(Array.from({ length: 22 }, (_, i) => t.mutation(internal.research.countSearch, { workspace: "demo", query: `q${i}` })));
+    expect(all.filter((r) => r.allowed)).toHaveLength(20);
   });
 });
 

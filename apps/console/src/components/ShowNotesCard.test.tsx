@@ -16,7 +16,7 @@ const actions = (): BlockActions => ({
 const blockOf = (key: string) => screen.getByText(key).closest("article")!;
 
 describe("ShowNotesCard", () => {
-  it("per hour: intro, threads and entries; supplied notes labelled; closing tracks get one line", () => {
+  it("per hour: intro, hour thread and entries; supplied notes labelled; closing tracks get one line", () => {
     render(<ShowNotesCard view={notesView()} today={TODAY} actions={actions()} />);
     expect(screen.getByRole("heading", { name: "Hour 1" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Hour 2" })).toBeInTheDocument();
@@ -31,11 +31,35 @@ describe("ShowNotesCard", () => {
     expect(within(blockOf("H1.3")).getByText("Not researched yet.")).toBeInTheDocument();
   });
 
-  it("each claim lists its sources as host links; [verify] claims show the code-written check", () => {
+  it("Oct 29: a track reads like his Paper notes: labeled bullets, short host links, [verify] on what to check", () => {
     render(<ShowNotesCard view={notesView()} today={TODAY} actions={actions()} />);
     const a = blockOf("H1.1");
-    expect(within(a).getByRole("link", { name: "label-a.bandcamp.com" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
-    expect(within(a).getByText(/Sources disagree: 2026-10-16 \(example.org\) vs 2026-10-23 \(discogs.com\)/)).toBeInTheDocument();
+    expect(within(a).getByRole("heading", { name: '[Artist A], "[Title A]"' })).toBeInTheDocument();
+    expect(within(a).getByText("Album and label:")).toBeInTheDocument();
+    expect(within(a).getByText("Artist bio:")).toBeInTheDocument();
+    expect(within(a).getByRole("link", { name: "label-a.bandcamp" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
+    expect(within(a).getByRole("link", { name: "en.wikipedia" })).toHaveAttribute("href", "https://en.wikipedia.org/a5");
+    expect(within(a).getByText("Sources disagree: example says Oct 16, 2026, discogs says Oct 23, 2026.")).toBeInTheDocument();
+    expect(within(a).getAllByText("[verify]")).toHaveLength(1);
+    // The reason is only in Notes for Your Review, never inline.
+    expect(within(a).queryByText(/\(example\.org\) vs/)).not.toBeInTheDocument();
+  });
+
+  it("a track with little that holds reads 'What I could verify' / 'What I couldn't verify'", () => {
+    render(<ShowNotesCard view={notesView()} today={TODAY} actions={actions()} />);
+    const b = blockOf("H1.2");
+    expect(within(b).getByText("What I could verify:")).toBeInTheDocument();
+    expect(within(b).getByText("[Artist B] recorded it in one take.")).toBeInTheDocument();
+    expect(within(b).getByText("What I couldn't verify:")).toBeInTheDocument();
+    expect(within(b).getByText("I couldn't confirm the album and label or the artist's bio.")).toBeInTheDocument();
+    expect(within(b).queryByText(/I found no verified bio/)).not.toBeInTheDocument();
+  });
+
+  it("Notes for Your Review lists each flagged track with its reasons", () => {
+    render(<ShowNotesCard view={notesView()} today={TODAY} actions={actions()} />);
+    const review = screen.getByRole("region", { name: "Notes for Your Review" });
+    expect(within(review).getByText('[Artist A], "[Title A]":')).toBeInTheDocument();
+    expect(within(review).getByText("[Title A] came out on 2026-10-16 (sources disagree: Oct 16, 2026 vs Oct 23, 2026).")).toBeInTheDocument();
   });
 
   it("embargoed blocks are Private with Plan 8's wording; dated and date not known", () => {

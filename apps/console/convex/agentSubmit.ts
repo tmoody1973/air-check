@@ -52,6 +52,11 @@ export function workspaceForToken(
 }
 
 export const MAX_BODY_BYTES = 131_072; // same cap as the bridge
+/**
+ * POST /agent/research only: a block carries its cited sources' text (LIMITS.sourcesPerBlock × LIMITS.sourceText), so
+ * 40 × 8,000 characters at JSON's worst 6 bytes each, plus URLs, is about 2 MB. Convex takes 16 MiB of arguments.
+ */
+export const RESEARCH_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Reads the body as text, giving up (null) as soon as it passes the cap, before any JSON parsing. */
 export async function readCapped(req: Request, max = MAX_BODY_BYTES): Promise<string | null> {
@@ -132,6 +137,7 @@ export type ResearchSubmit = {
 // A Record keyed by core's type, so a kind added or removed in core fails the typecheck here.
 const CLAIM_KINDS: Record<ClaimKind, true> = {
   release: true, "release-date": true, label: true, credit: true, "track-number": true, length: true, bio: true, detail: true, thread: true, connection: true,
+  chart: true, story: true, song: true, samples: true, video: true, "fun-fact": true,
 };
 const MAX_ID = 40;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);

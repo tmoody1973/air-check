@@ -11,6 +11,39 @@ describe("showNotesMarkdown", () => {
     expect(showNotesMarkdown(sampleView)).toBe(golden);
   });
 
+  it("Oct 29: shaped like his Paper notes: labeled bullets in his order, short link names, no per-hour count, no old headings", () => {
+    const md = showNotesMarkdown(sampleView);
+    const labels = [...md.split("### 1. [Artist A]")[1]!.split("### 2.")[0]!.matchAll(/^- \*\*([^*:]+):?\*\*/gm)].map((m) => m[1]);
+    expect(labels).toEqual(["Album and label", "Chart", "Artist bio", "Story", "Samples and connections", "Video", "Fun fact", "On-air angle", "Supplied note"]);
+    expect(md).toContain("[[en.example](https://en.example.org/a3)]");
+    expect(md).not.toMatch(/marked \*\*\[verify\]\*\* had|Pre-Air Verify List|Show Thread|### Details|\*\*Artist:\*\*|I found no verified bio|Only one source: example\.org \[|----------/);
+  });
+
+  it("marker rules: a fact that holds has no marker; a conflict gives both versions then [verify]; the reason is only in the review", () => {
+    const md = showNotesMarkdown(sampleView);
+    expect(md).toContain("- **Artist bio:** [Artist A] is a bassist from [City].[[en.example](https://en.example.org/a3)]\n");
+    expect(md).toContain("Sources disagree: example says Oct 10, 2026, news.example says Oct 17, 2026.[[example](https://www.example.org/b1)][[news.example](https://news.example.org/b2)] **[verify]**");
+    const body = md.split("## Notes for Your Review")[0]!;
+    expect(body).not.toMatch(/No source found|only one source|Only one source/i);
+    expect(md.split("## Notes for Your Review")[1]).toContain("(no source found)");
+  });
+
+  it("an unsourced fact is kept, marked [verify], with no links", () => {
+    expect(showNotesMarkdown(sampleView)).toContain("- **Chart:** [Title A] was a [Magazine] track of the week. **[verify]**\n");
+  });
+
+  it("a track with little that holds reads 'What I could verify' / 'What I couldn't verify'", () => {
+    const view = { ...sampleView, entries: sampleView.entries.map((e) => (e.key === "H1.2" ? { ...e, claims: e.claims.slice(0, 1) } : e)) };
+    expect(showNotesMarkdown(view)).toContain(
+      "**PRIVATE · embargoed until Nov 6, 2026**\n\n- **What I could verify:** Nothing yet.\n- **What I couldn't verify:** I couldn't confirm the album and label or the artist's bio. [Title B] came out on 2026-10-10.",
+    );
+  });
+
+  it("Notes for Your Review says 'Nothing to verify.' when nothing is flagged", () => {
+    const view = { ...sampleView, entries: sampleView.entries.map((e) => ({ ...e, claims: e.claims.filter((c) => c.status === "sourced" || c.status === "confirmed") })) };
+    expect(showNotesMarkdown(view)).toMatch(/## Notes for Your Review\n\nNothing to verify\.\n$/);
+  });
+
   it("marks an embargo set on the track itself, and a private block", () => {
     const view = {
       ...sampleView,
@@ -19,8 +52,8 @@ describe("showNotesMarkdown", () => {
       entries: sampleView.entries.map((e) => (e.key === "H1.1" ? { ...e, private: { by: "tarik" as const } } : e)),
     };
     const md = showNotesMarkdown(view);
-    expect(md).toContain('## 2. [Artist B] – "[Title B]"\n\n**PRIVATE · embargoed until Nov 6, 2026**');
-    expect(md).toContain('## 1. [Artist A] – "[Title A]"\n\n**PRIVATE**\n');
+    expect(md).toContain('### 2. [Artist B], "[Title B]"\n\n**PRIVATE · embargoed until Nov 6, 2026**');
+    expect(md).toContain('### 1. [Artist A], "[Title A]"\n\n**PRIVATE**\n');
     expect(md).not.toContain("embargoed (date not known)");
   });
 
@@ -28,7 +61,7 @@ describe("showNotesMarkdown", () => {
     const view = { ...sampleView, angles: false, entries: sampleView.entries.map((e) => (e.key === "H2.1" ? { ...e, edited: { text: "My own words." } } : e)) };
     const md = showNotesMarkdown(view);
     expect(md).not.toContain("On-air angle");
-    expect(md).toContain('## 1. [Artist D] – "[Title D]"\n\n**PRIVATE · embargoed (date not known)**\n\nMy own words.\n\n## 2.');
+    expect(md).toContain('### 1. [Artist D], "[Title D]"\n\n**PRIVATE · embargoed (date not known)**\n\nMy own words.\n\n### 2.');
     expect(md).not.toContain("It came out on [Label D].");
   });
 
@@ -46,23 +79,38 @@ describe("showNotesMarkdown", () => {
     expect(agent).not.toContain("Ahead of");
   });
 
-  it("marks a recent release of an embargoed track as private in the Show Thread", () => {
+  it("marks a recent release of an embargoed track as private in the release dates", () => {
     const view = {
       ...sampleView,
       entries: sampleView.entries.map((e) =>
         e.key === "H1.2" ? { ...e, claims: [{ kind: "release-date" as const, text: "Out 2026-10-20.", value: "2026-10-20", status: "confirmed" as const, sources: [link] }] } : e,
       ),
     };
-    expect(showNotesMarkdown(view)).toContain('[Artist B] – "[Title B]" released 10 days before the show (Oct 20, 2026) [[example.org](https://example.org/x)] · PRIVATE');
+    expect(showNotesMarkdown(view)).toContain('[Artist B], "[Title B]" released 10 days before the show (Oct 20, 2026)[[example](https://example.org/x)] · PRIVATE');
     expect(showNotesMarkdown(view, { forAgent: true })).not.toContain("PRIVATE");
+  });
+
+  it("pre-air verify still keys Air Check's own notes by track (### headings) and keeps closing tracks closed", () => {
+    const lines = numberLines(showNotesMarkdown(sampleView, { forAgent: true }), sampleView.tracks);
+    const of = (text: string) => lines.find((l) => l.text.includes(text));
+    expect(of("[Magazine] track of the week")).toMatchObject({ trackKey: "H1.1", closing: false });
+    expect(of("closing-track, no notes")).toMatchObject({ trackKey: "H1.3", closing: true });
+    expect(of("came out in September 2026 (no source found)")).not.toHaveProperty("trackKey");
   });
 });
 
 describe("notesForDraft (Review Focus 5)", () => {
   it("keeps only confirmed and sourced claims, with no embargoed, private, [verify] or angle text", () => {
     const text = notesForDraft(sampleView);
-    expect(text).toBe('[Artist A] – "[Title A]": [Title A] is the lead single from [Album A]. [Title A] is on [Label A]. [Title A] came out on 2026-10-16. [Artist A] co-produced the track with [Producer]. [Artist A] is a bassist from [City].');
-    expect(text).not.toMatch(/\[Artist B\]|\[Title B\]|\[Artist D\]|verify|Producer\] bring|supplied|late-night|https?:/);
+    expect(text).toBe(
+      [
+        '[Artist A] – "[Title A]": [Title A] is the lead single from [Album A]. It came out on [Label A]. [Title A] came out on 2026-10-16. [Artist A] is a bassist from [City]. [Artist A] wrote it after a tour of [Country]. It samples [Artist G]\'s [Title G]. The video was shot in one take in [City]. The drums were recorded in a stairwell.',
+        '[Artist F] – "[Title F]": [Artist F] is a rapper from [City] who runs [Label F].',
+      ].join("\n"),
+    );
+    expect(text).not.toMatch(/\[Artist B\]|\[Title B\]|\[Artist D\]|verify|Producer\]|supplied|late-night|https?:/);
+    // Decision 021: an unsourced fact (the chart, the September date) and a one-source credit never reach a description.
+    expect(text).not.toMatch(/Magazine|September 2026|co-produced/);
   });
 
   it("drops a private block, and keeps a thread that names no embargoed release", () => {
@@ -72,7 +120,7 @@ describe("notesForDraft (Review Focus 5)", () => {
         e.key === "H1.1" ? { ...e, private: { by: "agent" as const, reason: "personal" } } : e.key === "H1.threads" ? { ...e, claims: e.claims.map((c) => ({ ...c, text: "[Artist A] and [Artist C] share a drummer." })) } : e,
       ),
     };
-    expect(notesForDraft(view)).toBe("[Artist A] and [Artist C] share a drummer.");
+    expect(notesForDraft(view)).toBe('[Artist A] and [Artist C] share a drummer.\n[Artist F] – "[Title F]": [Artist F] is a rapper from [City] who runs [Label F].');
   });
 
   it("splits sentences without breaking on abbreviations", () => {

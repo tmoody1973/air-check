@@ -9,6 +9,7 @@ const OPEN_CLAIM_DAYS = 14;
 const KIND_WORDS: Record<ClaimKind, string> = {
   release: "release", "release-date": "release date", label: "label", credit: "credit", "track-number": "track number",
   length: "length", bio: "bio", detail: "detail", thread: "thread", connection: "connection",
+  chart: "chart", story: "story", song: "song", samples: "samples", video: "video", "fun-fact": "fun fact",
 };
 type OpenClaim = { jobId: string; label: string; status: "conflict" | "could-not-verify" };
 

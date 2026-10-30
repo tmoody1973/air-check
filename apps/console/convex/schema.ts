@@ -92,6 +92,7 @@ export const noteLineV = v.object({ id: v.string(), text: v.string(), trackKey: 
 export const claimKindV = v.union(
   v.literal("release"), v.literal("release-date"), v.literal("label"), v.literal("credit"), v.literal("track-number"), v.literal("length"),
   v.literal("bio"), v.literal("detail"), v.literal("thread"), v.literal("connection"),
+  v.literal("chart"), v.literal("story"), v.literal("song"), v.literal("samples"), v.literal("video"), v.literal("fun-fact"),
 );
 export const judgedClaimV = v.object({
   kind: claimKindV,

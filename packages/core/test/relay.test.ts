@@ -156,12 +156,22 @@ describe("researchInput", () => {
     expect(text).not.toContain("Closer Artist");
     expect(text).not.toContain("Second Artist");
     expect(text).toContain("7 web searches left today");
-    expect(text).toMatch(/Crate first/);
+    // Oct 29: show notes search the web first (it carries story, charts and press), at most 3 searches a track.
+    expect(text).toContain("at most 3 web searches per track");
+    expect(text).toContain('Tell me about this artist and release <Artist> - "<Title>"');
+    expect(text).not.toMatch(/Crate first/);
+    expect(researchInput({ ...job, kind: "verify", lines: [] })).toMatch(/Crate first/);
     expect(text).toMatch(/untrusted/);
     expect(text).toContain("If research_submit refuses twice for the same key, skip it and move on");
     expect(text).toContain("never send artist, title or URL fields");
     expect(text).toContain(RESEARCH_SKILL_TEXT["show-notes"]);
     expect(text).toMatch(/On-air angle|angle/);
+  });
+
+  it("Oct 29 (decision 021): offers the new kinds and lets a fact with no source go in with sources: []", () => {
+    const text = researchInput(job);
+    expect(text).toContain("chart, story, song, samples, video, fun-fact");
+    expect(text).toContain("sources: [] and Air Check marks it [verify]");
   });
 
   it("does not ask for angles when they are off", () => {
@@ -185,7 +195,7 @@ describe("researchInput", () => {
     expect(text).not.toContain("[Artist C]");
     expect(text).not.toContain("[Artist E]");
     expect(text).toMatch(/No web searches left today/);
-    const l = lines.find((x) => x.text.startsWith("- [Artist A] co-produced"))!;
+    const l = lines.find((x) => x.text.startsWith("- **Album and label:** [Title A]"))!;
     expect(text).toContain(`${l.id} [H1.1] ${l.text}`);
   });
 

@@ -82,6 +82,29 @@ function readDate(m: RegExpMatchArray): string | null {
 const datesIn = (text: string) => [...text.matchAll(DATE)].map(readDate).filter((d): d is string => d !== null);
 const LABEL_SUFFIX = /(?: (?:records|recordings|music|ltd|inc))+$/;
 
+// Oct 29: lengths as sources write them. m:ss or h:mm:ss; "4 minutes and 29 seconds"; a length or duration field
+// (MusicBrainz and iTunes in milliseconds, Bandcamp in seconds). A bare number in prose is never a length.
+const CLOCK = /\b(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)\b/g;
+const WORDS = /\b(\d{1,3})\s*(?:minutes?|mins?)\.?,?\s*(?:and\s+)?(\d{1,2})\s*(?:seconds?|secs?)\b/gi;
+const FIELD = /\b(length|duration|duration_?ms|durationinmillis|tracktimemillis)"?\s*[:=]\s*"?(\d+(?:\.\d+)?)/gi;
+/** A field's number is milliseconds when its name says so, or when it is 10,000 or more (no track is 2.7 hours). */
+const fieldSeconds = (key: string, n: number) => (/ms|millis/i.test(key) || n >= 10_000 ? n / 1000 : n);
+function secondsIn(text: string): number[] {
+  return [
+    ...[...text.matchAll(CLOCK)].map((m) => Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3])),
+    ...[...text.matchAll(WORDS)].map((m) => Number(m[1]) * 60 + Number(m[2])),
+    ...[...text.matchAll(FIELD)].map((m) => fieldSeconds(m[1]!, Number(m[2]))),
+  ];
+}
+/** A claimed length in seconds: any form secondsIn reads, or a bare number ("269000" ms, "269" or "269 seconds"). */
+function lengthValue(v: string): number | null {
+  const read = secondsIn(v);
+  if (read.length === 1) return read[0]!;
+  const bare = v.match(/^(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|secs?|seconds)?$/i);
+  return bare ? fieldSeconds(bare[2] ?? "", Number(bare[1])) : null;
+}
+const LENGTH_SLACK_S = 1;
+
 /** A value as claims compare it, or null when it cannot be read (an ambiguous numeric date, a length with no m:ss). */
 export function normalizeValue(kind: ClaimKind, value: string): string | null {
   const v = value.trim();
@@ -97,32 +120,91 @@ export function normalizeValue(kind: ClaimKind, value: string): string | null {
       return n ? String(Number(n[0])) : null;
     }
     case "length": {
-      const m = v.match(/(\d+):(\d{2})/);
-      return m ? `${Number(m[1])}:${m[2]}` : null;
+      const s = lengthValue(v);
+      return s === null ? null : String(s);
     }
     default:
       return fold(v) || null;
   }
 }
 
-/** Whether a source's own text shows the value: any date in it equal at the same precision, else the folded words. */
-export function sourceSays(text: string, kind: ClaimKind, value: string): boolean {
-  const want = normalizeValue(kind, value);
-  if (want === null) return false;
+/** Oct 29: a value on a long page counts only this close to a mention of the track's artist or title. */
+export const NEAR_CHARS = 300;
+/** Texts this long or shorter (the ledger's cap before page text) are read whole, as before. */
+const WHOLE_TEXT = 2_000;
+
+/** `fold(text)` built one character at a time, with the raw index of each folded character, so a match maps back. */
+function foldIndexed(text: string): { folded: string; at: number[] } {
+  const out: string[] = [];
+  const at: number[] = [];
+  for (let i = 0; i < text.length; ) {
+    const ch = String.fromCodePoint(text.codePointAt(i)!);
+    for (const c of ch.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")) {
+      if (c === " " && (out.length === 0 || out[out.length - 1] === " ")) continue;
+      out.push(c);
+      for (let k = 0; k < c.length; k++) at.push(i); // one index per UTF-16 unit, so at[] lines up with the string
+    }
+    i += ch.length;
+  }
+  return { folded: out.join(""), at };
+}
+
+/**
+ * The parts of a source's text a value may come from. A short text, or no names to look for, is the whole text. A long
+ * one is the stretches within NEAR_CHARS of a folded mention of any name (artist or title), merged; none when no name
+ * appears. Linear: one fold pass, then indexOf per name.
+ */
+function partsNear(text: string, near: readonly string[]): string[] {
+  const names = [...new Set(near.map(fold).filter(Boolean))];
+  if (text.length <= WHOLE_TEXT || !names.length) return [text];
+  const { folded, at } = foldIndexed(text);
+  const padded = ` ${folded} `;
+  const spans: [number, number][] = [];
+  for (const name of names) {
+    // padded[p] is the space before the name, so the name starts at folded[p].
+    for (let p = padded.indexOf(` ${name} `); p !== -1; p = padded.indexOf(` ${name} `, p + name.length + 1)) {
+      spans.push([Math.max(0, at[p]! - NEAR_CHARS), Math.min(text.length, at[p + name.length - 1]! + 1 + NEAR_CHARS)]);
+    }
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of spans) {
+    const last = merged.at(-1);
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged.map(([a, b]) => text.slice(a, b));
+}
+
+function saysWhole(text: string, kind: ClaimKind, want: string): boolean {
   // A year-only value is shown by any date in that year; judgeClaim still needs a month before it confirms.
   if (kind === "release-date") return datesIn(text).some((d) => d === want || (want.length === 4 && d.startsWith(`${want}-`)));
+  if (kind === "length") return secondsIn(text).some((s) => Math.abs(s - Number(want)) <= LENGTH_SLACK_S);
   return ` ${fold(text)} `.includes(` ${fold(want)} `);
 }
 
+/**
+ * Whether a source's own text shows the value: any date in it equal at the same precision, else the folded words. With
+ * `near` (the track's artist and title), a long text shows it only within NEAR_CHARS of one of them, so a discography
+ * or catalog page cannot "show" another record's date or label.
+ */
+export function sourceSays(text: string, kind: ClaimKind, value: string, near: readonly string[] = []): boolean {
+  const want = normalizeValue(kind, value);
+  if (want === null) return false;
+  return partsNear(text, near).some((part) => saysWhole(part, kind, want));
+}
+
 const unique = (xs: string[]) => [...new Set(xs)];
+export const NO_SOURCE = "No source found.";
 
 /**
- * The two-source rule, in code. Value claims count a source only when its text shows the value; critical claims
+ * The two-source rule, in code. `near` is the block's track (artist, title) or subject: on a long source the value must
+ * sit near one of them (sourceSays). Value claims count a source only when its text shows the value; critical claims
  * need two publishers or a primary source that is not an aggregator; sources that disagree are a conflict.
  */
-export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSource>): JudgedClaim {
+export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSource>, near: readonly string[] = []): JudgedClaim {
   const valueKind = VALUE_KINDS.includes(claim.kind);
-  const textOf = new Map<CitedSource, string>();
+  const textOf = new Map<CitedSource, string[]>();
   const cited: CitedSource[] = claim.sources.map((c) => {
     const s = sources[c.id];
     if (!s) throw new Error(`judgeClaim: ${c.id} was not resolved`); // the bridge refuses unknown ids first
@@ -134,12 +216,14 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
       via: s.via,
       ...(c.says !== undefined ? { says: c.says } : {}),
       primary: c.primary === true,
-      matched: !valueKind || (says !== undefined && sourceSays(s.text, claim.kind, says)),
+      matched: !valueKind || (says !== undefined && sourceSays(s.text, claim.kind, says, near)),
     };
-    textOf.set(out, s.text);
+    textOf.set(out, partsNear(s.text, near));
     return out;
   });
   const base = { kind: claim.kind, text: claim.text, ...(claim.value !== undefined ? { value: claim.value } : {}), sources: cited };
+  // Oct 29 (Tarik, decision 021): a fact with no source is kept, marked [verify]; he confirms it himself.
+  if (!cited.length) return { ...base, status: "could-not-verify", check: NO_SOURCE };
   const usable = cited.filter((s) => s.matched);
   if (!usable.length) {
     const check = valueKind && claim.value !== undefined ? `No source shows ${claim.value}` : "No source";
@@ -165,7 +249,7 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
     return s.primary && !p.offFamily && !AGGREGATORS.includes(p.publisher);
   });
   const yearOnly = claim.kind === "release-date" && own?.length === 4;
-  const monthShown = usable.some((s) => datesIn(textOf.get(s)!).some((d) => d.length >= 7 && d.startsWith(`${own}-`)));
+  const monthShown = usable.some((s) => textOf.get(s)!.some((part) => datesIn(part).some((d) => d.length >= 7 && d.startsWith(`${own}-`))));
   if (yearOnly && !monthShown) return { ...base, status: "could-not-verify", check: `Only the year ${own} is shown; check the full date` };
   if (publishers.length >= 2 || primary) return { ...base, status: "confirmed" };
   return { ...base, status: "could-not-verify", check: `Only one source: ${publishers[0]}` };

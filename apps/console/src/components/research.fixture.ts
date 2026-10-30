@@ -35,7 +35,11 @@ export function notesView(over: Partial<ResearchView> = {}, jobOver: Partial<Res
       entry("H1.1", {
         claims: [
           claim({ kind: "label", text: "[Title A] is on [Label A].", value: "[Label A]", status: "confirmed", sources: [src("a1", "musicbrainz.org"), src("a2", "label-a.bandcamp.com")] }),
-          claim({ kind: "release-date", text: "[Title A] came out on 2026-10-16.", value: "2026-10-16", status: "conflict", sources: [src("a3"), src("a4", "discogs.com")], check: "Sources disagree: 2026-10-16 (example.org) vs 2026-10-23 (discogs.com)" }),
+          claim({
+            kind: "release-date", text: "[Title A] came out on 2026-10-16.", value: "2026-10-16", status: "conflict",
+            sources: [{ ...src("a3"), says: "2026-10-16" }, { ...src("a4", "discogs.com"), says: "2026-10-23" }], check: "Sources disagree: 2026-10-16 (example.org) vs 2026-10-23 (discogs.com)",
+          }),
+          claim({ kind: "bio", text: "[Artist A] is a bassist from [City].", sources: [src("a5", "en.wikipedia.org")] }),
         ],
         angle: "What does [Producer] bring to the low end here?",
         suppliedNote: "[Label A]'s one-sheet calls it a late-night record.",

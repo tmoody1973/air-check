@@ -27,3 +27,7 @@ For web search specifically: keep Tavily inside the sandbox as it is today (no w
 - Across the next four shows, fewer than half of release dates end up as **[verify]**, and no closing track ever gets an entry.
 
 **What actually happened.**
+
+## Addendum 2026-10-29
+
+- Oct 29: advanced depth + raw page text + caps 100/20 (Tarik, after comparing with Perplexity notes). Tavily is now pay-as-you-go (9,125 credits at the switch); an advanced search costs 2 credits, so a full real day is 200 and a full demo day 40. The agent sees each result's chunks only; the ledger keeps up to 8,000 characters of the page for code's fact check, and on a page that long a value counts only within 300 characters of the track's artist or title. Still search-only, never `/extract`.

@@ -14,8 +14,8 @@ const TOKEN_LIFETIME_S = 12 * 60 * 60;
 const REFRESH_BEFORE_S = 60 * 60;
 const MAX_RESULTS = 5;
 const TIMEOUT_MS = 10_000;
-const MAX_BODY_BYTES = 262_144; // Tavily's cap: ten catalog items are a few KB
-const MAX_LINE = 2_000; // core's LIMITS.sourceText
+const MAX_BODY_BYTES = 262_144; // ten catalog items are a few KB
+const MAX_LINE = 2_000; // one catalog line; far under core's LIMITS.sourceText
 const PAGE_HOST = "music.apple.com";
 
 export interface AppleMusicConfig {

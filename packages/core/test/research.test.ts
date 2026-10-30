@@ -49,7 +49,7 @@ describe("normalizeValue", () => {
     expect(normalizeValue("release-date", "10/10/2026")).toBeNull();
     expect(normalizeValue("credit", "Bénédicte, Jr.")).toBe("benedicte jr");
     expect(normalizeValue("track-number", "Track 03")).toBe("3");
-    expect(normalizeValue("length", "4:07")).toBe("4:07");
+    expect(normalizeValue("length", "4:07")).toBe("247"); // seconds, so ms, seconds and m:ss compare
   });
 
   it("reads ISO timestamps at day precision and ordinal days, and refuses impossible dates (R7)", () => {
@@ -68,6 +68,79 @@ describe("sourceSays", () => {
     expect(sourceSays("Released 2026-10-17.", "release-date", "2026-10-10")).toBe(false);
     expect(sourceSays("Released 10/10/2026.", "release-date", "2026-10-10")).toBe(false);
     expect(sourceSays("Out on Brownswood Recordings.", "label", "Brownswood")).toBe(true);
+  });
+});
+
+// Oct 29 live run: "No source shows 4:29 / 2 / Ninja Tune" against MusicBrainz text that held all three.
+describe("sourceSays reads the forms sources write values in (Oct 29 false negatives)", () => {
+  it("a length matches milliseconds, seconds, m:ss and words, within one second", () => {
+    expect(sourceSays('{"position":2,"number":"2","title":"Glue","length":269000}', "length", "4:29")).toBe(true);
+    expect(sourceSays('{"title":"Glue","length":268450}', "length", "4:29")).toBe(true); // 268.45 s
+    expect(sourceSays('{"trackTimeMillis":269999}', "length", "4:29")).toBe(true);
+    expect(sourceSays('{"duration":269}', "length", "4:29")).toBe(true); // a duration field in seconds
+    expect(sourceSays("It runs 4 minutes and 29 seconds.", "length", "4:29")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "4 minutes and 29 seconds")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "269 seconds")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "269000")).toBe(true); // a value written in milliseconds
+    expect(sourceSays("Side two closes on a 1:04:29 jam.", "length", "1:04:29")).toBe(true);
+    expect(sourceSays('{"length":271500}', "length", "4:29")).toBe(false); // 2.5 s off
+    expect(sourceSays("Glue runs 4:31.", "length", "4:29")).toBe(false);
+    expect(sourceSays("Glue has 269 plays and 269000 views.", "length", "4:29")).toBe(false); // a bare number is no length
+    expect(normalizeValue("length", "4:29")).toBe("269");
+    expect(normalizeValue("length", "a while")).toBeNull();
+  });
+
+  it("a track number matches MusicBrainz's position and number fields; a label its label-info name", () => {
+    expect(sourceSays('{"position":2,"number":"A2","title":"Glue","length":269000}', "track-number", "2")).toBe(true);
+    expect(sourceSays('{"position":3,"number":"3","title":"Glue"}', "track-number", "2")).toBe(false);
+    const labelInfo = '{"label-info":[{"catalog-number":"ZEN243","label":{"id":"x","name":"Ninja Tune","sort-name":"Ninja Tune","label-code":12666}}]}';
+    expect(sourceSays(labelInfo, "label", "Ninja Tune")).toBe(true);
+    expect(sourceSays(labelInfo, "label", "Warp Records")).toBe(false);
+  });
+
+  it("'2 November 2017', '2017-11-02' and 'November 2, 2017' match each other", () => {
+    const forms = ["2 November 2017", "2017-11-02", "November 2, 2017", "Nov. 2nd, 2017", '"date":"2017-11-02"'];
+    for (const text of forms) for (const value of forms.slice(0, 3)) expect(sourceSays(`Glue: ${text}.`, "release-date", value), `${value} in ${text}`).toBe(true);
+    expect(sourceSays("Glue: 3 August 2017.", "release-date", "2 November 2017")).toBe(false);
+  });
+});
+
+describe("sourceSays near the track (Oct 29: 8,000-character page text)", () => {
+  const near = ["Alfa Mist", "Organic Rust"];
+  const filler = (n: number) => "Other records in the catalog. ".repeat(Math.ceil(n / 30)).slice(0, n);
+  it("on a long page a value counts only within 300 characters of the artist or title", () => {
+    const far = `Alfa Mist discography. ${filler(2_500)} Some other album came out October 10, 2026 on Label B.`;
+    expect(far.length).toBeGreaterThan(2_000);
+    expect(sourceSays(far, "release-date", "2026-10-10", near)).toBe(false);
+    expect(sourceSays(far, "label", "Label B", near)).toBe(false);
+    const close = `${filler(2_500)} Organic Rust is out October 10, 2026 on Label A. ${filler(1_000)}`;
+    expect(sourceSays(close, "release-date", "2026-10-10", near)).toBe(true);
+    expect(sourceSays(close, "label", "Label A", near)).toBe(true);
+    const after = `${filler(2_500)} Out October 10, 2026: ${"x".repeat(250)} the new one from ALFA MIST. ${filler(500)}`;
+    expect(sourceSays(after, "release-date", "2026-10-10", near)).toBe(true); // before the mention counts too, folded
+  });
+  it("a long page that never names the track shows nothing; a short text is read whole, as before", () => {
+    expect(sourceSays(`${filler(2_500)} Out October 10, 2026.`, "release-date", "2026-10-10", near)).toBe(false);
+    expect(sourceSays(`${filler(1_500)} Out October 10, 2026.`, "release-date", "2026-10-10", near)).toBe(true);
+    expect(sourceSays(`${filler(2_500)} Out October 10, 2026.`, "release-date", "2026-10-10")).toBe(true); // no names given
+  });
+  it("stays linear on a long page full of mentions", { timeout: 30_000 }, () => {
+    const page = "Alfa Mist ".repeat(800);
+    expect(fastest(() => sourceSays(page, "label", "Label A", near))).toBeLessThan(200);
+  });
+  it("two long pages that show the date only by coincidence, far from the track, do not confirm it", () => {
+    const page = `Alfa Mist. ${filler(2_500)} Unrelated reissue out October 10, 2026.`;
+    const sources = { S1: S("pitchfork.com", page), S2: S("stereogum.com", page) };
+    const j = judgeClaim(date([{ id: "S1" }, { id: "S2" }]), sources, near);
+    expect(j.status).toBe("could-not-verify");
+    expect(j.sources.every((s) => !s.matched)).toBe(true);
+    const right = `${filler(2_500)} Alfa Mist's Organic Rust arrives October 10, 2026.`;
+    expect(judgeClaim(date([{ id: "S1" }, { id: "S2" }]), { S1: S("pitchfork.com", right), S2: S("stereogum.com", right) }, near).status).toBe("confirmed");
+  });
+  it("a year-only date needs its month near the track too", () => {
+    const page = `${filler(2_500)} Organic Rust (2026). ${filler(1_000)} Some tour dates: October 3, 2026.`;
+    const year = { kind: "release-date" as const, text: "It came out in 2026.", value: "2026", sources: [{ id: "S1" }, { id: "S2" }] };
+    expect(judgeClaim(year, { S1: S("a.com", page), S2: S("b.com", page) }, near)).toMatchObject({ status: "could-not-verify", check: "Only the year 2026 is shown; check the full date" });
   });
 });
 
@@ -175,7 +248,12 @@ describe("judgeClaim (Review Focus 1 and 2)", () => {
   it("calls a non-critical fact with a source sourced, and with none could-not-verify", () => {
     const bio: ClaimInput = { kind: "bio", text: "A bassist from Detroit.", sources: [{ id: "S1" }] };
     expect(judgeClaim(bio, { S1: S("pitchfork.com", "anything") }).status).toBe("sourced");
-    expect(judgeClaim({ ...bio, sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source" });
+    expect(judgeClaim({ ...bio, sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source found.", sources: [] });
+  });
+
+  it("Oct 29 (Tarik): a fact with no source at all is kept as could-not-verify, 'No source found.', whatever its kind", () => {
+    expect(judgeClaim(date([]), {})).toMatchObject({ status: "could-not-verify", check: "No source found.", value: "2026-10-10" });
+    expect(judgeClaim({ kind: "detail", text: "It was a DJ Mag track of the year.", sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source found." });
   });
 });
 
