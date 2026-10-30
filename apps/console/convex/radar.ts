@@ -579,14 +579,35 @@ export const retry = mutation({
  * (embedResult acts only on a queued release).
  */
 export const pastePlayer = mutation({
-  args: { releaseId: v.id("releases"), pasted: v.string() },
-  handler: async (ctx, { releaseId, pasted }) => {
+  // Oct 30: the bookmarklet also sends the page's cover and address; each is kept only if it passes the same URL rules.
+  args: { releaseId: v.id("releases"), pasted: v.string(), art: v.optional(v.string()), page: v.optional(v.string()) },
+  handler: async (ctx, { releaseId, pasted, art, page }) => {
     await requireRealHuman(ctx);
-    await ownRelease(ctx, releaseId);
+    const doc = await ownRelease(ctx, releaseId);
     if (pasted.length > 5_000) throw badInput("That is too long for Bandcamp's embed code.");
     const embed = embedFromPaste(pasted);
     if (!embed) throw badInput("That isn't Bandcamp's embed code. On the Bandcamp page: Share, then Embed, then copy the code.");
-    await ctx.db.patch(releaseId, { embed, embedState: "ready", embedError: undefined });
+    const cover = art !== undefined && art.length <= 500 ? bandcampArtUrl(art) : null;
+    const link = !doc.bandcampPage && page !== undefined && page.length <= 500 ? bandcampPageUrl(page) : null;
+    await ctx.db.patch(releaseId, { embed, embedState: "ready", embedError: undefined, ...(cover && { art: cover }), ...(link && { bandcampPage: link }) });
+  },
+});
+
+/** Oct 30: the bookmarklet's attach page. Real releases (both tabs) whose title words all match; [] for anyone else. */
+export const attachCandidates = query({
+  args: { title: v.string() },
+  handler: async (ctx, { title }) => {
+    if (workspaceOf(await actorOf(ctx)) !== "real") return [];
+    const words = foldText(title.slice(0, MAX_SEARCH)).split(" ").filter(Boolean).slice(0, 16);
+    if (!words.length) return [];
+    const found = await ctx.db
+      .query("releases")
+      .withSearchIndex("search_text", (q) => q.search("searchText", words.join(" ")).eq("workspace", "real"))
+      .take(20);
+    return found
+      .filter((r) => matchesAll(words, r))
+      .slice(0, 5)
+      .map((r) => ({ _id: r._id, artist: r.artist, title: r.title, hasPlayer: !!r.embed }));
   },
 });
 

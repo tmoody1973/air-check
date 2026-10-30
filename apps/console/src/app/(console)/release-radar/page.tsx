@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
@@ -72,12 +73,22 @@ function RadarBody() {
   );
 }
 
+/** Oct 30: where Tarik gets the "Send to Air Check" bookmarklet (players and covers from Bandcamp pages he opens). */
+function BookmarkletHint() {
+  return useWorkspace() === "real" ? (
+    <p className="mt-6 text-sm text-ink-soft">
+      No player or cover? <Link href="/release-radar/attach" className="underline">Get the Send to Air Check button</Link> for Bandcamp pages.
+    </p>
+  ) : null;
+}
+
 export default function ReleaseRadarPage() {
   return (
     <Shell title="Release radar">
       <Suspense fallback={<p className="text-ink-soft">Loading…</p>}>
         <RadarBody />
       </Suspense>
+      <BookmarkletHint />
     </Shell>
   );
 }

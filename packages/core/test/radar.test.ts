@@ -23,6 +23,8 @@ import {
   pickInbound,
   readBandcampEmbed,
   embedFromPaste,
+  bookmarkletCode,
+  readAttachPayload,
   releaseKey,
   senderDecision,
   stripLinks,
@@ -940,5 +942,24 @@ describe("bandcampSlug and bandcampPageForTitle (decision 024: a roundup link go
   });
   test("a page that fails the URL rule is never matched", () => {
     expect(bandcampPageForTitle(["https://evil.example/album/glass-weather", "http://x.bandcamp.com/album/glass-weather"], "Glass Weather")).toBeNull();
+  });
+});
+
+describe("Bandcamp bookmarklet (Oct 30: Tarik's browser reads the page; Air Check never fetches it)", () => {
+  test("the bookmarklet reads the player, cover, title and page from the open page and opens the attach page with them in the hash", () => {
+    const code = bookmarkletCode("https://aircheck.rhythmlabradio.com");
+    expect(code.startsWith("javascript:")).toBe(true);
+    expect(code).toContain("twitter:player");
+    expect(code).toContain("og:image");
+    expect(code).toContain("https://aircheck.rhythmlabradio.com/release-radar/attach#");
+    expect(() => bookmarkletCode("javascript:alert(1)")).toThrow();
+  });
+  test("readAttachPayload: the hash's JSON, each field checked; anything off is dropped", () => {
+    const good = { player: "https://bandcamp.com/EmbeddedPlayer/v=2/album=3847473100/size=large/", art: "https://f4.bcbits.com/img/a1234567890_5.jpg", title: "Reset, by Versa", page: "https://deepheads.bandcamp.com/album/reset" };
+    expect(readAttachPayload("#" + encodeURIComponent(JSON.stringify(good)))).toEqual({ embed: { kind: "album", id: "3847473100" }, art: good.art, page: good.page, title: "Reset", player: good.player });
+    expect(readAttachPayload("#" + encodeURIComponent(JSON.stringify({ ...good, art: "https://evil.example/a.jpg", page: "https://evil.example/album/x" })))).toEqual({ embed: { kind: "album", id: "3847473100" }, title: "Reset", player: good.player });
+    expect(readAttachPayload("#" + encodeURIComponent(JSON.stringify({ ...good, player: "https://evil.example/EmbeddedPlayer/album=1/" })))).toBeNull();
+    expect(readAttachPayload("#not-json")).toBeNull();
+    expect(readAttachPayload("")).toBeNull();
   });
 });
