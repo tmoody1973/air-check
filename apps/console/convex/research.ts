@@ -687,7 +687,10 @@ function briefProblems(job: Job, claims: ClaimIn[]): string[] {
   const connects = claims.filter((c) => c.kind === "connection");
   const infobox = claims.filter((c) => c.kind === "infobox");
   // Decision 023: the brief is an article. Section facts (any other kind, old briefs' included), infobox rows, connections.
-  if (claims.length - connects.length - infobox.length > LIMITS.briefFactsMax) problems.push(`A brief has at most ${LIMITS.briefFactsMax} section facts.`);
+  const facts = claims.length - connects.length - infobox.length;
+  // Oct 30: after a bare "at most 28" the model cut a 30-fact brief to 4. Say how many it sent and what to keep.
+  if (facts > LIMITS.briefFactsMax)
+    problems.push(`A brief has at most ${LIMITS.briefFactsMax} section facts; you sent ${facts}. Keep your ${LIMITS.briefFactsMax} strongest sourced facts, drop only the rest, and submit again.`);
   if (infobox.length > LIMITS.infoboxMax) problems.push(`A brief has at most ${LIMITS.infoboxMax} infobox rows.`);
   for (const c of infobox) {
     if (!(INFOBOX_FIELDS as readonly string[]).includes(c.text)) problems.push(`An infobox row's text is one of: ${INFOBOX_FIELDS.join(", ")}.`);
