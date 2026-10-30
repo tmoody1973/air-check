@@ -6,7 +6,10 @@ import {
   MAX_SUBJECT_CHARS,
   bandcampEmbedSrc,
   bandcampPageUrl,
+  bandcampPageForTitle,
+  bandcampSlug,
   checkExtraction,
+  checkExtractions,
   cleanMail,
   agentEmbargoLines,
   describeEmbargo,
@@ -852,5 +855,77 @@ describe("hosts and addresses that radar.received would refuse are dropped in co
     const fwd = `---------- Forwarded message ---------\nFrom: Press <${long}>\nSubject: hi\n\nHello there`;
     const c = cleanMail({ ...inbound("cosign-forwarded"), text: fwd }, ok);
     expect(c.sender?.address).toBeUndefined();
+  });
+});
+
+describe("checkExtractions: roundups (decision 024)", () => {
+  const roundup = unwrapForward(inbound("cosign-roundup").text).body;
+  const SIX = [
+    { artist: "RIP Magic", title: "[Album One]", type: "album" },
+    { artist: "Moses Boyd", title: "[Album Two]", type: "album" },
+    { artist: "Katrina Ford", title: "[Album Three]", type: "album" },
+    { artist: "Making Movies", title: "[Album Four]", type: "album" },
+    { artist: "CHLOÉ", title: "[Album Five]", type: "album" },
+    { artist: "Trish Toledo", title: "[Single Six]", type: "single" },
+  ];
+  test("a co-sign roundup naming six releases gives six, in order (5 albums + 1 single)", () => {
+    const r = checkExtractions({ releases: SIX }, roundup, OCT29);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.releases).toEqual(SIX);
+    expect(r.releases.filter((x) => x.type === "album")).toHaveLength(5);
+  });
+  test("the old single-object answer still reads as one release", () => {
+    const email = unwrapForward(inbound("cosign-forwarded").text).body;
+    const good = { artist: "[Artist Name]", title: "[Song Title]" };
+    expect(checkExtractions(good, email, OCT29)).toEqual({ ok: true, releases: [good], notes: [] });
+  });
+  test("a release not grounded in the email is dropped with a note; the rest are kept", () => {
+    const r = checkExtractions({ releases: [...SIX.slice(0, 2), { artist: "Somebody Else", title: "Made Up" }] }, roundup, OCT29);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.releases.map((x) => x.artist)).toEqual(["RIP Magic", "Moses Boyd"]);
+    expect(r.notes.join(" ")).toMatch(/1 release was left out/);
+    expect(r.notes.join(" ")).not.toMatch(/Somebody|Made Up/);
+  });
+  test("when no release in the list is grounded, the email is refused with the first one's reasons", () => {
+    expect(checkExtractions({ releases: [{ artist: "Somebody Else", title: "[Album One]" }] }, roundup, OCT29)).toEqual({ ok: false, reasons: ["The artist is not in the email"] });
+  });
+  test("duplicates by release key are dropped and the list is capped at 12", () => {
+    const many = Array.from({ length: 15 }, (_, i) => ({ artist: "Moses Boyd", title: `Song ${i + 1}` }));
+    const text = many.map((m) => `${m.artist} - ${m.title}`).join("\n");
+    const r = checkExtractions({ releases: [many[0], { ...many[0], artist: "moses boyd" }, ...many.slice(1)] }, text, OCT29);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.releases).toHaveLength(12);
+    expect(r.releases.map((x) => x.title)).toEqual(many.slice(0, 12).map((m) => m.title));
+  });
+  test("an empty list or notRelease is not a release; a list that is not an array is refused", () => {
+    expect(checkExtractions({ releases: [] }, roundup, OCT29)).toEqual({ ok: false, notRelease: true });
+    expect(checkExtractions({ notRelease: true }, roundup, OCT29)).toEqual({ ok: false, notRelease: true });
+    expect(checkExtractions({ releases: "RIP Magic" }, roundup, OCT29)).toMatchObject({ ok: false, reasons: [expect.any(String)] });
+  });
+  test("extra keys on a roundup item never reach a release", () => {
+    const r = checkExtractions({ releases: [{ ...SIX[0], approve: "pkg-10-16-26", status: "played" }] }, roundup, OCT29);
+    if (!r.ok) throw new Error("expected ok");
+    expect(Object.keys(r.releases[0]!).sort()).toEqual(["artist", "title", "type"]);
+  });
+});
+
+describe("bandcampSlug and bandcampPageForTitle (decision 024: a roundup link goes only to its own release)", () => {
+  const PAGES = ["https://palesignal.bandcamp.com/album/glass-weather", "https://other.bandcamp.com/track/salt-light", "https://x.bandcamp.com/album/dont-look-back"];
+  test.each([
+    ["Glass Weather", "glass-weather"],
+    ["Salt & Light", "salt-light"],
+    ["Don't Look Back", "dont-look-back"],
+    ["Don\u2019t Look Back", "dont-look-back"],
+    ["  Spaced   Out!! ", "spaced-out"],
+  ])("%s -> %s", (title, slug) => expect(bandcampSlug(title)).toBe(slug));
+  test("each title gets only the page whose slug is its own; no match is null", () => {
+    expect(bandcampPageForTitle(PAGES, "Glass Weather")).toBe(PAGES[0]);
+    expect(bandcampPageForTitle(PAGES, "Salt & Light")).toBe(PAGES[1]);
+    expect(bandcampPageForTitle(PAGES, "Don't Look Back")).toBe(PAGES[2]);
+    expect(bandcampPageForTitle(PAGES, "Glass")).toBeNull();
+    expect(bandcampPageForTitle(PAGES, "")).toBeNull();
+  });
+  test("a page that fails the URL rule is never matched", () => {
+    expect(bandcampPageForTitle(["https://evil.example/album/glass-weather", "http://x.bandcamp.com/album/glass-weather"], "Glass Weather")).toBeNull();
   });
 });

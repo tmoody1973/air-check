@@ -1,0 +1,20 @@
+{
+  "_note": "SYNTHETIC fixture in the AgentMail message shape (decision 024). Not a real email: shaped like the live co-sign roundup of Oct 30, 2026 (its subject line, five albums and one single, links only to co-sign's own detail pages, no Bandcamp link). Titles are placeholders.",
+  "message_id": "<fwd-cosign-roundup-0001@radiomilwaukee.example.invalid>",
+  "from_": "Tarik Moody <tarik@radiomilwaukee.org>",
+  "subject": "Fwd: ALBUMS: RIP Magic, Moses Boyd, Katrina Ford, Making Movies, CHLOÉ || SINGLES: Trish Toledo",
+  "text": "---------- Forwarded message ---------\nFrom: co-sign <newmusic@co-sign.example.invalid>\nDate: Thu, Oct 30, 2026 at 7:02 AM\nSubject: ALBUMS: RIP Magic, Moses Boyd, Katrina Ford, Making Movies, CHLOÉ || SINGLES: Trish Toledo\nTo: <tarik@radiomilwaukee.org>\n\n\nThis week's new music for radio.\n\nALBUMS\n\nRIP Magic - [Album One]\nMore info: https://co-sign.example.invalid/release/1001\n\nMoses Boyd - [Album Two]\nMore info: https://co-sign.example.invalid/release/1002\n\nKatrina Ford - [Album Three]\nMore info: https://co-sign.example.invalid/release/1003\n\nMaking Movies - [Album Four]\nMore info: https://co-sign.example.invalid/release/1004\n\nCHLOÉ - [Album Five]\nMore info: https://co-sign.example.invalid/release/1005\n\nSINGLES\n\nTrish Toledo - [Single Six]\nMore info: https://co-sign.example.invalid/release/1006\n\nManage your preferences: https://co-sign.example.invalid/prefs\nUnsubscribe: https://co-sign.example.invalid/unsubscribe\n",
+  "authentication_results": {
+    "spf": "pass",
+    "dkim": "pass",
+    "dmarc": "pass",
+    "spf_domain": "radiomilwaukee.org",
+    "dkim_domain": "radiomilwaukee.org",
+    "dmarc_domain": "radiomilwaukee.org"
+  },
+  "labels": [
+    "received",
+    "unread"
+  ],
+  "attachments": []
+}
