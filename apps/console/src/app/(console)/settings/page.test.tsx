@@ -30,4 +30,10 @@ describe("Settings web search row (Plan 7)", () => {
     render(<SettingsPage />);
     expect(screen.getByText("1 of 20 searches used today")).toBeInTheDocument();
   });
+
+  it("adds the Tavily credits the bridge reported (Oct 29 prefetch)", () => {
+    results["research.searchUsage"] = { used: 28, cap: 100, credits: 56 };
+    render(<SettingsPage />);
+    expect(screen.getByText("28 of 100 searches used today · 56 credits")).toBeInTheDocument();
+  });
 });

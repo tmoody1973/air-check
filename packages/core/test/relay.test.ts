@@ -158,7 +158,11 @@ describe("researchInput", () => {
     expect(text).toContain("7 web searches left today");
     // Oct 29: show notes search the web first (it carries story, charts and press), at most 3 searches a track.
     expect(text).toContain("at most 3 web searches per track");
-    expect(text).toContain('Tell me about this artist and release <Artist> - "<Title>"');
+    // Oct 29 prefetch: code already ran the first one, so the agent reads it with first_search before searching.
+    expect(text).toContain("Air Check already ran each track's first web search");
+    expect(text).toContain("first_search");
+    expect(text).toContain("Start with first_search for your first track key");
+    expect(text).toContain("research_submit refuses a track until you have read its first_search");
     expect(text).not.toMatch(/Crate first/);
     expect(researchInput({ ...job, kind: "verify", lines: [] })).toMatch(/Crate first/);
     expect(text).toMatch(/untrusted/);

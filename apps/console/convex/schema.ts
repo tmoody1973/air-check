@@ -354,7 +354,8 @@ export default defineSchema({
   }).index("by_jobId_key", ["jobId", "key"]),
   // Plan 7: source_search calls per workspace per America/Chicago day (`day` = chicagoDayKey). `source` absent = web
   // (Tavily); "apple_music" is counted apart. Kept here so a bridge restart never resets it.
-  searchUsage: defineTable({ workspace: workspaceV, day: v.string(), source: v.optional(v.literal("apple_music")), count: v.number() })
+  // credits: Tavily credits spent that day (web row only), as the bridge reports them (Oct 29 prefetch).
+  searchUsage: defineTable({ workspace: workspaceV, day: v.string(), source: v.optional(v.literal("apple_music")), count: v.number(), credits: v.optional(v.number()) })
     .index("by_workspace_day", ["workspace", "day"]),
   conversations: defineTable({
     workspace: workspaceV,

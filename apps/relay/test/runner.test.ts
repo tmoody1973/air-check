@@ -279,6 +279,38 @@ describe("logging (Hard Rule 8)", () => {
   });
 });
 
+describe("first searches (Oct 29 prefetch)", () => {
+  const withPrefetch = (prefetch: (w: "real" | "demo", job: string) => Promise<void>) => {
+    runner.stop();
+    runner = createRunner({
+      convex,
+      sandboxes: [
+        { name: "airc", workspace: "real", hermes: new HermesClient(`http://127.0.0.1:${real.port}`, TOKEN) },
+        { name: "aircdemo", workspace: "demo", hermes: new HermesClient(`http://127.0.0.1:${demo.port}`, DEMO_TOKEN) },
+      ],
+      log: (l) => logs.push(l), flushMs: 10, backoffMs: () => 1, prefetch,
+    });
+  };
+
+  test("a research run with a job starts the bridge's first searches as it starts, without the model; chat runs do not", async () => {
+    const calls: [string, string][] = [];
+    withPrefetch(async (w, job) => void calls.push([w, job]));
+    runner.onPending([row({ runId: "r1", kind: "research", jobId: "rj-abc123" }), row({ runId: "d1", workspace: "demo", kind: "research", jobId: "rj-def456" }), row({ runId: "c1" })]);
+    await waitFor(() => convex.finishedCalls.length === 3, "finish");
+    expect(calls.sort()).toEqual([["demo", "rj-def456"], ["real", "rj-abc123"]]);
+    expect(logs).toContain("run=r1 event=prefetch n=1");
+  });
+
+  test("a failed bridge call is logged and the run still starts (the agent's first_search call starts it instead)", async () => {
+    withPrefetch(async () => { throw new Error("bridge down SECRET"); });
+    runner.onPending([row({ runId: "r1", kind: "research", jobId: "rj-abc123" })]);
+    await waitFor(() => convex.finishedCalls.length === 1, "finish");
+    expect(real.starts).toHaveLength(1);
+    expect(logs).toContain("run=r1 event=prefetch_failed n=1");
+    expect(logs.join("\n")).not.toContain("SECRET");
+  });
+});
+
 describe("permanent errors and lost runs (R26)", () => {
   const notFound = () => new ConvexError({ code: "NOT_FOUND" });
 

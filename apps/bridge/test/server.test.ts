@@ -31,6 +31,7 @@ beforeAll(async () => {
     req.on("end", () => {
       convexHits.push({ auth: req.headers.authorization, body, url: req.url });
       if (req.url === "/agent/research") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ saved: "H1.1", claims: 1, verify: 0, dropped: [] }));
+      if (req.url === "/agent/research-prefetch") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ tracks: [], embargoed: [] }));
       if (req.url === "/agent/packages/get") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", status: "awaiting_review" }));
       const revise = req.url === "/agent/packages/revise";
       res.writeHead(revise ? 200 : 201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", ...(revise && { status: "awaiting_review" }) }));
@@ -56,7 +57,7 @@ beforeAll(async () => {
   server = await startServer({ ...base, demoMcpToken: demoToken, demoSubmitToken: "m".repeat(40) });
   port = (server.address() as AddressInfo).port;
   // An unreadable Apple Music key must not stop the bridge (R6): the option just says it is not configured.
-  bareServer = await startServer({ ...base, appleMusic: { teamId: "TEAM123456", keyId: "KEY1234567", keyFile: `${dir}/missing.p8` } });
+  bareServer = await startServer({ ...base, tavilyApiKey: "tvly-test", appleMusic: { teamId: "TEAM123456", keyId: "KEY1234567", keyFile: `${dir}/missing.p8` } });
   barePort = (bareServer.address() as AddressInfo).port;
 });
 afterAll(async () => {
@@ -153,9 +154,9 @@ describe("bridge HTTPS server", () => {
     expect(r.status).toBe(400);
   });
 
-  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun, radar_get, source_search and research_submit only", async () => {
+  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun, radar_get, source_search, first_search and research_submit only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
-    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "first_search", "research_submit"]);
   });
 
   it("/aircheck/mcp refuses an unknown tool name", async () => {
@@ -216,7 +217,7 @@ describe("bridge HTTPS server", () => {
 
   it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
     const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
-    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "first_search", "research_submit"]);
     convexHits.length = 0;
     const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
     const r = await send("/aircheck-demo/mcp", {
@@ -260,6 +261,29 @@ describe("bridge HTTPS server", () => {
     const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a" } }) });
     expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
     expect(convexHits).toHaveLength(0);
+  });
+
+  it("first_search without a Tavily key answers plainly and calls nothing", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "first_search", arguments: { job: "rj-abc123", key: "H1.1" } }) });
+    expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
+    expect(convexHits).toHaveLength(0);
+  });
+
+  it("Oct 29: POST /aircheck/prefetch starts a job's first searches for the relay, with the route's MCP token; it is not an agent tool", async () => {
+    convexHits.length = 0;
+    // No Tavily key: nothing to start, and Convex is not asked.
+    expect((await send("/aircheck/prefetch", { method: "POST", token: aircheckToken, body: { job: "rj-abc123" } })).status).toBe(204);
+    expect((await send("/aircheck-demo/prefetch", { method: "POST", token: demoToken, body: { job: "rj-abc123" } })).status).toBe(204);
+    expect(convexHits).toHaveLength(0);
+    // With a key it plans through Convex with the route's submit token, and answers 202 at once.
+    expect((await send("/aircheck/prefetch", { method: "POST", token: aircheckToken, body: { job: "rj-abc123" }, port: barePort })).status).toBe(202);
+    expect(convexHits.map((h) => [h.url, h.auth, h.body])).toEqual([["/agent/research-prefetch", `Bearer ${"s".repeat(40)}`, JSON.stringify({ job: "rj-abc123" })]]);
+    expect((await send("/aircheck/prefetch", { method: "POST", token: demoToken, body: { job: "rj-abc123" } })).status).toBe(401);
+    expect((await send("/aircheck-demo/prefetch", { method: "POST", token: aircheckToken, body: { job: "rj-abc123" } })).status).toBe(401);
+    expect((await send("/aircheck/prefetch", { method: "GET", token: aircheckToken })).status).toBe(405);
+    expect((await send("/aircheck/prefetch", { method: "POST", token: aircheckToken, body: { job: 7 } })).status).toBe(400);
+    expect((await send("/aircheck-demo/prefetch", { method: "POST", token: demoToken, body: { job: "x" }, port: barePort })).status).toBe(404);
   });
 
   it("starts with an unreadable Apple Music key, and source_search apple_music answers plainly and calls nothing", async () => {

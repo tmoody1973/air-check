@@ -29,6 +29,17 @@ describe("createSourceLedger", () => {
     expect(ledger.get(crate)!.text).toBe(text); // already there: not added twice
   });
 
+  it("one page found by two searches keeps each chunk and its page text once (Oct 29 prefetch: merge on [...])", () => {
+    const ledger = createSourceLedger();
+    const page = `Glue is a single by Bicep. ${"Belfast duo. ".repeat(700)}`;
+    const id = ledger.add(src("https://en.wikipedia.org/wiki/Glue", `Glue\nIt came out on Ninja Tune [...] DJ Mag track of the year\n${page}`));
+    expect(ledger.add(src("https://en.wikipedia.org/wiki/Glue", `Glue\nDJ Mag track of the year [...] Video by Joe Wilson\n${page}`))).toBe(id);
+    const text = ledger.get(id)!.text;
+    for (const piece of ["It came out on Ninja Tune", "DJ Mag track of the year", "Video by Joe Wilson", "Glue is a single by Bicep."]) {
+      expect(text.split(piece), piece).toHaveLength(2);
+    }
+  });
+
   it("caps text at 8,000 characters, and a repeat URL's new text still fits", () => {
     expect(SOURCE_TEXT_MAX).toBe(LIMITS.sourceText);
     const ledger = createSourceLedger();

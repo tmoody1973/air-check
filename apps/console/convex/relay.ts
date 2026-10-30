@@ -40,6 +40,8 @@ export const pending = query({
           ? [{
               runId: r.runId, workspace: r.workspace, kind: r.kind, input: r.input, instructions: r.instructions, conversationId: r.conversationId,
               stopRequested: r.stopRequested ?? false, hermesRunId: r.hermesRunId, status: r.status, lastSeq: r.lastSeq,
+              // Oct 29 prefetch: a research run's job, so the relay can start the bridge's first searches.
+              ...(r.jobId && { jobId: r.jobId }),
             }]
           : [],
       );

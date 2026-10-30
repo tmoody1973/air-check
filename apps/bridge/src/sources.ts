@@ -17,11 +17,17 @@ export const SOURCE_TEXT_MAX = 8_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-/** Old text plus new, capped. The newer text keeps at least half the room, so a later snippet that shows a date fits. */
+/**
+ * Old text plus the pieces of the new it lacks, capped. A piece is a line or one of Tavily's chunks (joined by "[...]"),
+ * so one page found by two searches keeps each chunk and its page text once (Oct 29 prefetch). A piece counts as there
+ * when its first 200 characters are (old's copy of a long page may be cut short). The newer text keeps at least half
+ * the room, so a later snippet that shows a date fits.
+ */
 function merge(old: string, add: string): string {
-  if (old.includes(add)) return old;
-  const keep = Math.max(SOURCE_TEXT_MAX / 2, SOURCE_TEXT_MAX - 1 - add.length);
-  return `${old.slice(0, keep)}\n${add}`.slice(0, SOURCE_TEXT_MAX);
+  const fresh = add.split(/\n|\s*\[\.\.\.\]\s*/).filter((p) => p.trim() && !old.includes(p.slice(0, 200))).join("\n");
+  if (!fresh) return old;
+  const keep = Math.max(SOURCE_TEXT_MAX / 2, SOURCE_TEXT_MAX - 1 - fresh.length);
+  return `${old.slice(0, keep)}\n${fresh}`.slice(0, SOURCE_TEXT_MAX);
 }
 
 export function createSourceLedger(opts: { ttlMs?: number; max?: number } = {}): SourceLedger {

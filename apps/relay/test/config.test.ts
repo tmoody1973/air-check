@@ -18,6 +18,13 @@ describe("loadConfig", () => {
   test.each([[{ RELAY_TOKEN: "short" }], [{ RELAY_TOKEN: undefined }], [{ CONVEX_URL: undefined }]])("rejects bad env %j", (over) => {
     expect(() => loadConfig({ ...base, ...over })).toThrow(/RELAY_TOKEN|CONVEX_URL/);
   });
+  test("the bridge (Oct 29 prefetch) is optional: its URL and the per-workspace MCP tokens", () => {
+    expect(loadConfig(base).bridge).toBeUndefined();
+    expect(loadConfig({ ...base, BRIDGE_URL: "https://10.104.0.41:8443", AIRCHECK_MCP_TOKEN: "m".repeat(40), AIRCHECK_DEMO_MCP_TOKEN: "" }).bridge).toEqual({
+      url: "https://10.104.0.41:8443", tokens: { real: "m".repeat(40) },
+    });
+    expect(() => loadConfig({ ...base, BRIDGE_URL: "not a url" })).toThrow(/BRIDGE_URL/);
+  });
   test("the error never contains the token value", () => {
     try { loadConfig({ ...base, RELAY_TOKEN: "supersecret" }); } catch (e) { expect(String(e)).not.toContain("supersecret"); }
   });

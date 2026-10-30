@@ -111,6 +111,8 @@ describe("start", () => {
     expect(all[0]).toMatchObject({ runId, kind: "research", jobId, status: "queued", source: "live" });
     expect(all[0]!.input).toContain("H1.3 · closing track, skipped");
     expect(all[0]!.input).toContain(jobId);
+    // Oct 29 prefetch: the relay gets the job id, so it can start the bridge's first searches without the model.
+    expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([expect.objectContaining({ runId, kind: "research", jobId })]);
   });
 
   test("a tracklist with an unreadable line or an empty hour is refused", async () => {
@@ -606,6 +608,80 @@ describe("search caps (POST /agent/search-usage)", () => {
     const t = convexTest(schema, modules);
     const all = await Promise.all(Array.from({ length: 22 }, (_, i) => t.mutation(internal.research.countSearch, { workspace: "demo", query: `q${i}` })));
     expect(all.filter((r) => r.allowed)).toHaveLength(20);
+  });
+});
+
+describe("first searches (Oct 29 prefetch: POST /agent/research-prefetch and /agent/search-done)", () => {
+  const call = async (t: T, path: string, body: unknown, token = AGENT) => {
+    const res = await post(t, path, body, token);
+    return { status: res.status, data: (await res.json()) as Record<string, unknown> };
+  };
+  const plan = (t: T, job: string, token = AGENT) => call(t, "/agent/research-prefetch", { job }, token);
+  const q = (artist: string, title: string) => `Tell me about this artist and release ${artist} - "${title}"`;
+
+  test("lists each track left to research with its first-search query; closing tracks, done tracks, intros and threads are left out", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await startNotes(t);
+    expect(await plan(t, jobId)).toEqual({
+      status: 200,
+      data: {
+        tracks: [
+          { key: "H1.1", query: q("Alfa Mist", "Organic Rust") },
+          { key: "H1.2", query: q("Nala Sinephro", "Space 1") },
+          { key: "H2.1", query: q("Yussef Dayes", "Black Classical Music") },
+        ],
+        embargoed: [],
+      },
+    });
+    await submit(t, { job: jobId, key: "H1.1", claims: [detail()], sources: SOURCES });
+    expect(((await plan(t, jobId)).data.tracks as { key: string }[]).map((x) => x.key)).toEqual(["H1.2", "H2.1"]);
+    // It only reads: no search is counted by asking.
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100 });
+  });
+
+  test("a Regenerate's one block is listed even though it was saved", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId, runId } = await startNotes(t);
+    await finishDone(t, jobId, runId);
+    await t.withIdentity(human).mutation(api.research.regenerate, { jobId, key: "H1.1", overwriteEdit: false });
+    expect(((await plan(t, jobId)).data.tracks as { key: string }[]).map((x) => x.key)).toEqual(["H1.1"]);
+  });
+
+  test("an embargoed track gets no first search and is named by key only (R8)", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Alfa Mist", title: "Organic Rust", embargo: { until: "2026-11-07" } }));
+    const { jobId } = await startNotes(t);
+    const { data } = await plan(t, jobId);
+    expect(data.embargoed).toEqual(["H1.1"]);
+    expect(JSON.stringify(data)).not.toMatch(/Alfa Mist|Organic Rust|2026-11-07/);
+  });
+
+  test("another workspace's job is 404; a stopped job, a verify job or a taken-over job gets no first searches", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId, runId } = await startNotes(t);
+    expect((await plan(t, jobId, DEMO_AGENT)).status).toBe(404);
+    expect((await plan(t, "rj-nope00")).status).toBe(404);
+    expect((await call(t, "/agent/research-prefetch", {})).status).toBe(400);
+    await t.withIdentity(human).mutation(api.research.takeOver, { jobId });
+    expect(await plan(t, jobId)).toEqual({ status: 409, data: { error: "Tarik took over; stop now." } });
+    await finishRun(t, runId, "cancelled");
+    const verify = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "pasted", text: "Out Oct 10." }, tracklistText: TRACKLIST });
+    expect((await plan(t, verify.jobId)).data).toEqual({ error: "Only show notes have first searches; use source_search." });
+  });
+
+  test("search-done gives back failed searches (never below zero) and adds Tavily credits to today's line in Settings", async () => {
+    const t = convexTest(schema, modules);
+    for (let i = 0; i < 3; i++) await call(t, "/agent/search-usage", { query: `q${i}` });
+    expect(await call(t, "/agent/search-done", { refund: 1, credits: 4 })).toEqual({ status: 200, data: {} });
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 2, cap: 100, credits: 4 });
+    await call(t, "/agent/search-done", { refund: 9, credits: 2 });
+    expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100, credits: 6 });
+    // The demo's own row; credits alone start one.
+    await call(t, "/agent/search-done", { credits: 2 }, DEMO_AGENT);
+    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 20, credits: 2 });
+    for (const bad of [{ refund: -1 }, { credits: 1.5 }, { refund: 101 }, { credits: 10_001 }, { refund: "1" }, null]) {
+      expect((await call(t, "/agent/search-done", bad)).status, JSON.stringify(bad)).toBe(400);
+    }
   });
 });
 

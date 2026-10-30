@@ -175,6 +175,20 @@ describe("source_search", () => {
     expect(textOf(r)).toBe("Web search failed (HTTP 500). Try again later.");
   });
 
+  it("reports the credits Tavily says a search cost (Oct 29), and gives back a failed one: only successful searches count", async () => {
+    const ok = setup(undefined, () => json(200, { results, usage: { credits: 2 } }));
+    await ok.t.call({ query: "artist a album" });
+    const done = (f: typeof ok.fetch) =>
+      (f.mock.calls as unknown as [string, RequestInit][]).filter(([u]) => u === `${SITE}/agent/search-done`).map(([, init]) => JSON.parse(String(init.body)));
+    expect(done(ok.fetch)).toEqual([{ credits: 2 }]);
+    const failed = setup(undefined, () => json(400, {}));
+    await failed.t.call({ query: "artist a album" });
+    expect(done(failed.fetch)).toEqual([{ refund: 1 }]);
+    const free = setup(); // no usage in the answer: nothing to report
+    await free.t.call({ query: "artist a album" });
+    expect(done(free.fetch)).toEqual([]);
+  });
+
   it("logs time and result count, never the query", async () => {
     const { t } = setup();
     await t.call({ query: "secret artist query" });
@@ -312,6 +326,19 @@ describe("research_submit", () => {
     const r = await t.call({ job: "rj-abc123", key: "H1.4", claims: [claim([s1])] });
     expect(textOf(r)).toBe(sentence);
     expect(r.isError).toBe(isError);
+  });
+
+  it("Oct 29: a show-notes track whose first_search the agent has not read is refused locally, and nothing is posted", async () => {
+    const fetch = vi.fn(async () => json(200, { saved: "H1.2", claims: 1, verify: 0, dropped: [] }));
+    const gate = vi.fn(async (_job: string, key: string) => (key === "H1.2" ? "Call first_search for H1.2 first; its results are ready." : null));
+    const t = researchSubmitTool({ siteUrl: SITE, token: TOKEN, fetch: fetch as typeof globalThis.fetch, ledger, firstSearchGate: gate });
+    const r = await t.call({ job: "rj-abc123", key: "H1.2", claims: [claim([s1])] });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe("Not saved. Call first_search for H1.2 first; its results are ready.");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(gate).toHaveBeenCalledWith("rj-abc123", "H1.2");
+    expect((await t.call({ job: "rj-abc123", key: "H1.3", claims: [claim([s1])] })).isError).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("unreachable Air Check is a plain error", async () => {

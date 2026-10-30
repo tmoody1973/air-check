@@ -14,6 +14,8 @@ export interface PendingRun {
   hermesRunId: string | undefined;
   status: "queued" | "running" | "stopping";
   lastSeq: number | undefined;
+  /** A research run's job (Oct 29 prefetch). */
+  jobId?: string;
 }
 export interface RunEvent { event: string; data: Record<string, unknown>; t: number; seq: number }
 export interface ActivityEvent { key: string; at: number; decision: "allowed" | "blocked"; host: string; port: number; binary?: string; reason?: string }
