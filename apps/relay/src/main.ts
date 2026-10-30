@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { followAudit, type SpawnLogs } from "./audit.js";
+import { bridgePrefetch } from "./bridge.js";
 import { loadConfig } from "./config.js";
 import { connectConvex } from "./convex.js";
 import { HermesClient } from "./hermes.js";
@@ -25,6 +26,7 @@ function main(): void {
   const convex = connectConvex(config.convexUrl, config.relayToken);
   const runner = createRunner({
     convex, log,
+    ...(config.bridge && { prefetch: bridgePrefetch(config.bridge) }),
     sandboxes: config.sandboxes.map((s) => ({ name: s.name, workspace: s.workspace, hermes: new HermesClient(`http://127.0.0.1:${s.port}`, s.token) })),
   });
   const unsubscribe = convex.subscribePending(runner.onPending, () => log("pending subscription_error"));

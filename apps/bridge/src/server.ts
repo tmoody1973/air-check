@@ -25,7 +25,11 @@ interface Endpoint {
   token: string;
   listTools(): Promise<Tool[]>;
   callTool(name: string, args: unknown): Promise<CallToolResult>;
+  /** Oct 29: the relay's start of a job's first searches (POST <route>/prefetch); not an MCP tool. */
+  prefetch?(job: string): Promise<"started" | "none" | "failed">;
 }
+
+const PREFETCH_STATUS = { started: 202, none: 204, failed: 502 } as const;
 
 class HttpError extends Error {
   constructor(readonly status: number) {
@@ -81,13 +85,21 @@ function reply(res: ServerResponse, status: number, body = "", headers: Record<s
 async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<string, Endpoint>) {
   const path = new URL(req.url ?? "/", "https://bridge").pathname;
   if (path === "/healthz" && req.method === "GET") return reply(res, 200, "ok");
-  const ep = Object.hasOwn(routes, path) ? routes[path] : undefined;
-  if (!ep) return reply(res, 404);
+  // /aircheck/prefetch and /aircheck-demo/prefetch: the same token as that route's /mcp.
+  const prefetching = path.endsWith("/prefetch");
+  const base = prefetching ? `${path.slice(0, -"/prefetch".length)}/mcp` : path;
+  const ep = Object.hasOwn(routes, base) ? routes[base] : undefined;
+  if (!ep || (prefetching && !ep.prefetch)) return reply(res, 404);
   if (!bearerOk(req.headers.authorization, ep.token)) return reply(res, 401);
   // Stateless JSON responses: no GET SSE stream, no DELETE session.
   if (req.method !== "POST") return reply(res, 405, "", { allow: "POST" });
 
   const body = await readJson(req);
+  if (prefetching) {
+    const job = (body as { job?: unknown } | null)?.job;
+    if (typeof job !== "string" || !job.trim() || job.length > 40) return reply(res, 400);
+    return reply(res, PREFETCH_STATUS[await ep.prefetch!(job.trim())]);
+  }
   const server = mcpServer(ep);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on("close", () => {
@@ -101,7 +113,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, routes: Record<
 /** The private HTTPS bridge: /crate/mcp (allowlisted Crate, each result's URLs given source ids) and /aircheck/mcp
  * (package_submit, package_revise, read-only package_get, episode_mark_rerun, radar_get, source_search, first_search,
  * research_submit),
- * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. */
+ * and /aircheck-demo/mcp (the same tools, demo workspace) when the demo token pair is configured. Each aircheck route
+ * also takes POST <route>/prefetch { job } with its own token: the relay starts a job's first searches (Oct 29). */
 export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   // One ledger for every route: ids Crate issues on /crate/mcp are cited on /aircheck/mcp. Shared by real and demo (R4).
   const ledger = createSourceLedger();
@@ -109,12 +122,18 @@ export function startServer(config: BridgeConfig): Promise<HttpsServer> {
   // Unconfigured or an unreadable key: source_search's apple_music option says so; the bridge still starts.
   const appleMusic = loadAppleMusic(config.appleMusic);
   const submitEndpoint = (token: string, submitToken: string): Endpoint => {
-    // One set per route, made once: first_search keeps its job's searched answers across the agent's calls.
-    const tools = [packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool, firstSearchTool, researchSubmitTool].map((make) =>
-      make({ siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey, appleMusic }),
-    );
+    const opts = { siteUrl: config.convexSiteUrl, token: submitToken, ledger, tavilyApiKey: config.tavilyApiKey, appleMusic };
+    // One set per route, made once: first_search keeps its jobs' searched answers, and research_submit asks it before a
+    // show-notes track is saved.
+    const first = firstSearchTool(opts);
+    const tools = [
+      ...[packageSubmitTool, packageReviseTool, packageGetTool, episodeMarkRerunTool, radarGetTool, sourceSearchTool].map((make) => make(opts)),
+      first,
+      researchSubmitTool({ ...opts, firstSearchGate: first.gate }),
+    ];
     return {
       token,
+      prefetch: first.prefetch,
       listTools: async () => tools.map((t) => t.tool),
       callTool: async (name, args) => {
         const t = tools.find((x) => x.tool.name === name);

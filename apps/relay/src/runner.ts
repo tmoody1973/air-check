@@ -10,6 +10,8 @@ export interface RunnerOptions {
   flushMs?: number;
   backoffMs?: (attempt: number) => number;
   maxLive?: number;
+  /** Oct 29: starts the bridge's first searches for a research run's job. Best effort, never awaited by the run. */
+  prefetch?: (workspace: "real" | "demo", jobId: string) => Promise<void>;
 }
 export interface Runner { onPending(rows: PendingRun[]): void; stop(): void }
 
@@ -101,6 +103,10 @@ export function createRunner(o: RunnerOptions): Runner {
   }
 
   async function begin(sb: Sandbox, r: PendingRun): Promise<void> {
+    // Alongside the start, not before it: a slow bridge never delays the run. Not show notes: the bridge does nothing.
+    if (o.prefetch && r.kind === "research" && r.jobId) {
+      o.prefetch(r.workspace, r.jobId).then(() => o.log(`run=${r.runId} event=prefetch n=1`), () => o.log(`run=${r.runId} event=prefetch_failed n=1`));
+    }
     let hermesRunId: string;
     try {
       // Idempotent by runId: a repeat start (after a crash between POST and `started`) returns the same Hermes run.

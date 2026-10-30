@@ -328,6 +328,19 @@ describe("research_submit", () => {
     expect(r.isError).toBe(isError);
   });
 
+  it("Oct 29: a show-notes track whose first_search the agent has not read is refused locally, and nothing is posted", async () => {
+    const fetch = vi.fn(async () => json(200, { saved: "H1.2", claims: 1, verify: 0, dropped: [] }));
+    const gate = vi.fn(async (_job: string, key: string) => (key === "H1.2" ? "Call first_search for H1.2 first; its results are ready." : null));
+    const t = researchSubmitTool({ siteUrl: SITE, token: TOKEN, fetch: fetch as typeof globalThis.fetch, ledger, firstSearchGate: gate });
+    const r = await t.call({ job: "rj-abc123", key: "H1.2", claims: [claim([s1])] });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe("Not saved. Call first_search for H1.2 first; its results are ready.");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(gate).toHaveBeenCalledWith("rj-abc123", "H1.2");
+    expect((await t.call({ job: "rj-abc123", key: "H1.3", claims: [claim([s1])] })).isError).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("unreachable Air Check is a plain error", async () => {
     const { t } = setup(() => Promise.reject(new TypeError("fetch failed")));
     const r = await t.call({ job: "rj-abc123", key: "H1.4", claims: [claim([s1])] });

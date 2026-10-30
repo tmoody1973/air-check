@@ -162,6 +162,7 @@ describe("researchInput", () => {
     expect(text).toContain("Air Check already ran each track's first web search");
     expect(text).toContain("first_search");
     expect(text).toContain("Start with first_search for your first track key");
+    expect(text).toContain("research_submit refuses a track until you have read its first_search");
     expect(text).not.toMatch(/Crate first/);
     expect(researchInput({ ...job, kind: "verify", lines: [] })).toMatch(/Crate first/);
     expect(text).toMatch(/untrusted/);

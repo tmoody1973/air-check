@@ -60,7 +60,7 @@ function setup(over: { plan?: Handler; usage?: Handler; tavily?: Handler; tavily
     sleep: async (ms) => void sleeps.push(ms),
   });
   const call = (key: string, job = JOB) => t.call({ job, key });
-  return { t, call, fetch, ledger, sleeps, done, searched, maxInFlight: () => maxInFlight };
+  return { t, call, fetch, ledger, sleeps, done, searched, maxInFlight: () => maxInFlight, gate: (key: string, job = JOB) => t.gate(job, key) };
 }
 /** Lets the background batch finish its report (the agent never waits for that). */
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -265,5 +265,81 @@ describe("first_search (Oct 29 prefetch)", () => {
       expect.stringMatching(/^tool=first_search status=ok ms=\d+$/),
       expect.stringMatching(/^prefetch tracks=3 ok=3 failed=0 capped=0 timeouts=0 ms=\d+ credits=6$/),
     ]));
+  });
+
+  it("the agent's text is compact: chunks only, no URL line, one track at most 8 KB", async () => {
+    const big = Array.from({ length: 5 }, (_, i) => ({
+      title: `${"T".repeat(195)} ${i}`, url: `https://site${i}.example/${"p".repeat(300)}`, content: "c".repeat(3_000), raw_content: "p".repeat(8_000), published_date: "2026-10-01",
+    }));
+    const { call, ledger } = setup({ plan: () => json(200, { tracks: [track(1)], embargoed: [] }), tavily: () => json(200, { results: big }) });
+    const out = textOf(await call("H1.1"));
+    expect(out.length).toBeLessThanOrEqual(8_192);
+    expect(out).not.toContain("https://");
+    expect(out).not.toContain("ppp");
+    const id = out.match(/^\[(S[0-9a-z]{5})\]/m)![1]!;
+    expect(ledger.get(id)!.url).toMatch(/^https:\/\/site0\.example\//); // the ledger still has the address
+  });
+});
+
+describe("prefetch without the model (Oct 29, relay -> bridge)", () => {
+  it("prefetch(job) starts every track's search; the agent's later first_search is served from it with no new search", async () => {
+    const s = setup();
+    expect(await s.t.prefetch(JOB)).toBe("started");
+    await settle();
+    expect(s.searched).toHaveLength(3);
+    for (const k of ["H1.1", "H1.2", "H1.3"]) expect((await s.call(k)).isError).toBe(false);
+    expect(s.searched).toHaveLength(3);
+  });
+
+  it("a job with nothing to prefetch (not show notes, not running, not found) is none; Air Check unreachable is failed", async () => {
+    expect(await setup({ plan: () => json(409, { error: "Only show notes have first searches; use source_search." }) }).t.prefetch(JOB)).toBe("none");
+    expect(await setup({ plan: () => json(404, {}) }).t.prefetch(JOB)).toBe("none");
+    expect(await setup({ plan: () => Promise.reject(new TypeError("down")) }).t.prefetch(JOB)).toBe("failed");
+    expect(await setup({ tavilyApiKey: null }).t.prefetch(JOB)).toBe("none");
+  });
+});
+
+describe("research_submit's gate (Oct 29: the model must read first_search)", () => {
+  const READY = (key: string) => `Call first_search for ${key} first; its results are ready.`;
+
+  it("refuses a show-notes track until first_search for that key has been returned in this job", async () => {
+    const s = setup();
+    await s.t.prefetch(JOB);
+    await settle();
+    expect(await s.gate("H1.2")).toBe(READY("H1.2"));
+    await s.call("H1.2");
+    expect(await s.gate("H1.2")).toBeNull();
+    expect(await s.gate("H1.1")).toBe(READY("H1.1")); // per key
+  });
+
+  it("never gates intros, threads or closing tracks", async () => {
+    const s = setup();
+    await s.t.prefetch(JOB);
+    for (const key of ["H1.intro", "H2.threads", "H1.15"]) expect(await s.gate(key)).toBeNull();
+  });
+
+  it("lets a track through when its first search failed, the cap ran out or it is embargoed", async () => {
+    let used = 0;
+    const s = setup({
+      plan: () => json(200, { tracks: [track(1), track(2), track(3)], embargoed: ["H1.4"] }),
+      usage: (b) => json(200, String(b.query).includes("Artist 3") ? { allowed: false, used: 2, cap: 2 } : { allowed: true, used: ++used, cap: 2 }),
+      tavily: (b) => (String(b.query).includes("Artist 2") ? json(400, {}) : json(200, { results: [page(1)] })),
+    });
+    await s.t.prefetch(JOB);
+    await settle();
+    expect(await s.gate("H1.1")).toBe(READY("H1.1"));
+    for (const key of ["H1.2", "H1.3", "H1.4"]) expect(await s.gate(key), key).toBeNull();
+  });
+
+  it("does not gate a verify or deep-dive job, or when web search is not configured", async () => {
+    expect(await setup({ plan: () => json(409, { error: "Only show notes have first searches; use source_search." }) }).gate("H1.1")).toBeNull();
+    expect(await setup({ tavilyApiKey: null }).gate("H1.1")).toBeNull();
+  });
+
+  it("is the fallback trigger: a gate on a job the bridge has not seen starts its first searches", async () => {
+    const s = setup();
+    expect(await s.gate("H1.1")).toBe(READY("H1.1"));
+    await settle();
+    expect(s.searched).toHaveLength(3);
   });
 });

@@ -111,6 +111,8 @@ describe("start", () => {
     expect(all[0]).toMatchObject({ runId, kind: "research", jobId, status: "queued", source: "live" });
     expect(all[0]!.input).toContain("H1.3 · closing track, skipped");
     expect(all[0]!.input).toContain(jobId);
+    // Oct 29 prefetch: the relay gets the job id, so it can start the bridge's first searches without the model.
+    expect(await t.query(api.relay.pending, { token: RELAY })).toEqual([expect.objectContaining({ runId, kind: "research", jobId })]);
   });
 
   test("a tracklist with an unreadable line or an empty hour is refused", async () => {

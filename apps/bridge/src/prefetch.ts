@@ -14,8 +14,11 @@ import { TavilyError, tavilySearch } from "./tavily.js";
 
 /**
  * Oct 29 prefetch: each show-notes track's first web search (core firstSearchQuery), run by code in parallel so the
- * agent spends its time writing, not searching. The agent's first first_search call for a job starts the batch for every
- * track Convex lists; each call then returns its own track's results, waiting only if that search is still running.
+ * agent spends its time writing, not searching. The relay starts the batch as the run starts (POST <route>/prefetch,
+ * prefetch() below); if that call failed, the agent's first first_search or research_submit for the job starts it. Each
+ * first_search returns its own track's results (compact, about 8 KB at most), waiting only if that search is still
+ * running, and research_submit refuses a show-notes track until its results were read (gate(); the model skipped the
+ * prefetched searches on Oct 29 22:33).
  * Settings follow Tavily's batch guidance (docs.tavily.com best-practices-search, "Async & Batch Search", Oct 29).
  */
 export const PREFETCH_CONCURRENCY = 5; // (100 RPM / 60) x about 3 s a search
@@ -28,9 +31,15 @@ const RETRY_AFTER_MS = 10 * 60 * 1000;
 const MAX_CACHED = 2_000;
 const MAX_ID = 40;
 const PLAN_FAILED = "Could not get this job's first searches. Use source_search instead.";
+/** Most of each result's chunks first_search shows: five results stay under about 8 KB. */
+const FIRST_SNIPPET = 1_200;
+const TRACK_KEY = /^H\d+\.\d+$/;
 
 type Status = "ok" | "failed" | "capped" | "embargoed" | "unchecked";
 type Outcome = { status: Status; text: string };
+/** What the bridge knows of a job: show notes or not, its tracks' queries, embargoed keys, keys whose results the agent has read. */
+type JobState = { at: number; showNotes: boolean; keys: ReadonlyMap<string, string>; embargoed: ReadonlySet<string>; served: ReadonlySet<string> };
+type Plan = { ok: true; tracks: Track[]; embargoed: string[] } | { ok: false; status: string; text: string };
 type Searched = Outcome & { credits: number; timedOut: boolean; refund: boolean };
 type Track = { key: string; query: string };
 
@@ -59,12 +68,26 @@ const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof
 const isTrack = (v: unknown): v is Track => isObj(v) && typeof v.key === "string" && typeof v.query === "string";
 const shortStr = (v: unknown) => (typeof v === "string" && v.trim() && v.length <= MAX_ID ? v.trim() : "");
 
-export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: number) => Promise<void>; concurrency?: number }): PackageSubmitTool {
+export interface FirstSearch extends PackageSubmitTool {
+  /** The relay's call as a research run starts: plan and start the job's first searches without the model. */
+  prefetch(job: string): Promise<"started" | "none" | "failed">;
+  /** research_submit's check: a sentence while a show-notes track's first search is unread, else null. */
+  gate(job: string, key: string): Promise<string | null>;
+}
+
+export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: number) => Promise<void>; concurrency?: number }): FirstSearch {
   const doFetch = opts.fetch ?? fetch;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const url = (path: string) => new URL(path, opts.siteUrl).toString();
   // Keyed by job and query, not by track key: a new tracklist can put another track on the same key.
-  const cache = new Map<string, { at: number; keep: number; outcome: Promise<Outcome> }>();
+  const cache = new Map<string, { at: number; keep: number; outcome: Promise<Outcome>; status?: Status }>();
+  const jobs = new Map<string, JobState>();
+  const liveJob = (job: string) => {
+    const j = jobs.get(job);
+    if (j && Date.now() - j.at < KEEP_MS) return j;
+    jobs.delete(job);
+    return undefined;
+  };
   const live = (k: string) => {
     const e = cache.get(k);
     if (e && Date.now() - e.at < e.keep) return e;
@@ -83,7 +106,7 @@ export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: numbe
     if (!usage.data.allowed) return outcome("capped", SEARCH_CAP_REACHED);
     try {
       const { results, credits } = await withRetry(() => tavilySearch({ apiKey: opts.tavilyApiKey!, fetch: doFetch }, query, { timeoutMs: PREFETCH_TIMEOUT_MS }), sleep);
-      return outcome("ok", resultText(opts.ledger, webFound(results), "tavily"), { credits });
+      return outcome("ok", resultText(opts.ledger, webFound(results), "tavily", { maxSnippet: FIRST_SNIPPET }), { credits });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Web search failed.";
       return outcome("failed", `${message} Use source_search for this track if you need it.`, { refund: true, timedOut: message === "Web search timed out." });
@@ -103,7 +126,7 @@ export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: numbe
       if (s.refund) n.refund++;
       n.credits += s.credits;
       const e = cache.get(f.k);
-      if (e && s.status !== "ok") cache.set(f.k, { ...e, keep: RETRY_AFTER_MS });
+      if (e) cache.set(f.k, { ...e, status: s.status, keep: s.status === "ok" ? e.keep : RETRY_AFTER_MS });
       f.resolve({ status: s.status, text: s.text });
     });
     await reportSearches(doFetch, opts.siteUrl, opts.token, { refund: n.refund, credits: n.credits });
@@ -124,6 +147,49 @@ export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: numbe
     if (fresh.length) void batch(fresh);
   }
 
+  /** Asks Convex for the job's tracks, remembers them, and starts the searches this bridge does not hold yet. */
+  async function plan(job: string): Promise<Plan> {
+    const res = await postFields(doFetch, url("/agent/research-prefetch"), opts.token, ["job"], { job });
+    if (res?.status === 404) return { ok: false, status: "404", text: "No such research job; stop." };
+    if (res?.status === 409 && typeof res.data.error === "string") {
+      if (res.data.error.startsWith("Only show notes")) jobs.set(job, { at: Date.now(), showNotes: false, keys: new Map(), embargoed: new Set(), served: new Set() });
+      return { ok: false, status: "409", text: res.data.error };
+    }
+    if (!res || res.status !== 200 || !Array.isArray(res.data.tracks)) return { ok: false, status: res ? String(res.status) : "unreachable", text: PLAN_FAILED };
+    const tracks = res.data.tracks.filter(isTrack);
+    const embargoed = Array.isArray(res.data.embargoed) ? res.data.embargoed.filter((k): k is string => typeof k === "string") : [];
+    const was = liveJob(job);
+    jobs.set(job, {
+      at: was?.at ?? Date.now(), showNotes: true, served: was?.served ?? new Set(),
+      keys: new Map([...(was?.keys ?? []), ...tracks.map((t): [string, string] => [t.key, t.query])]),
+      embargoed: new Set([...(was?.embargoed ?? []), ...embargoed]),
+    });
+    while (jobs.size > MAX_CACHED) jobs.delete(jobs.keys().next().value!);
+    start(job, tracks);
+    return { ok: true, tracks, embargoed };
+  }
+
+  async function prefetch(job: string): Promise<"started" | "none" | "failed"> {
+    if (!opts.tavilyApiKey) return "none";
+    const p = await plan(job);
+    return p.ok ? "started" : p.status === "404" || p.status === "409" ? "none" : "failed";
+  }
+
+  async function gate(job: string, key: string): Promise<string | null> {
+    if (!opts.tavilyApiKey || !TRACK_KEY.test(key)) return null; // intros and threads are never gated
+    let j = liveJob(job);
+    // An unseen job (the relay's call failed, or a bridge restart) is planned now, which also starts its searches.
+    if (!j || (j.showNotes && !j.keys.has(key))) {
+      await plan(job);
+      j = liveJob(job);
+    }
+    const query = j?.showNotes ? j.keys.get(key) : undefined;
+    if (!query || j!.served.has(key) || j!.embargoed.has(key)) return null; // closing, done, embargoed, or already read
+    const status = live(`${job}\n${query}`)?.status;
+    if (status && status !== "ok") return null; // its search failed or the cap ran out: nothing to read
+    return `Call first_search for ${key} first; its results are ready.`;
+  }
+
   async function serve(args: unknown): Promise<{ text: string; isError: boolean; status: string }> {
     const a = isObj(args) ? args : {};
     const job = shortStr(a.job);
@@ -131,21 +197,21 @@ export function firstSearchTool(opts: ResearchToolOptions & { sleep?: (ms: numbe
     const fail = (text: string, status: string) => ({ text, isError: true, status });
     if (!job || !key) return fail("Send the research job id and one track key, e.g. H1.4.", "bad");
     if (!opts.tavilyApiKey) return fail(NOT_CONFIGURED_SEARCH, "unconfigured");
-    const plan = await postFields(doFetch, url("/agent/research-prefetch"), opts.token, ["job"], { job });
-    if (plan?.status === 404) return fail("No such research job; stop.", "404");
-    if (plan?.status === 409 && typeof plan.data.error === "string") return fail(plan.data.error, "409");
-    if (!plan || plan.status !== 200 || !Array.isArray(plan.data.tracks)) return fail(PLAN_FAILED, plan ? String(plan.status) : "unreachable");
-    const tracks = plan.data.tracks.filter(isTrack);
-    start(job, tracks);
-    if (Array.isArray(plan.data.embargoed) && plan.data.embargoed.includes(key)) return fail(EMBARGOED_SEARCH_REFUSAL, "embargoed");
-    const t = tracks.find((x) => x.key === key);
+    const p = await plan(job);
+    if (!p.ok) return fail(p.text, p.status);
+    if (p.embargoed.includes(key)) return fail(EMBARGOED_SEARCH_REFUSAL, "embargoed");
+    const t = p.tracks.find((x) => x.key === key);
     if (!t) return fail(`${key} has no first search: it is not a track left to research in this job. Closing tracks, intros and threads have none.`, "none");
     const o = await live(`${job}\n${t.query}`)!.outcome;
     if (o.status !== "ok") return fail(o.text, o.status);
+    const j = liveJob(job);
+    if (j) jobs.set(job, { ...j, served: new Set([...j.served, key]) });
     return { text: `First search for ${key}, run by Air Check when the job started.\n\n${o.text}`, isError: false, status: "ok" };
   }
 
   return {
+    prefetch,
+    gate,
     tool: {
       name: "first_search",
       description:

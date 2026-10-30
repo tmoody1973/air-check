@@ -120,7 +120,7 @@ export function researchInput(job: ResearchPromptJob): string {
   const n = job.searchesLeft;
   // Oct 29: show notes search the web first (story, charts, awards, press); verify and deep dives keep Crate first.
   const plan = job.kind === "show-notes"
-    ? "Air Check already ran each track's first web search: read it with first_search (job, key) and write from it. Start with first_search for your first track key. Use at most 3 web searches per track including that one: source_search only for gaps (bio, missing release facts), then Crate for what is still missing."
+    ? "Air Check already ran each track's first web search: read it with first_search (job, key) and write from it. Start with first_search for your first track key; research_submit refuses a track until you have read its first_search. Use at most 3 web searches per track including that one: source_search only for gaps (bio, missing release facts), then Crate for what is still missing."
     : "Use Crate first and keep source_search for what Crate cannot confirm.";
   const searches = n > 0
     ? `You have ${n} web search${n === 1 ? "" : "es"} left today. ${plan}`
