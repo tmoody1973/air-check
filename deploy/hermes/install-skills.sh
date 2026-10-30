@@ -5,7 +5,7 @@
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH" XDG_RUNTIME_DIR="/run/user/$(id -u)"
 REPO="${1:-$HOME/air-check}"
-SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags)
+SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags rlr-show-notes rlr-pre-air-verify rlr-deep-dive)
 for sandbox in airc aircdemo; do
   for skill in "${SKILLS[@]}"; do
     nemohermes "$sandbox" skill remove "$skill" >/dev/null 2>&1 || true
