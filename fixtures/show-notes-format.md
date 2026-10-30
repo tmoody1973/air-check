@@ -31,7 +31,7 @@ closing-track, no notes
 ```
 
 Observed conventions:
-- Links follow each sentence, written `[[short host](url)]`: the host without `www.` and without its last label (`en.wikipedia`, `udiscovermusic`, `music.apple`).
+- Links follow each sentence, written `[[short host](url)]`: the host without `www.` and without its last label (`en.wikipedia`, `pitchfork`, `music.apple`).
 - Bullets appear only when there is something to say, in the order above. Facts of one kind share one bullet of one to four sentences.
 - A fact that holds has no marker. A fact to check ends **[verify]**; a conflict also gives both versions ("Sources disagree: en.wikipedia says X, instagram says Y."). The reason ("no source found", "only one source", "sources disagree") is only in Notes for Your Review.
 - A fact with no source is kept and marked **[verify]** (decision 021). Never "I found no verified bio": a track with little found uses "What I could verify / What I couldn't verify".
