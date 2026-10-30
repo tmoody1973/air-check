@@ -629,6 +629,17 @@ If the Tavily provider rule comes back after the re-onboard (from NemoClaw's sav
 
 For `aircdemo` (after a destroy and `~/.aircheck/onboard-demo.sh`, which never passes a Tavily key): add both tools with the commands under "aircdemo (the judges' sandbox)", `nemohermes aircdemo mcp restart`, then `bash deploy/hermes/apply-agent-config.sh --with-skills`. Check by hand: `nemohermes aircdemo status` lists `pypi` only, `policy get` has no `api.tavily.com`, `mcp status aircheck --json --tools` lists `source_search` and `research_submit`, the skills are the five station skills, and `/health` on 8643 is 200. Its search still works: it goes through the bridge, capped at 20 a day.
 
+### First searches in code (Oct 29 prefetch, branch `feat/research-prefetch`)
+
+Show notes now get each track's first web search run by the bridge, in parallel, before the agent writes (decision 022). It touches Convex, the bridge and the agent's skill. Deploy in this order, after the show-notes rework (`feat/research-richer`) is deployed:
+
+1. **Convex** (`npx convex deploy -y`). Adds the read-only `/agent/research-prefetch` route, the `/agent/search-done` route, the optional `credits` field on `searchUsage`, the new show-notes prompt line and the new skill text. Convex first: a new bridge calling an old Convex gets 404 from both routes, and `first_search` then tells the agent to use `source_search` (nothing breaks, nothing is faster).
+2. **The bridge** ("Updating the bridge" above), then `nemohermes airc mcp restart` and `nemohermes aircdemo mcp restart`. Check: `nemohermes airc mcp status aircheck --json --tools` (and `aircdemo`) lists `first_search` beside `source_search` and `research_submit`.
+3. **The skill:** `~/air-check/deploy/hermes/install-skills.sh` on the VM after `git pull`, so the installed `rlr-show-notes` matches the copy sent in the prompt.
+4. **Check on a real show:** start show notes and watch `journalctl -u aircheck-bridge -f`. Expect one line `prefetch tracks=<n> ok=<n> failed=0 capped=0 timeouts=0 ms=<about 30000 for 28 tracks> credits=<2 x ok>` shortly after the run starts, then `tool=first_search status=ok` lines. Settings shows "… searches used today · <credits> credits". Time the job from start to done and write the before and after times in `docs/LEARNING-LOG.md`.
+
+Rolling back: deploy the previous bridge and run `install-skills.sh` from the previous commit; the new Convex routes are harmless without it, and the prompt still tells the agent to call `first_search`, which an old bridge does not have, so roll Convex back too.
+
 ## Plan 8: release radar
 
 The release radar turns forwarded email into release records. AgentMail (an email service with its own inbox, `rhythmlab@agentmail.to`) receives the mail and calls the console's `/api/agentmail/inbound` route. The console only stores the cleaned email. The ingest worker reads it once a minute: Bandcamp emails by code, co-signs through the Token Factory model, and one allowlisted Bandcamp page fetch for the player. Nothing in this section ever prints a secret; values move by pipe from a file.
