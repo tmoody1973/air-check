@@ -789,20 +789,55 @@ describe("playContext", () => {
     ]);
   });
 
-  test("a lookup that fails leaves that artist out; the rest are still saved", async () => {
+  // The service being down: the first thrown lookup ends the pass, and what was found before it is saved.
+  test("a thrown lookup stops the pass; the days found before it are saved", async () => {
     const t = convexTest(schema, modules);
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       const { args } = JSON.parse(String(init.body)) as { args: { stationSlug: string; q: string } };
-      calls.push(args.q);
-      if (args.q === "Alfa Mist") throw new Error("down");
+      calls.push(`${args.stationSlug}|${args.q}`);
+      if (args.q === "Yussef Dayes") throw new Error("down");
       return new Response(JSON.stringify({ status: "success", value: [{ artist: args.q, title: "T", playedAt: Date.UTC(2026, 9, 20, 18) }] }));
     });
     await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
     const { jobId, runId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
     await finishVerify(t, jobId, runId);
+    expect(calls).toEqual(["88nine|Alfa Mist", "hyfin|Alfa Mist", "88nine|Yussef Dayes"]);
+    expect((await job(t, jobId))!.playContext!.map((p) => `${p.artist}|${p.station}`)).toEqual(["Alfa Mist|88nine", "Alfa Mist|hyfin"]);
+  });
+
+  test("past the deadline (8 minutes from the start) no new lookup starts; what was found is saved", async () => {
+    const t = convexTest(schema, modules);
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const { args } = JSON.parse(String(init.body)) as { args: { stationSlug: string; q: string } };
+      calls.push(`${args.stationSlug}|${args.q}`);
+      vi.setSystemTime(Date.now() + 5 * 60_000); // each lookup "takes" 5 minutes
+      return new Response(JSON.stringify({ status: "success", value: [{ artist: args.q, title: "T", playedAt: Date.UTC(2026, 9, 20, 18) }] }));
+    });
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId, runId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    await finishVerify(t, jobId, runId);
+    expect(calls).toEqual(["88nine|Alfa Mist", "hyfin|Alfa Mist"]);
+    expect((await job(t, jobId))!.playContext).toHaveLength(2);
+  });
+
+  test("a Regenerate that ends done again does not look anything up again or replace the saved context", async () => {
+    const t = convexTest(schema, modules);
+    const calls = fakePlays({ "88nine|Alfa Mist": Date.UTC(2026, 9, 20, 18) });
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const as = t.withIdentity(human);
+    const { jobId, runId } = await as.mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    await finishVerify(t, jobId, runId);
     expect(calls).toHaveLength(4);
-    expect((await job(t, jobId))!.playContext!.map((p) => `${p.artist}|${p.station}`)).toEqual(["Yussef Dayes|88nine", "Yussef Dayes|hyfin"]);
+    const key = (await job(t, jobId))!.lines!.find((l) => !l.closing)!.id;
+    const again = await as.mutation(api.research.regenerate, { jobId, key, overwriteEdit: false });
+    await submit(t, { job: jobId, key, claims: [detail()], sources: SOURCES });
+    await finishRun(t, again.runId);
+    const j = (await job(t, jobId))!;
+    expect(j.status).toBe("done");
+    expect(calls).toHaveLength(4);
+    expect(j.playContext).toEqual([{ artist: "Alfa Mist", station: "88nine", lastPlayed: "2026-10-20" }]);
   });
 
   test("the demo never looks anything up (Hard Rule 9), and show notes jobs do not either", async () => {

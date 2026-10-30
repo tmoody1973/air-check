@@ -6,6 +6,8 @@ import { actorOf, workspaceOf, type Workspace } from "./gate";
 
 export const MAX_TRACKLIST = 50_000;
 export const MAX_NOTES = 20_000;
+/** The ingest service's cap on a show's Paper notes, and on the notes a pre-air check reads (64 KB). */
+export const MAX_NOTES_BYTES = 65_536;
 
 /** Queues a draft-package run whose instruction is built here, in code. Shared by the form and the ingest service. */
 export function queueDraft(ctx: MutationCtx, workspace: Workspace, form: PackageDraftForm): Promise<string> {

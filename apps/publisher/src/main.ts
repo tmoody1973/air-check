@@ -3,7 +3,7 @@ import { loadConfig } from "./config.js";
 import { connectConvex } from "./convex.js";
 import { fullPass, startup, statusReporter, unlistedTest, type PublishDeps } from "./publish.js";
 import { openState } from "./state.js";
-import { sendReadyCards, sendResearchCards, telegramSender } from "./telegram.js";
+import { cardsPass, telegramSender } from "./telegram.js";
 
 // Hard Rule 8: journald (stdout) only, and only `publish package=... step=... ok=... ms=...` lines (with `update=...`
 // first for a description update, or `research=<job id>` instead for a research card) plus the start line.
@@ -51,11 +51,7 @@ async function main(): Promise<void> {
   const timers = [
     // One upload and one description update at most per pass, never two requests at once.
     every(config.pollMs, "pass", () => fullPass(deps)),
-    every(CARDS_MS, "cards", async () => {
-      const cards = { convex, state, appUrl: config.appUrl, send, log };
-      await sendReadyCards(cards);
-      await sendResearchCards(cards);
-    }),
+    every(CARDS_MS, "cards", () => cardsPass({ convex, state, appUrl: config.appUrl, send, log })),
   ];
   // Stopping mid-upload leaves the package `publishing`; the next start reconciles it to outcome_unknown.
   const shutdown = () => { for (const t of timers) clearInterval(t); process.exit(0); };

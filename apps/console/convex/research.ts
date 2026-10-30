@@ -38,13 +38,12 @@ import { sessionKeyOf } from "./demoLimits";
 import { enqueueLiveRun } from "./enqueue";
 import { episodeByDate, isOpenRun, requireRealHuman } from "./episodes";
 import { actorOf, type Workspace, workspaceOf } from "./gate";
-import { MAX_NOTES_BYTES } from "./ingest";
 import { activeEmbargoes } from "./radar";
 import { createdAtOf } from "./runDefaults";
 import { stopRun } from "./runs";
 import { claimKindV, workspaceV } from "./schema";
 import { SAMPLE_JOB_PREFIX } from "./seedResearch";
-import { MAX_NOTES, MAX_TRACKLIST } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES, MAX_TRACKLIST } from "./tracklist";
 
 // Plan 7: sourced research jobs. A job is a Hermes run (kind `research`) whose prompt is built here, in code. The agent
 // saves blocks through POST /agent/research -> submitEntry, which writes research rows in its token's workspace and
@@ -300,16 +299,15 @@ export async function draftNotesFromResearch(ctx: QueryCtx, workspace: Workspace
 }
 
 /**
- * Task 5: real verify jobs that ended done since `since`, as counts only (changes offered, claims still open), for the
- * Telegram line that links to the report. Never a line, claim or source.
+ * Task 5: real verify jobs created since `since`, each `ready` once done, as counts only (changes offered, claims still
+ * open), for the Telegram line that links to the report. Never a line, claim or source. Listed by creation, not by
+ * finish, so a done job sent back to queued (Regenerate, Resume) stays listed and its line is never sent twice.
  */
-export async function finishedVerifyCounts(ctx: QueryCtx, since: number): Promise<{ jobId: string; showDate: string; changes: number; open: number }[]> {
-  // ponytail: reads every real verify job (two a week); add a by-finishedAt index if that ever grows.
-  const jobs = await ctx.db.query("research").withIndex("by_workspace_kind_showDate", (q) => q.eq("workspace", "real").eq("kind", "verify")).collect();
-  const done = jobs.filter((j) => j.status === "done" && (j.finishedAt ?? 0) >= since);
-  return Promise.all(done.map(async (j) => {
+export async function recentVerifyJobs(ctx: QueryCtx, since: number): Promise<{ jobId: string; showDate: string; ready: boolean; changes: number; open: number }[]> {
+  const jobs = await ctx.db.query("research").withIndex("by_workspace_created", (q) => q.eq("workspace", "real").gte("createdAt", since)).collect();
+  return Promise.all(jobs.filter((j) => j.kind === "verify").map(async (j) => {
     const { changes, open } = verifyReport({ lines: j.lines ?? [], entries: (await liveEntries(ctx, j.jobId)).map(forView), tracks: j.tracks });
-    return { jobId: j.jobId, showDate: j.showDate ?? "", changes: changes.length, open: open.length };
+    return { jobId: j.jobId, showDate: j.showDate ?? "", ready: j.status === "done", changes: changes.length, open: open.length };
   }));
 }
 
@@ -764,8 +762,9 @@ export const onRunFinished = internalMutation({
     const entries = await liveEntries(ctx, job.jobId);
     const left = remainingKeys(job, entries);
     if (!left.length) {
-      // P6: a finished real pre-air check gets 88Nine and HYFIN context, looked up in code after it is saved.
-      if (job.kind === "verify" && job.workspace === "real") await ctx.scheduler.runAfter(0, internal.research.playContext, { jobId: job.jobId });
+      // P6: a finished real pre-air check gets 88Nine and HYFIN context, looked up in code after it is saved. Once only:
+      // a Regenerate or Resume that ends done again keeps the context it has.
+      if (job.kind === "verify" && job.workspace === "real" && !job.playContext) await ctx.scheduler.runAfter(0, internal.research.playContext, { jobId: job.jobId });
       return end("done");
     }
     if (job.status === "taken-over" || run.status === "cancelled") return end("stopped");
@@ -840,21 +839,27 @@ export const playArtists = internalQuery({
   },
 });
 
+/** Convex ends an action at 10 minutes; no new lookup starts after this, so the days found are always saved. */
+const PLAY_DEADLINE_MS = 8 * 60_000;
+
 /**
  * P6, scheduled by onRunFinished for a done real verify job. One lookup per distinct artist and station (88nine and
- * hyfin only, Hard Rule 3, checked again in core's lastPlayed), one at a time. Only days found are kept: a failed lookup
- * or no play in the window says nothing, so no row claims an artist was never played (Hard Rule 10). The demo never
- * gets here (Hard Rule 9).
+ * hyfin only, Hard Rule 3, checked again in core's lastPlayed), one at a time. The first thrown lookup (the service is
+ * down) or the deadline ends the pass, and the days found so far are saved. Only days found are kept: no play in the
+ * window says nothing, so no row claims an artist was never played (Hard Rule 10). The demo never gets here (Hard Rule 9).
  */
 export const playContext = internalAction({
   args: { jobId: v.string() },
   handler: async (ctx, { jobId }): Promise<void> => {
     const artists: string[] = await ctx.runQuery(internal.research.playArtists, { jobId });
     if (!artists.length) return;
+    const stop = Date.now() + PLAY_DEADLINE_MS;
     const found: Infer<typeof playRowV>[] = [];
-    for (const artist of artists) {
+    pass: for (const artist of artists) {
       for (const station of STATIONS) {
-        const day = await lastPlayed(fetch, station, artist).catch(() => null);
+        if (Date.now() >= stop) break pass;
+        const day = await lastPlayed(fetch, station, artist).catch(() => undefined);
+        if (day === undefined) break pass;
         if (day) found.push({ artist, station, lastPlayed: day });
       }
     }

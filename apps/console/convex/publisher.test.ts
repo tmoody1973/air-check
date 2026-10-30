@@ -311,24 +311,31 @@ describe("publisher.researchReady", () => {
     return jobId;
   }
 
-  test("done real verify jobs from the last 48 hours: job id, show date, changes and open counts only", async () => {
+  test("real verify jobs created in the last 48 hours: job id, show date, ready, changes and open counts only", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const t = convexTest(schema, modules);
     const id = await verifyJob(t);
     await verifyJob(t, { jobId: "rj-running", status: "running", finishedAt: undefined });
-    await verifyJob(t, { jobId: "rj-old", finishedAt: NOW - 49 * HOUR });
+    await verifyJob(t, { jobId: "rj-old", createdAt: NOW - 49 * HOUR });
     await verifyJob(t, { jobId: "rj-demo", workspace: "demo" });
     await verifyJob(t, { jobId: "rj-notes", kind: "show-notes", lines: undefined });
+    const byId = (rows: { jobId: string }[]) => Object.fromEntries(rows.map((r) => [r.jobId, r]));
     const ready = await t.query(api.publisher.researchReady, { token: PUB });
-    expect(ready).toEqual([{ jobId: id, showDate: "2026-10-30", changes: 1, open: 1 }]);
+    expect(byId(ready)).toEqual({
+      [id]: { jobId: id, showDate: "2026-10-30", ready: true, changes: 1, open: 1 },
+      "rj-running": { jobId: "rj-running", showDate: "2026-10-30", ready: false, changes: 1, open: 1 },
+    });
     expect(JSON.stringify(ready)).not.toMatch(/Lisbon|Label A|private/);
-    // The running one is listed once it finishes.
+    // The running one is ready once it finishes; a done one sent back to queued (Regenerate) stays listed, not ready.
     await t.run(async (ctx) => {
       const j = (await ctx.db.query("research").withIndex("by_jobId", (q) => q.eq("jobId", "rj-running")).unique())!;
       await ctx.db.patch(j._id, { status: "done", finishedAt: NOW });
+      const k = (await ctx.db.query("research").withIndex("by_jobId", (q) => q.eq("jobId", id)).unique())!;
+      await ctx.db.patch(k._id, { status: "queued", finishedAt: undefined });
     });
-    expect((await t.query(api.publisher.researchReady, { token: PUB })).map((r: { jobId: string }) => r.jobId).sort()).toEqual([id, "rj-running"]);
+    const after = byId(await t.query(api.publisher.researchReady, { token: PUB }));
+    expect([after[id]?.ready, after["rj-running"]?.ready]).toEqual([false, true]);
   });
 });
 

@@ -6,7 +6,7 @@ import { requeueStuckUpdates } from "./descriptionUpdates";
 import { gateFor, viaGate } from "./gate";
 import { writeMixcloudStatus } from "./mixcloud";
 import { activeEmbargoes, embargoProblems, markPlayed } from "./radar";
-import { finishedVerifyCounts } from "./research";
+import { recentVerifyJobs } from "./research";
 import { mixcloudStatusFields } from "./schema";
 
 // The publisher service on the VM is the only caller. Every function checks PUBLISHER_TOKEN first, in constant
@@ -127,14 +127,15 @@ export const awaitingReview = query({
 const READY_WINDOW_MS = 48 * 3_600_000;
 
 /**
- * Plan 7: pre-air checks finished in the last 48 hours (real workspace only), as `{ jobId, showDate, changes, open }`.
- * The publisher sends one Telegram line per job with a link to the report in the signed-in console; never its text.
+ * Plan 7: pre-air checks started in the last 48 hours (real workspace only), as `{ jobId, showDate, ready, changes,
+ * open }`. The publisher sends one Telegram line per ready job with a link to the report in the signed-in console;
+ * never its text.
  */
 export const researchReady = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     requirePublisher(token);
-    return finishedVerifyCounts(ctx, Date.now() - READY_WINDOW_MS);
+    return recentVerifyJobs(ctx, Date.now() - READY_WINDOW_MS);
   },
 });
 

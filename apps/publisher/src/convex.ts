@@ -4,8 +4,8 @@ import { anyApi, type FunctionReference } from "convex/server"; // untyped on pu
 
 export interface QueueItem { packageId: string; showDate: string; decidedAt?: string; draft: PackageDraft; fingerprint?: string; coverStorageId?: string }
 export interface ReviewItem { packageId: string; title: string; trackCount: number; flagCount: number }
-/** Plan 7: a finished pre-air check. Counts only, never the report's text. */
-export interface ResearchItem { jobId: string; showDate: string; changes: number; open: number }
+/** Plan 7: a pre-air check from the last 48 hours; `ready` once it is done. Counts only, never the report's text. */
+export interface ResearchItem { jobId: string; showDate: string; ready: boolean; changes: number; open: number }
 /** Hard Rule 2: state, account name, time and a short error code. Never a credential. */
 export interface MixcloudStatus { state: "connected" | "needs_reconnect" | "not_connected"; account?: string; connectedAt?: number; lastError?: string }
 /** Plan 5c Task 4: an approved description update, claimed (now pushing). `showUrl` is the package's own receipt URL. */

@@ -1,4 +1,5 @@
 import type { AgentPackageInput, ClaimKind, ResolvedSource } from "@aircheck/core";
+import { ConvexError } from "convex/values";
 
 export const MIN_TOKEN_LENGTH = 32;
 
@@ -16,6 +17,17 @@ function sameBytes(a: string, b: string): boolean {
 export function sameToken(given: string, expected: string | undefined): boolean {
   if (!expected || expected.length < MIN_TOKEN_LENGTH) return false;
   return sameBytes(given, expected);
+}
+
+/**
+ * The ingest service's check (Plan 6), here beside sameToken so ingest.ts and radar.ts share it without importing each
+ * other's modules. INGEST_TOKEN in constant time; fails closed when unset or shorter than 32 characters. A token equal
+ * to another service's or the agent's would let one act as the other, so that refuses everything too (M7).
+ */
+export function requireIngest(token: string): void {
+  const { INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN } = process.env;
+  const shared = [MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN].includes(INGEST_TOKEN);
+  if (shared || !sameToken(token, INGEST_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 export function tokenMatches(header: string | null, expected: string | undefined): boolean {

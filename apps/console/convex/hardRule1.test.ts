@@ -171,6 +171,8 @@ test("the research routes each run one ctx.runMutation to their own function, an
   expect(research).toMatch(/export const playContext = internalAction\(/);
   expect([...research.matchAll(/\bfetch\b/g)]).toHaveLength(research.match(/lastPlayed\(fetch, /g)?.length ?? -1);
   expect(research.match(/lastPlayed\(fetch, /g)).toHaveLength(1);
+  // No import cycle: ingest.ts reads research.ts (Air Check notes for a draft), so research.ts and radar.ts never import ingest.ts.
+  for (const name of ["research", "radar"]) expect(src(name), `${name}.ts imports ingest`).not.toMatch(/from "\.\/ingest"/);
 });
 
 test("packages.revise (the agent's) calls only gateFor(ctx).revise, after the workspace check", () => {

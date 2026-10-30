@@ -2,24 +2,16 @@ import { episodeStatus, formatTracklist } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { sameToken } from "./agentSubmit";
+import { requireIngest } from "./agentSubmit";
 import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, inScope, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
 import { draftNotesFromResearch } from "./research";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
-import { MAX_NOTES, queueDraft } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES, queueDraft } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
-// INGEST_TOKEN first, in constant time, and fails closed when it is unset or shorter than 32 characters. A token equal
-// to another service's or the agent's would let one act as the other, so that refuses everything too (M7).
+// INGEST_TOKEN first (requireIngest, in agentSubmit.ts beside sameToken), in constant time, and fails closed.
 // Hard Rule 1: nothing here reaches a package. requestDraft only queues the Tracklist page's draft-package run: the agent
 // drafts, Tarik approves. Hard Rule 2: the episode shape has no field for a credential or a URL.
-export function requireIngest(token: string): void {
-  const { INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN } = process.env;
-  const shared = [MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN].includes(INGEST_TOKEN);
-  if (shared || !sameToken(token, INGEST_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
-}
-
-export const MAX_NOTES_BYTES = 65_536;
 const MAX_TRACKS = 100;
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
