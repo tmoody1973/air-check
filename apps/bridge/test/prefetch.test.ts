@@ -397,3 +397,71 @@ describe("second search (Oct 30: interviews, reviews, samples)", () => {
     expect(s.searched).toHaveLength(3);
   });
 });
+
+describe("a deep dive's brief (Oct 30, decision 023: five searches on the subject)", () => {
+  const Q = ["Tell me about the artist Artist 7", "Artist 7 biography early life origins", "Artist 7 interview", "Artist 7 discography albums reviews", "Artist 7 influences samples legacy"];
+  const brief = { key: "brief", query: Q[0], query2: Q[1], extra: Q.slice(2) };
+  const LABELS = ["Overview", "Biography", "Interviews", "Records and reviews", "Influences and legacy"];
+  const tavily: Handler = (b) => {
+    const i = Q.indexOf(String(b.query));
+    return json(200, { results: [page(7, { title: `Artist 7 page ${i + 1}`, url: `https://site${i + 1}.example/7` })], usage: { credits: 2 } });
+  };
+
+  it("runs all five in one batch and returns every one under its label, never echoing a query", async () => {
+    const s = setup({ plan: () => json(200, { tracks: [brief], embargoed: [] }), tavily });
+    const out = textOf(await s.call("brief"));
+    expect(out.split("\n")[0]).toBe("Searches for the brief, run by Air Check when the job started (5 of 5 returned results).");
+    LABELS.forEach((label, i) => {
+      expect(out).toContain(`Search ${i + 1}: ${label}`);
+      expect(out).toMatch(new RegExp(`^\\[S[0-9a-z]{5}\\] Artist 7 page ${i + 1} · site${i + 1}\\.example$`, "m"));
+    });
+    for (const q of Q) expect(out).not.toContain(q);
+    await settle();
+    expect(s.searched.sort()).toEqual([...Q].sort());
+    expect(logs).toContainEqual(expect.stringMatching(/^prefetch searches=5 ok=5 failed=0 capped=0 timeouts=0 ms=\d+ credits=10$/));
+    for (const line of logs) for (const q of Q) expect(line).not.toContain(q);
+  });
+
+  it("a failed search is left out and counted in the first line; all failed is the first one's sentence", async () => {
+    const some = setup({ plan: () => json(200, { tracks: [brief], embargoed: [] }), tavily: (b) => (String(b.query) === Q[2] ? json(400, {}) : tavily(b)) });
+    const out = textOf(await some.call("brief"));
+    expect(out.split("\n")[0]).toBe("Searches for the brief, run by Air Check when the job started (4 of 5 returned results).");
+    expect(out).not.toContain("Search 3: Interviews");
+    expect(out).toContain("Search 4: Records and reviews");
+    const none = setup({ plan: () => json(200, { tracks: [brief], embargoed: [] }), tavily: () => json(400, {}) });
+    const r = await none.call("brief");
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toContain("Web search failed (HTTP 400).");
+  });
+
+  it("research_submit's gate refuses the brief until first_search(brief) was read; an embargoed brief is never searched or gated", async () => {
+    const s = setup({ plan: () => json(200, { tracks: [brief], embargoed: [] }), tavily });
+    await s.t.prefetch(JOB);
+    await settle();
+    expect(await s.gate("brief")).toBe("Call first_search for brief first; its results are ready.");
+    await s.call("brief");
+    expect(await s.gate("brief")).toBeNull();
+    const held = setup({ plan: () => json(200, { tracks: [], embargoed: ["brief"] }), tavily });
+    expect(await held.gate("brief")).toBeNull();
+    expect(textOf(await held.call("brief"))).toBe(EMBARGOED_SEARCH_REFUSAL);
+    expect(held.searched).toEqual([]);
+  });
+
+  it("lets the brief through when every one of its searches failed or the cap ran out", async () => {
+    const s = setup({ plan: () => json(200, { tracks: [brief], embargoed: [] }), usage: () => json(200, { allowed: false, used: 20, cap: 20 }) });
+    await s.t.prefetch(JOB);
+    await settle();
+    expect(await s.gate("brief")).toBeNull();
+  });
+
+  it("a plan's extra must be a list of text: anything else is dropped as a bad track; more than five extra are cut to five", async () => {
+    const bad = setup({ plan: () => json(200, { tracks: [{ ...brief, extra: "Artist 7 interview" }], embargoed: [] }), tavily });
+    await bad.t.prefetch(JOB);
+    await settle();
+    expect(bad.searched).toEqual([]);
+    const many = setup({ plan: () => json(200, { tracks: [{ ...brief, extra: [...Q.slice(2), "Artist 7 a", "Artist 7 b", "Artist 7 c"] }], embargoed: [] }), tavily });
+    await many.t.prefetch(JOB);
+    await settle();
+    expect(many.searched).toHaveLength(7);
+  });
+});

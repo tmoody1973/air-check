@@ -5,6 +5,7 @@ import {
   chicagoDayKey,
   agentEmbargoLines,
   bandcampArtUrl,
+  bandcampPageForTitle,
   bandcampTag,
   describeEmbargo,
   embargoHits,
@@ -14,6 +15,7 @@ import {
   isHostName,
   isShowDate,
   MAX_ABOUT_CHARS,
+  MAX_RELEASES,
   MAX_STORED_CHARS,
   MAX_TAGS,
   type ReleaseFields,
@@ -30,7 +32,7 @@ import { requireIngest } from "./agentSubmit";
 import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from "./schema";
 
 // Plan 8: the release radar. Forwarded email is untrusted data (Hard Rule 5). The one write an email may cause is its
-// own inbox row, at most one releases record (new or merged) with its queued player fetch, and the "links not followed"
+// own inbox row, its releases records (one, or up to 12 for a roundup, decision 024; new or merged) with their queued player fetches, and the "links not followed"
 // activity row. Nothing here reaches a package, a run or Mixcloud (Hard Rule 1), and nothing here fetches anything.
 // - The console's inbound route has one mutation, `received` (INBOX_TOKEN); the catch-up script also has `reparse`.
 // - The ingest worker has four: `pending`, `record`, `embedsWanted`, `embedResult` (INGEST_TOKEN).
@@ -124,7 +126,8 @@ const releaseFieldsV = v.object({
   embargo: v.optional(embargoV),
 });
 const outcomeV = v.union(
-  v.object({ kind: v.literal("saved"), release: releaseFieldsV }),
+  // Decision 024: a roundup's other releases ride in `more`; a one-release email has no `more`.
+  v.object({ kind: v.literal("saved"), release: releaseFieldsV, more: v.optional(v.array(releaseFieldsV)) }),
   v.object({ kind: v.union(v.literal("not-a-release"), v.literal("refused"), v.literal("failed")), reasons: v.array(v.string()) }),
 );
 type CleanMailArg = Infer<typeof cleanMailV>;
@@ -285,12 +288,27 @@ export const record = mutation({
     }
     // A release that breaks a rule is refused with the plain reason (body kept for Try again), never thrown: a throw
     // would leave the row at the head of pending for ever.
-    const problem = releaseProblem(outcome.release);
+    // Decision 024: a roundup is all or nothing, so Try again reads the same email whole.
+    const all = [outcome.release, ...(outcome.more ?? [])];
+    const problem = all.length > MAX_RELEASES ? `At most ${MAX_RELEASES} releases in one email` : all.map(releaseProblem).find((p) => p !== null);
     if (problem) {
       await ctx.db.patch(row._id, { state: "refused", reasons: [problem] });
       return {};
     }
-    const { releaseId, merged } = await saveRelease(ctx, row, outcome.release);
+    // The stored pages pass the URL rule again here: a page forged past the console queues nothing. One release takes
+    // the email's first page; in a roundup each release takes only the page whose slug is its own title.
+    const pages = row.bandcampPages ?? [];
+    const pageFor = (f: ReleaseFields) => (all.length === 1 ? (pages.map(bandcampPageUrl).find((p): p is string => p !== null) ?? null) : bandcampPageForTitle(pages, f.title));
+    const keys = new Set<string>();
+    const saves = [];
+    for (const f of all) {
+      const key = releaseKey(f.artist, f.title);
+      if (keys.has(key)) continue;
+      keys.add(key);
+      saves.push(await saveRelease(ctx, row, f, pageFor(f)));
+    }
+    const { releaseId } = saves[0]!;
+    const merged = saves.every((x) => x.merged);
     await ctx.db.patch(row._id, { state: merged ? "merged" : "saved", releaseId, body: undefined, reasons: undefined });
     return { releaseId, merged };
   },
@@ -304,11 +322,9 @@ function stricter(a: Embargo | undefined, b: Embargo | undefined): Embargo | und
 }
 
 /** One record per release key. A merge fills only empty fields Tarik has not edited and leaves status and tab alone. */
-async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields): Promise<{ releaseId: Id<"releases">; merged: boolean }> {
+async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, f: ReleaseFields, page: string | null): Promise<{ releaseId: Id<"releases">; merged: boolean }> {
   const key = releaseKey(f.artist, f.title);
   const sender = { ...row.sender, messageId: row.messageId, at: row.receivedAt };
-  // The stored page passes the URL rule again here: a page forged past the console queues nothing.
-  const page = (row.bandcampPages ?? []).map(bandcampPageUrl).find((p): p is string => p !== null);
   const queue = page ? { bandcampPage: page, embedState: "queued" as const, embedQueuedAt: Date.now() } : {};
   const cur = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
   if (!cur) {

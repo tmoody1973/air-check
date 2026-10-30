@@ -211,4 +211,20 @@ describe("researchInput", () => {
     expect(text).not.toContain("Closer Artist");
     expect(text).toContain(RESEARCH_SKILL_TEXT["deep-dive"]);
   });
+
+  it("Oct 30 (decision 023): a deep dive reads its five first searches, then writes an article of 10 to 28 facts, an infobox and connections", () => {
+    const text = researchInput({ jobId: "rj-dd0001", kind: "deep-dive", subject: { type: "artist", name: "[Artist A]" }, tracks, angles: true, searchesLeft: 20 });
+    expect(text).toContain('Air Check already ran five web searches on the subject: read them with first_search (job, key "brief") first; research_submit refuses the brief until you have.');
+    expect(text).toContain("Then fill gaps with Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes) and at most 4 more source_search.");
+    expect(text).toContain("10 to 28 section facts (kinds lead, origins, career, sound, records, legacy)");
+    expect(text).toContain('up to 8 of kind "infobox" (text = the field: Origin, Years active, Genres, Labels, Members, Founded, Founders, Released, Label, Producer; value = the value)');
+    expect(text).toContain('up to 3 of kind "connection"');
+    expect(text).toContain("At most 12 claims per block (the brief: at most 39).");
+    expect(text).toContain("fun-fact, lead, origins, career, sound, records, legacy, infobox.");
+    expect(text).not.toMatch(/5 to 8 facts/);
+    // A subject that names an embargo has no first searches: Crate only, as before (R2).
+    const held = researchInput({ jobId: "rj-dd0001", kind: "deep-dive", subject: { type: "artist", name: "Third Artist" }, tracks, angles: true, searchesLeft: 20, embargoes: [{ artist: "Third Artist", title: "Late", until: "2026-11-06" }] });
+    expect(held).not.toContain('read them with first_search (job, key "brief") first');
+    expect(held).toMatch(/Crate first/);
+  });
 });

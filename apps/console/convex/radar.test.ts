@@ -538,6 +538,88 @@ describe("pastePlayer (Oct 30: Bandcamp challenges the worker's page reads)", ()
     expect(await errorCode(t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE + " ".repeat(5_001) }))).toBe("BAD_INPUT");
     expect(await errorCode(t.withIdentity(demo).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE }))).toBe("FORBIDDEN");
     expect((await releases(t))[0]).not.toHaveProperty("embed");
+
+describe("roundups: several releases in one email (decision 024)", () => {
+  const A = "https://palesignal.bandcamp.com/album/glass-weather";
+  const B = "https://other.bandcamp.com/track/salt-light";
+  const roundup = (more: Record<string, unknown>[], release: Record<string, unknown> = {}) => ({ ...saved(release), more: more.map((m) => ({ artist: "Ferro Lane", ...m })) });
+
+  test("every release is saved with its own key, the email's sender and links; the inbox row points at the first", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail({ links: ["https://co-sign.example.invalid/release/1"] }));
+    const r = await record(t, "m1", roundup([{ artist: "Moses Boyd", title: "Album Two", type: "album" }, { artist: "Trish Toledo", title: "Single Six", type: "single" }]));
+    const rows = await releases(t);
+    expect(rows.map((x) => [x.artist, x.title, x.status, x.source])).toEqual([
+      ["Ferro Lane", "Glass Weather", "new", "cosign"],
+      ["Moses Boyd", "Album Two", "new", "cosign"],
+      ["Trish Toledo", "Single Six", "new", "cosign"],
+    ]);
+    for (const x of rows) expect(x.senders).toEqual([expect.objectContaining({ messageId: "m1" })]);
+    expect(await inboxRow(t, "m1")).toMatchObject({ state: "saved", releaseId: rows[0]!._id });
+    expect(r).toEqual({ releaseId: rows[0]!._id, merged: false });
+  });
+
+  test("a link goes only to the release whose title is its slug, whatever the order; a release with no match gets none", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail({ bandcampPages: [B, A] }));
+    await record(t, "m1", roundup([{ title: "Salt & Light" }, { title: "Nothing Linked" }]));
+    const by = Object.fromEntries((await releases(t)).map((x) => [x.title, x]));
+    expect(by["Glass Weather"]).toMatchObject({ bandcampPage: A, embedState: "queued" });
+    expect(by["Salt & Light"]).toMatchObject({ bandcampPage: B, embedState: "queued" });
+    expect(by["Nothing Linked"]).not.toHaveProperty("bandcampPage");
+    expect(by["Nothing Linked"]).not.toHaveProperty("embedState");
+  });
+
+  test("a roundup never hands one release's link to another, even when only one link is in the email", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail({ bandcampPages: [B] }));
+    await record(t, "m1", roundup([{ title: "Another One" }]));
+    for (const x of await releases(t)) expect(x).not.toHaveProperty("bandcampPage");
+  });
+
+  test("a single-release email keeps the first-link rule", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail({ bandcampPages: [B] }));
+    await record(t, "m1", saved({}));
+    expect((await releases(t))[0]).toMatchObject({ title: "Glass Weather", bandcampPage: B });
+  });
+
+  test("a release already on file merges as before; an email whose releases all merge reads merged", async () => {
+    const t = convexTest(schema, modules);
+    await savedRelease(t, "m1");
+    await savedRelease(t, "m2", mail(), { title: "Album Two" });
+    await received(t, "m3", mail());
+    await record(t, "m3", roundup([{ title: "Album Two", label: "Pale Signal" }]));
+    const rows = await releases(t);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ title: "Album Two", label: "Pale Signal", senders: [expect.objectContaining({ messageId: "m2" }), expect.objectContaining({ messageId: "m3" })] });
+    expect(await inboxRow(t, "m3")).toMatchObject({ state: "merged" });
+  });
+
+  test("the same release twice in one email is saved once", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail());
+    await record(t, "m1", roundup([{ title: "glass weather" }]));
+    expect(await releases(t)).toHaveLength(1);
+    expect((await releases(t))[0]!.senders).toHaveLength(1);
+  });
+
+  test("one release breaking a rule refuses the whole email (body kept); over 12 releases is refused", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail());
+    await record(t, "m1", roundup([{ title: "x".repeat(201) }]));
+    expect(await inboxRow(t, "m1")).toMatchObject({ state: "refused", body: mail().body });
+    await received(t, "m2", mail());
+    await record(t, "m2", roundup(Array.from({ length: 12 }, (_, i) => ({ title: `T${i}` }))));
+    expect(await inboxRow(t, "m2")).toMatchObject({ state: "refused", reasons: ["At most 12 releases in one email"] });
+    expect(await releases(t)).toEqual([]);
+  });
+
+  test("a forged key inside a roundup release fails validation", async () => {
+    const t = convexTest(schema, modules);
+    await received(t, "m1", mail());
+    expect(await errorCode(record(t, "m1", roundup([{ title: "B", status: "played" }])))).not.toBe("no error");
+    expect(await releases(t)).toEqual([]);
   });
 });
 

@@ -20,6 +20,7 @@ const KIND_WORDS: Record<JudgedClaim["kind"], string> = {
   release: "release", "release-date": "release date", label: "label", credit: "credit", "track-number": "track number",
   length: "length", bio: "bio", detail: "detail", thread: "thread", connection: "connection",
   chart: "chart", story: "story", song: "song", samples: "samples", video: "video", "fun-fact": "fun fact",
+  lead: "lead", origins: "origins", career: "career", sound: "sound", records: "records", legacy: "legacy", infobox: "infobox",
 };
 const verifyChip = (c: JudgedClaim) => `[verify] ${KIND_WORDS[c.kind]}: ${c.status === "conflict" ? "sources disagree" : "could not verify"}`;
 const BTN = "inline-flex min-h-11 items-center whitespace-nowrap rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold hover:bg-surface-quiet disabled:text-muted";

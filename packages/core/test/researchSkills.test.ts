@@ -64,3 +64,28 @@ describe("rlr-show-notes (Oct 29)", () => {
     expect(entry(skill)).toBe(entry(md));
   });
 });
+
+describe("rlr-deep-dive (Oct 30, decision 023: an article, not bullets)", () => {
+  const skill = RESEARCH_SKILL_TEXT["deep-dive"];
+
+  it("reads the five first searches, identifies the subject, and writes encyclopedia prose in the article's sections", () => {
+    expect(skill).toContain('`first_search` with the job and key `brief`');
+    expect(skill).toContain("MusicBrainz");
+    expect(skill).toMatch(/neutral, third person, past tense for history/);
+    expect(skill).toContain("15 to 28 section facts");
+    for (const kind of ["lead", "origins", "career", "sound", "records", "legacy", "infobox", "connection"]) expect(skill).toContain(`\`${kind}\``);
+    expect(skill).toContain("Never research the closing track");
+    expect(skill).not.toMatch(/Five to eight short facts/);
+  });
+
+  it("its worked example is valid claim JSON: two origins sentences citing [S…] ids", () => {
+    const example = skill.match(/```json\n([\s\S]*?)\n```/)![1]!;
+    const claims = JSON.parse(example) as { kind: string; text: string; sources: { id: string }[] }[];
+    expect(claims).toHaveLength(2);
+    for (const c of claims) {
+      expect(c.kind).toBe("origins");
+      expect(c.text.length).toBeLessThanOrEqual(300);
+      expect(c.sources[0]!.id).toMatch(/^S[0-9a-z]{5}$/);
+    }
+  });
+});

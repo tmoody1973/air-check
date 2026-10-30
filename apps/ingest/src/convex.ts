@@ -94,7 +94,7 @@ export interface IngestConvex {
 /** Plan 8: one stored email as radar.pending returns it. The body is cleaned text: no link, no address. */
 export interface PendingEmail { messageId: string; tab: RadarTab; subject: string; body: string; receivedAt: number }
 /** Mirrors outcomeV in apps/console/convex/radar.ts: any other key is refused by its validator. */
-export type RadarOutcome = { kind: "saved"; release: ReleaseFields } | { kind: "not-a-release" | "refused" | "failed"; reasons: string[] };
+export type RadarOutcome = { kind: "saved"; release: ReleaseFields; more?: ReleaseFields[] } | { kind: "not-a-release" | "refused" | "failed"; reasons: string[] };
 /** Mirrors embedResult's validator: the player id, and (Task 6b) the page's art, tags, about and release date from the same fetch. */
 export type EmbedOutcome = (BandcampEmbed & BandcampDetails) | { failed: string };
 /** The radar code's only Convex calls (Plan 8 Global Constraints): radar.pending, record, embedsWanted, embedResult. */

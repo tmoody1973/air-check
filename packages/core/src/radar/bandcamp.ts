@@ -1,3 +1,4 @@
+import { foldText } from "./extract";
 export const BANDCAMP_DOMAIN = "bandcamp.com";
 
 const HOST = /^(?:[a-z0-9-]+\.)*bandcamp\.com$/;
@@ -23,6 +24,24 @@ export function bandcampPageUrl(raw: string): string | null {
   if (!HOST.test(u.hostname)) return null;
   const m = u.pathname.match(PAGE_PATH);
   return m ? `https://${u.hostname}/${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * Decision 024: a title as Bandcamp writes it in a page's URL: apostrophes dropped, accents folded, any other run of
+ * punctuation or space one hyphen ("Don't Look Back" -> dont-look-back, "Salt & Light" -> salt-light).
+ */
+export function bandcampSlug(title: string): string {
+  return foldText(title.replace(/['\u2019]/g, "")).replace(/ /g, "-");
+}
+
+/**
+ * The page among an email's Bandcamp links whose /album|track/<slug> is this title's slug, or null. A roundup's link
+ * goes only to its own release, never to another one in the same email.
+ */
+export function bandcampPageForTitle(pages: string[], title: string): string | null {
+  const slug = bandcampSlug(title);
+  if (!slug) return null;
+  return pages.map(bandcampPageUrl).find((p): p is string => p !== null && p.slice(p.lastIndexOf("/") + 1) === slug) ?? null;
 }
 
 export type BandcampEmbed = { kind: "album" | "track"; id: string };

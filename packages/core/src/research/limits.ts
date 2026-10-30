@@ -9,9 +9,13 @@ export const LIMITS = {
   angle: 140,
   note: 300,
   replacement: 600,
-  deepDiveFactsMin: 5,
-  deepDiveFactsMax: 8,
+  /** Oct 30 (decision 023): a deep dive's brief is an article: 10 to 28 section facts, an infobox and connections. */
+  briefFactsMin: 10,
+  briefFactsMax: 28,
+  infoboxMax: 8,
   connectsMax: 3,
+  /** The brief's claim cap in place of claimsPerBlock: briefFactsMax + infoboxMax + connectsMax. */
+  briefClaims: 39,
   /** A source's text the ledger keeps for code's fact check: Tavily's chunks plus the page's plain text (Oct 29). */
   sourceText: 8_000,
   /** The ingest service's MAX_NOTES_BYTES. */
