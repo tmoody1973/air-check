@@ -68,12 +68,17 @@ describe("BandcampPlayer", () => {
     expect(embedErrorText("http_404")).toContain("404");
   });
 
-  it("demo: a bracketed placeholder with the Sample tag, never an iframe, even with an embed", () => {
-    const { container } = render(<BandcampPlayer {...base} demo embed={{ kind: "album", id: "1" }} embedState="ready" />);
+  it("demo, bracketed sample (no player id): the placeholder with the Sample tag, never an iframe", () => {
+    const { container } = render(<BandcampPlayer {...base} demo />);
     expect(screen.getByText("[Bandcamp player]")).toBeInTheDocument();
     expect(screen.getByText("Sample")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).toBeNull();
     expect(container.querySelector("iframe")).toBeNull();
+  });
+
+  it("demo, a real released sample with a player id (decision 026): Play on Bandcamp, like the station's", () => {
+    render(<BandcampPlayer {...base} demo embed={{ kind: "album", id: "3847473100" }} embedState="ready" />);
+    expect(screen.getByRole("button", { name: "Play on Bandcamp" })).toBeInTheDocument();
+    expect(screen.queryByText("[Bandcamp player]")).toBeNull();
   });
 
   it("no Bandcamp page at all: nothing", () => {

@@ -159,6 +159,12 @@ describe("Play", () => {
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
   });
 
+  it("demo row with a real player and cover (decision 026): the real cover and Bandcamp's player", () => {
+    setup(rel({ workspace: "demo", art: "https://f4.bcbits.com/img/a1792156796_5.jpg", embed: { kind: "album", id: "3847473100" }, embedState: "ready" }), { demo: true, playing: "r1" });
+    expect(document.querySelector("img")?.getAttribute("src")).toBe("https://f4.bcbits.com/img/a1792156796_5.jpg");
+    expect(document.querySelector("iframe")?.getAttribute("src")).toContain("album=3847473100");
+  });
+
   it("demo Bandcamp row: Play opens the bracketed placeholder, never a real player", () => {
     setup(rel({ workspace: "demo" }), { demo: true, playing: "r1" });
     expect(screen.getByText("[Bandcamp player]")).toBeInTheDocument();
@@ -307,12 +313,12 @@ describe("art, tags, about and favorite", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("demo: a bracketed placeholder on a Bandcamp row, never the image; none on a co-sign", () => {
-    setup(rel(page), { demo: true });
+  it("demo: a bracketed sample (no real cover) gets the placeholder; none on a co-sign", () => {
+    setup(rel({ ...page, art: undefined }), { demo: true });
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("[Cover art]")).toBeInTheDocument();
     cleanup();
-    setup(rel({ ...page, source: "cosign" }), { demo: true });
+    setup(rel({ ...page, art: undefined, source: "cosign" }), { demo: true });
     expect(screen.queryByText("[Cover art]")).toBeNull();
   });
 
