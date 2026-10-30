@@ -11,6 +11,12 @@
 
 **What we chose and why.** A. Claude proposed it; the brief (Tarik's coordinator, Oct 29) asked for code-run, parallel first searches with Tavily's batch settings. It reuses what exists: the same search client, the same source ledger and ids, the same daily cap and embargo check in Convex (each prefetched search is counted and checked exactly like a `source_search`). It adds two small Convex routes: a read-only one that lists the job's tracks to search, and one that gives back failed searches (only successful ones count against the cap) and records the Tavily credits each answer reports, shown in Settings.
 
+**Addendum (Oct 29, 23:00): the model is not trusted to ask.** In a live run at 22:33 with the new prompt, the agent made one web search in 20 minutes and went to MusicBrainz instead, despite the prompt. So two changes, the coordinator's call, built by Claude:
+- **The relay starts the batch.** As the relay (the service that hands runs to the agent, on the same machine as the bridge) starts a research run, it calls the bridge's new `<route>/prefetch` address with the job id, using that route's existing MCP token. It is not an agent tool. The agent's own first call stays as the fallback.
+- **Code makes the agent read it.** `research_submit` refuses a show-notes track ("Call first_search for H1.2 first; its results are ready.") until `first_search` has returned that track's results in this job, unless its search failed, the cap ran out or the track is embargoed. Intros and threads are never held.
+- **Smaller results.** `first_search` shows ids, titles, dates and up to 1,200 characters of chunks per result, no URLs: about 8 KB a track at most, against about 12 KB before.
+- Cost: the relay now holds the two bridge MCP tokens (it could call any agent tool; it is our own code on the same machine), and a refused submit costs the agent a turn the first time it skips.
+
 **What we gave up.**
 - The agent still spends one tool call per track reading its results. A per-hour call would save turns but put about 170 KB in one message.
 - The batch is kept in the bridge's memory for 12 hours. A bridge restart forgets it, and the next call searches again (counted against the cap again).
