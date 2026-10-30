@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { api } from "../../../../convex/_generated/api";
+import { BookmarkletSetup } from "@/components/BookmarkletLink";
 import { MixcloudConnection, noticeFrom } from "@/components/MixcloudConnection";
 import { Shell, useWorkspace } from "@/components/Shell";
 import { SourceConnections, SourceNotice, sourceNoticeFrom } from "@/components/SourceConnections";
@@ -44,6 +45,7 @@ function SettingsBody() {
       </div>
       <SourceConnections sources={sources} workspace={workspace} />
       <WebSearchUsage />
+      {workspace === "real" && <BookmarkletSetup boxed />}
     </div>
   );
 }

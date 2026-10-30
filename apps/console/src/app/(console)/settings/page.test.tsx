@@ -10,7 +10,7 @@ vi.mock("../../../../convex/_generated/api", () => ({
   api: { mixcloud: { get: "mixcloud.get" }, episodes: { sources: "episodes.sources" }, research: { searchUsage: "research.searchUsage" } },
 }));
 vi.mock("@/components/Shell", () => ({ Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, useWorkspace: () => "real" }));
-vi.mock("@/components/MixcloudConnection", () => ({ MixcloudConnection: () => null, noticeFrom: () => undefined }));
+vi.mock("@/components/MixcloudConnection", async (orig) => ({ ...(await orig<object>()), MixcloudConnection: () => null, noticeFrom: () => undefined }));
 vi.mock("@/components/SourceConnections", () => ({ SourceConnections: () => null, SourceNotice: () => null, sourceNoticeFrom: () => undefined }));
 
 import SettingsPage from "./page";
@@ -35,5 +35,14 @@ describe("Settings web search row (Plan 7)", () => {
     results["research.searchUsage"] = { used: 28, cap: 100, credits: 56 };
     render(<SettingsPage />);
     expect(screen.getByText("28 of 100 searches used today · 56 credits")).toBeInTheDocument();
+  });
+});
+
+describe("Settings: the Send to Air Check bookmarklet (Oct 30)", () => {
+  it("shows the draggable button with a javascript: href for the real workspace", () => {
+    results["research.searchUsage"] = { used: 0, cap: 100 };
+    render(<SettingsPage />);
+    expect(screen.getByText("Bandcamp players and covers")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Send to Air Check" }).getAttribute("href")).toMatch(/^javascript:/);
   });
 });

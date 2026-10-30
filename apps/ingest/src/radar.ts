@@ -1,4 +1,4 @@
-import { checkExtractions, EXTRACTION_SKILL_TEXT, MAX_EMAIL_CHARS, parseBandcampEmail, type Extractions } from "@aircheck/core";
+import { checkExtractions, EXTRACTION_SKILL_TEXT, MAX_EMAIL_CHARS, parseBandcampEmail, stripLinks, type Extractions } from "@aircheck/core";
 import type { PendingEmail, RadarConvex, RadarOutcome } from "./convex.js";
 import type { Http } from "./http.js";
 import { chatJson, type ChatFailure } from "./tokenFactory.js";
@@ -47,7 +47,11 @@ export async function radarPass(deps: RadarDeps): Promise<void> {
 /** One email's outcome; `code` is the Token Factory client's short failure code, for the log only. */
 async function read(deps: RadarDeps, email: PendingEmail): Promise<{ outcome: RadarOutcome; code?: ChatFailure }> {
   // The same text goes to the model and to checkExtraction, so every field is grounded in what the model saw.
-  const text = `Subject: ${email.subject}\n\n${email.body}`.slice(0, MAX_EMAIL_CHARS);
+  const raw = `Subject: ${email.subject}\n\n${email.body}`.slice(0, MAX_EMAIL_CHARS);
+  // Convex never stores :// or @, so one here is a bug upstream: refuse. A www. form the stripper missed when the email
+  // was stored (Oct 30: a forward's "www. co-sign. com") is stripped again, so Try again reads it.
+  if (/:\/\/|@/.test(raw)) return { outcome: { kind: "refused", reasons: [STILL_LINKED] } };
+  const text = stripLinks(raw).text;
   if (LINKISH.test(text)) return { outcome: { kind: "refused", reasons: [STILL_LINKED] } };
   let candidate: unknown = email.tab === "bandcamp" ? parseBandcampEmail(email.subject, email.body) : null;
   if (!candidate) {

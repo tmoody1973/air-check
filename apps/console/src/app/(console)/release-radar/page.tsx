@@ -77,7 +77,7 @@ function RadarBody() {
 function BookmarkletHint() {
   return useWorkspace() === "real" ? (
     <p className="mt-6 text-sm text-ink-soft">
-      No player or cover? <Link href="/release-radar/attach" className="underline">Get the Send to Air Check button</Link> for Bandcamp pages.
+      No player or cover? <Link href="/settings" className="underline">Get the Send to Air Check button in Settings</Link> for Bandcamp pages.
     </p>
   ) : null;
 }
