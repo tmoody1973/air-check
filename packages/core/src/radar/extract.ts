@@ -240,6 +240,46 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
   };
 }
 
+/** A roundup names at most this many releases (decision 024). */
+export const MAX_RELEASES = 12;
+
+export type Extractions = { ok: true; releases: ReleaseFields[]; notes: string[] } | { ok: false; notRelease: true } | { ok: false; reasons: string[] };
+
+/**
+ * Decision 024: the reader's answer for one email, which may name several releases (`{ "releases": [...] }`) or one (the
+ * old single object). Each release passes checkExtraction on its own; a roundup keeps the grounded ones (a dropped one is
+ * counted in a note, never named), drops repeats by release key and stops at 12. None grounded: refused with the first
+ * one's reasons. An empty list is not a release.
+ */
+export function checkExtractions(candidate: unknown, emailText: string, receivedAt: number): Extractions {
+  const list = candidate && typeof candidate === "object" && !Array.isArray(candidate) ? (candidate as Record<string, unknown>).releases : undefined;
+  if (list === undefined) {
+    const one = checkExtraction(candidate, emailText, receivedAt);
+    return one.ok ? { ok: true, releases: [one.release], notes: one.notes } : one;
+  }
+  if (!Array.isArray(list)) return { ok: false, reasons: ["The reader's list of releases was not a list"] };
+  if (list.length === 0) return { ok: false, notRelease: true };
+  const checked = list.slice(0, MAX_RELEASES * 2).map((c) => checkExtraction(c, emailText, receivedAt));
+  const keys = new Set<string>();
+  const releases: ReleaseFields[] = [];
+  const notes: string[] = [];
+  for (const x of checked) {
+    if (!x.ok || releases.length >= MAX_RELEASES) continue;
+    const key = releaseKey(x.release.artist, x.release.title);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    releases.push(x.release);
+    notes.push(...x.notes);
+  }
+  if (!releases.length) {
+    const first = checked.find((x) => !x.ok && "reasons" in x);
+    return first && !first.ok && "reasons" in first ? first : { ok: false, notRelease: true };
+  }
+  const dropped = checked.filter((x) => !x.ok).length;
+  if (dropped) notes.push(`${dropped} release${dropped === 1 ? " was" : "s were"} left out: not found in the email.`);
+  return { ok: true, releases, notes };
+}
+
 function embargoOf(model: unknown, code: { until: string | null } | null, dates: string[], notes: string[]): { until: string | null } | undefined {
   // Any signal at all counts (fail safe); only undefined, null and false mean "none".
   const modelFound = model !== undefined && model !== null && model !== false;

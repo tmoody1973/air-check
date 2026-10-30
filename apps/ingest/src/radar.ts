@@ -1,4 +1,4 @@
-import { checkExtraction, EXTRACTION_SKILL_TEXT, MAX_EMAIL_CHARS, parseBandcampEmail, type Extraction } from "@aircheck/core";
+import { checkExtractions, EXTRACTION_SKILL_TEXT, MAX_EMAIL_CHARS, parseBandcampEmail, type Extractions } from "@aircheck/core";
 import type { PendingEmail, RadarConvex, RadarOutcome } from "./convex.js";
 import type { Http } from "./http.js";
 import { chatJson, type ChatFailure } from "./tokenFactory.js";
@@ -26,7 +26,7 @@ const MAX_REASON = 300;
 /**
  * Plan 8: turn stored emails into releases, one at a time. Bandcamp's template is read in code; anything else goes to
  * the extractor (one no-tools Token Factory call whose input is the cleaned text only). Every answer is checked by
- * checkExtraction, and each email gets exactly one recorded outcome. Hard Rule 8: the log carries counts and states only.
+ * checkExtractions (each release on its own), and each email gets exactly one recorded outcome. Hard Rule 8: the log carries counts and states only.
  */
 export async function radarPass(deps: RadarDeps): Promise<void> {
   for (const email of await deps.convex.pending()) {
@@ -56,11 +56,15 @@ async function read(deps: RadarDeps, email: PendingEmail): Promise<{ outcome: Ra
     if ("code" in answer) return { outcome: { kind: "failed", reasons: [NO_ANSWER] }, code: answer.code };
     candidate = answer.json;
   }
-  return { outcome: outcomeOf(checkExtraction(candidate, text, email.receivedAt)) };
+  return { outcome: outcomeOf(checkExtractions(candidate, text, email.receivedAt)) };
 }
 
-function outcomeOf(x: Extraction): RadarOutcome {
-  if (x.ok) return { kind: "saved", release: x.release };
+// Decision 024: a roundup's other releases ride in `more`; a one-release email keeps the old two-key outcome.
+function outcomeOf(x: Extractions): RadarOutcome {
+  if (x.ok) {
+    const [release, ...more] = x.releases;
+    return { kind: "saved", release: release!, ...(more.length && { more }) };
+  }
   if ("notRelease" in x) return { kind: "not-a-release", reasons: [NOT_A_RELEASE] };
   return { kind: "refused", reasons: x.reasons.slice(0, MAX_REASONS).map((r) => r.slice(0, MAX_REASON)) };
 }

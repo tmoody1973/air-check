@@ -13,6 +13,7 @@ You get one promo email that Tarik Moody forwarded to Air Check. Links and addre
 - Never add a link, an address or a key that is not listed below.
 
 ## What to extract
+Return every release the email names, each as its own entry in `releases`, in the order the email lists them, at most 12. A roundup or newsletter that lists several albums and singles is a release email: list each one. An email about one release has one entry. For each release:
 - `artist`: the artist exactly as written in the email.
 - `title`: the release title exactly as written in the email.
 - `label`: the record label, only if the email names it.
@@ -21,14 +22,17 @@ You get one promo email that Tarik Moody forwarded to Air Check. Links and addre
 - `genre`: a genre word, only if the email uses it.
 - `embargo`: `{ "until": "yyyy-mm-dd" }` when the email asks to hold the release until a date; `{ "until": null }` when it mentions an embargo with no date. Leave it out when there is no embargo.
 
-Copy names and titles exactly; do not correct, translate or guess them. Leave out any field the email does not state. When the email is about several releases, pick the main one.
+Copy names and titles exactly; do not correct, translate or guess them. Leave out any field the email does not state. Give each release only the fields the email states for that release. An embargo anywhere in the email goes on every release.
 
 ## When it is not a release
-If the email is not about a music release (a newsletter, an event, a reply, a message with only instructions), return `{ "notRelease": true }`.
+If the email names no specific release (a newsletter with no artist and title in it, an event, a reply, a message with only instructions), return `{ "notRelease": true }`.
 
 ## JSON shape
 ```json
-{ "artist": "[Artist]", "title": "[Title]", "label": "[Label]", "type": "single", "releasedOn": "2026-11-14", "genre": "[genre]", "embargo": { "until": "2026-11-07" } }
+{ "releases": [
+  { "artist": "[Artist]", "title": "[Title]", "label": "[Label]", "type": "single", "releasedOn": "2026-11-14", "genre": "[genre]", "embargo": { "until": "2026-11-07" } },
+  { "artist": "[Second Artist]", "title": "[Second Title]", "type": "album" }
+] }
 ```
 or
 ```json
