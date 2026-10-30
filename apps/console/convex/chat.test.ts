@@ -200,4 +200,13 @@ describe("runs.requestStop", () => {
     await expect(t.mutation(api.runs.requestStop, { runId })).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
     expect((await all(t, "runs"))[0]).toMatchObject({ status: "queued" });
   });
+
+  test("in the demo, only the visitor who started a run can stop it; another visitor gets NOT_FOUND", async () => {
+    const t = convexTest(schema, modules);
+    const { runId } = await t.withIdentity(demo({ sid: "s1" })).mutation(api.chat.send, { text: "a" });
+    await expect(t.withIdentity(demo({ sid: "s2" })).mutation(api.runs.requestStop, { runId })).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
+    expect((await all(t, "runs"))[0]).toMatchObject({ status: "queued" });
+    await t.withIdentity(demo({ sid: "s1" })).mutation(api.runs.requestStop, { runId });
+    expect((await all(t, "runs"))[0]).toMatchObject({ status: "cancelled" });
+  });
 });

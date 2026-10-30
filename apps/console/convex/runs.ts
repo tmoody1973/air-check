@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import { sessionKeyOf } from "./demoLimits";
 import { actorOf, workspaceOf } from "./gate";
 import { sourceOf, statusOf } from "./runDefaults";
 
@@ -37,13 +38,14 @@ export async function stopRun(ctx: MutationCtx, run: Doc<"runs">): Promise<void>
   }
 }
 
-/** Stop button. */
+/** Stop button. In the demo only the visitor who started the run may stop it (the same rule as research's ownJob). */
 export const requestStop = mutation({
   args: { runId: v.string() },
   handler: async (ctx, { runId }) => {
     const ws = workspaceOf(await actorOf(ctx));
     const run = ws ? await ctx.db.query("runs").withIndex("by_runId", (q) => q.eq("runId", runId)).unique() : null;
     if (!run || run.workspace !== ws) throw new ConvexError({ code: "NOT_FOUND" });
+    if (ws === "demo" && run.sessionKey !== (await sessionKeyOf(ctx))) throw new ConvexError({ code: "NOT_FOUND" });
     await stopRun(ctx, run);
   },
 });
