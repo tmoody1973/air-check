@@ -186,3 +186,21 @@ describe("markedMedia: numbers to the stored addresses (Convex's record path)", 
     expect(markedMedia({}, images, links)).toEqual({});
   });
 });
+
+describe("the HTML reader stays linear on hostile input (decision 027)", () => {
+  // Same budget as radar.test.ts's hostile-input checks: the best of three runs under 200 ms.
+  const fast = (label: string, html: string) =>
+    test(`${label} finishes under 200 ms`, { timeout: 30_000 }, () => {
+      const times = [0, 1, 2].map(() => {
+        const t = performance.now();
+        cleaned({ html });
+        return performance.now() - t;
+      });
+      expect(Math.min(...times)).toBeLessThan(200);
+    });
+  fast("200k of unclosed <img", "<img ".repeat(40_000));
+  fast("one 200k image tag of width= runs", `<img ${"width=".repeat(33_000)}>`);
+  fast("one 200k image tag of src= runs", `<img ${" src=".repeat(40_000)}>`);
+  fast("20k covers", `<img src="${COVER1}" width="300">`.repeat(1_500));
+  fast("200k of [image 1 runs", "[image 1".repeat(25_000));
+});

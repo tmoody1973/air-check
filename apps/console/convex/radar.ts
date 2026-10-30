@@ -347,7 +347,7 @@ async function saveRelease(ctx: MutationCtx, row: Doc<"inbox">, marked: ReleaseF
   const queue = page ? { bandcampPage: page, embedState: "queued" as const, embedQueuedAt: Date.now() } : {};
   const cur = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
   if (!cur) {
-    const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as ReleaseFields;
+    const fields = Object.fromEntries(Object.entries(f).filter(([, val]) => val !== undefined)) as typeof f;
     const releaseId = await ctx.db.insert("releases", {
       workspace: "real",
       ...fields,
