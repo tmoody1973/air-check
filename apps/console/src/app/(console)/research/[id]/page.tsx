@@ -1,7 +1,7 @@
 "use client";
 
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { api } from "../../../../../convex/_generated/api";
 import { ClaimReport } from "@/components/ClaimReport";
 import { DeepDiveCard } from "@/components/DeepDiveCard";
@@ -24,6 +24,8 @@ export default function ResearchPage() {
   const editEntry = useMutation(api.research.editEntry);
   const setPrivate = useMutation(api.research.setPrivate);
   const setSuppliedNote = useMutation(api.research.setSuppliedNote);
+  const startVerify = useMutation(api.research.startVerify);
+  const router = useRouter();
 
   if (view === undefined) return <Shell title="Research"><p className="text-ink-soft">Loading…</p></Shell>;
   if (view === null) return <Shell title="Research"><p className="text-ink-soft">Research not found</p></Shell>;
@@ -43,6 +45,10 @@ export default function ResearchPage() {
         <ResearchProgress
           view={view} authReady={!isLoading && isAuthenticated}
           onTakeOver={() => takeOver({ jobId: id })} onResume={() => resume({ jobId: id })}
+          onVerify={view.job.showDate ? async () => {
+            const { jobId } = await startVerify({ showDate: view.job.showDate!, notes: { from: "air-check" } });
+            router.push(`/research/${jobId}`);
+          } : undefined}
         />
         {problems.length > 0 && (
           <section aria-labelledby="refused-h" className="rounded-card border border-line bg-surface px-5 py-4">

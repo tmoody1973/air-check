@@ -94,6 +94,30 @@ describe("ResearchProgress", () => {
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 
+  it("a done job with work left (a retarget added keys) still offers Resume", () => {
+    render(<ResearchProgress view={notesView({ progress: { done: 6, total: 8 } }, { status: "done" })} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("I3: done show notes offer Pre-air verify; running, sample or other kinds do not", async () => {
+    const onVerify = vi.fn(noop);
+    const done = notesView({ progress: { done: 8, total: 8 } }, { status: "done" });
+    render(<ResearchProgress view={done} onTakeOver={noop} onResume={noop} onVerify={onVerify} />);
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pre-air verify" }));
+    expect(onVerify).toHaveBeenCalledOnce();
+    cleanup();
+    const refused = () => Promise.reject({ data: { code: "PAUSED", message: "Live research is paused for the demo today. The sample report is below." } });
+    render(<ResearchProgress view={done} onTakeOver={noop} onResume={noop} onVerify={refused} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pre-air verify" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Live research is paused for the demo today.");
+    for (const v of [notesView(), notesView({ sample: true, progress: { done: 8, total: 8 } }, { status: "done" }), verifyView({ progress: { done: 3, total: 3 } })]) {
+      cleanup();
+      render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} onVerify={onVerify} />);
+      expect(screen.queryByRole("button", { name: "Pre-air verify" })).not.toBeInTheDocument();
+    }
+  });
+
   it("the Live tag never wraps", () => {
     render(<ResearchProgress view={notesView()} onTakeOver={noop} onResume={noop} />);
     expect(screen.getByText("Live · Nemotron")).toHaveClass("whitespace-nowrap");

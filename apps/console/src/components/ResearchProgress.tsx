@@ -15,6 +15,7 @@ import { SampleTag } from "./SampleTag";
 
 const TAKE_OVER = "Stops now. Everything saved so far stays.";
 const RESUME = "Researches what is left. Blocks you edited are skipped.";
+const VERIFY = "Checks these notes against their sources before air, as a new pre-air check.";
 const KIND_WORDS: Record<JudgedClaim["kind"], string> = {
   release: "release", "release-date": "release date", label: "label", credit: "credit", "track-number": "track number",
   length: "length", bio: "bio", detail: "detail", thread: "thread", connection: "connection",
@@ -75,10 +76,12 @@ function TrackRows({ view }: { view: ResearchView }) {
 
 const TITLES = { "show-notes": ["Writing show notes", "Show notes"], verify: ["Checking the notes", "Pre-air check"], "deep-dive": ["Writing the deep dive", "Deep dive"] } as const;
 
-export function ResearchProgress({ view, onTakeOver, onResume, authReady = true }: {
+export function ResearchProgress({ view, onTakeOver, onResume, onVerify, authReady = true }: {
   view: ResearchView;
   onTakeOver: () => Promise<unknown>;
   onResume: () => Promise<unknown>;
+  /** I3: start a pre-air check of these show notes (done show notes only; never the sample). */
+  onVerify?: () => Promise<unknown>;
   /** False until Convex has the Clerk token. */
   authReady?: boolean;
 }) {
@@ -91,7 +94,9 @@ export function ResearchProgress({ view, onTakeOver, onResume, authReady = true 
   const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
   // Every open block counts (intros and threads too), not only the track rows shown.
   const left = view.progress.total - view.progress.done;
-  const canResume = !active && !sample && left > 0 && status !== "done";
+  // Work left after done happens only after a retarget (server-only for now).
+  const canResume = !active && !sample && left > 0;
+  const canVerify = !!onVerify && kind === "show-notes" && status === "done" && !sample;
   const byKey = new Map(view.entries.map((e) => [e.key, e]));
   const nextHour = active ? view.tracks.find((t) => !t.closing && !isDoneEntry(byKey.get(t.key)))?.hour : undefined;
   const title = `${TITLES[kind][active ? 0 : 1]}${kind === "show-notes" && nextHour ? ` · Hour ${nextHour}` : ""}`;
@@ -119,15 +124,16 @@ export function ResearchProgress({ view, onTakeOver, onResume, authReady = true 
       {kind !== "show-notes" && active && view.lastStep && (
         <p className="border-t border-line px-5 py-3"><span className={NEUTRAL_CHIP}>{view.lastStep}</span></p>
       )}
-      {(active || canResume) && (
+      {(active || canResume || canVerify) && (
         <div className="flex flex-wrap items-center gap-3 border-t border-line px-5 py-3.5">
           {active ? (
             <button type="button" className={BTN} disabled={pending || !authReady} onClick={() => act(onTakeOver)}>Take over</button>
-          ) : (
+          ) : canResume && (
             <button type="button" className={BTN} disabled={pending || !authReady} onClick={() => act(onResume)}>Resume</button>
           )}
+          {canVerify && <button type="button" className={BTN} disabled={pending || !authReady} onClick={() => act(onVerify)}>Pre-air verify</button>}
           <span className="min-w-0 flex-1 basis-56 text-[13px] text-muted">
-            {!authReady ? "Signing you in…" : status === "queued" ? `Waiting for the agent… ${TAKE_OVER}` : active ? TAKE_OVER : RESUME}
+            {!authReady ? "Signing you in…" : status === "queued" ? `Waiting for the agent… ${TAKE_OVER}` : active ? TAKE_OVER : canResume ? RESUME : VERIFY}
           </span>
           {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
         </div>
