@@ -651,6 +651,18 @@ Show notes get each track's first web search run by the bridge, in parallel, bef
 
 Rolling back: deploy the previous bridge, relay and Convex, and run `install-skills.sh` from the previous commit, together (the new prompt names a tool an old bridge lacks). Remove the four relay.env lines or leave them; an old relay ignores them.
 
+### Deep dive as an article (Oct 30, decision 023, branch `feat/deep-dive-article`)
+
+A deep dive now reads like a Wikipedia page: an infobox, a lead, sections (Origins, Career, Sound and influences, Key records, Legacy), connections, what could not be verified, and numbered references. Code runs five web searches on the subject when the job starts, the same way as show notes; the agent reads them with `first_search` (key `brief`), and `research_submit` refuses the brief until it has. No relay change: the relay already calls prefetch for every research run. Deploy in this order:
+
+1. **Convex** (`npx convex deploy -y`). Adds the new claim kinds (`lead`, `origins`, `career`, `sound`, `records`, `legacy`, `infobox`) to the schema, the brief's limits (28 section facts, 8 infobox rows, 3 connections, 39 claims), the deep dive's entry in `/agent/research-prefetch`, and the new prompt and skill text. Convex first: an older Convex refuses the new kinds, and the new bridge reads the `extra` searches it sends.
+2. **The bridge** ("Updating the bridge" above), then `nemohermes airc mcp restart` and `nemohermes aircdemo mcp restart`. Check `nemohermes airc mcp status aircheck --json --tools` (and `aircdemo`) lists `first_search`.
+3. **The skill:** `git pull` on the VM, then `deploy/hermes/install-skills.sh` (the rewritten `rlr-deep-dive`).
+4. **The console** (`dc up -d --build`): the page renders the article.
+5. **Check:** start a deep dive on an artist and watch `journalctl -u aircheck-bridge -f`. Expect one line `prefetch searches=5 ok=5 … credits=10`, then `tool=first_search status=ok`. A deep dive costs 5 counted searches (10 credits) before the agent's own, up to 4 more.
+
+Rolling back: the previous Convex, bridge and skill together. Once a brief with the new kinds is saved, Convex will refuse to deploy the older schema (it checks stored rows against it), so after that keep this Convex and roll back only the bridge and the skill.
+
 ## Plan 8: release radar
 
 The release radar turns forwarded email into release records. AgentMail (an email service with its own inbox, `rhythmlab@agentmail.to`) receives the mail and calls the console's `/api/agentmail/inbound` route. The console only stores the cleaned email. The ingest worker reads it once a minute: Bandcamp emails by code, co-signs through the Token Factory model, and one allowlisted Bandcamp page fetch for the player. Nothing in this section ever prints a secret; values move by pipe from a file.

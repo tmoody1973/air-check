@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { deepDiveMarkdown, type DeepDiveView, notesForDraft, numberLines, showNotesMarkdown, verifyReport, type VerifyView } from "../src/index";
+import { type CitedSource, deepDiveMarkdown, type DeepDiveView, type JudgedClaim, notesForDraft, numberLines, showNotesMarkdown, verifyReport, type VerifyView } from "../src/index";
 import { sampleView } from "./helpers/researchSample";
 
 const golden = readFileSync(new URL("../../../fixtures/show-notes-sample.md", import.meta.url), "utf8");
@@ -182,50 +182,113 @@ describe("verifyReport", () => {
   });
 });
 
-describe("deepDiveMarkdown", () => {
+describe("deepDiveMarkdown (Oct 30: an article, like our own Wikipedia page)", () => {
   const tracks = [
     { key: "H1.1", hour: 1 as const, position: 1, artist: "[Artist A]", title: "[Title A]", closing: false },
     { key: "H1.2", hour: 1 as const, position: 2, artist: "[Artist B]", title: "[Title B]", closing: true },
   ];
+  const at = (n: string) => ({ url: `https://${n}.example/${n}`, host: `${n}.example`, title: `Page ${n.toUpperCase()}`, via: "tavily", primary: false, matched: true });
+  const [A, B, C] = [at("a"), at("b"), at("c")];
+  const claim = (kind: JudgedClaim["kind"], text: string, sources: CitedSource[], extra: Partial<JudgedClaim> = {}): JudgedClaim => ({ kind, text, status: "sourced", sources, ...extra });
   const base: DeepDiveView = {
     subject: { type: "label", name: "[Label A]" },
     tracks,
     entry: {
       key: "brief",
       claims: [
-        { kind: "detail", text: "[Label A] started in [City].", status: "sourced", sources: [link] },
-        { kind: "connection", text: "[Artist A] recorded for [Label A].", value: "H1.1", status: "sourced", sources: [link] },
-        { kind: "connection", text: "A closing-track link.", value: "H1.2", status: "sourced", sources: [link] },
-        { kind: "label", text: "[Label A] is part of [Group].", value: "[Group]", status: "could-not-verify", sources: [link], check: "Only one source: example.org" },
+        claim("infobox", "Origin", [A], { value: "London" }),
+        claim("infobox", "Founded", [B], { value: "1990" }),
+        claim("lead", "[Label A] is a record label in London.", [A]),
+        claim("lead", "It is known for [Genre].", [C]),
+        claim("origins", "[Label A] was founded in 1990 by [Founder].", [B, A]),
+        claim("origins", "The founders were DJs.", [], { status: "could-not-verify", check: "No source found." }),
+        claim("career", "It signed [Artist A] in 1995.", [C]),
+        claim("connection", "[Artist A] recorded for [Label A].", [C], { value: "H1.1" }),
+        claim("connection", "A closing-track link.", [A], { value: "H1.2" }),
       ],
+      note: "Two pages are from the same magazine.",
     },
     pastShows: { count: 3, year: 2026, last: "2026-10-16" },
   };
 
-  it("renders facts, connections by track name, what could not be verified, and the code-written past-shows line", () => {
+  it("renders an infobox, a lead with no heading, one paragraph per section, connections, past shows, checks and numbered references", () => {
     expect(deepDiveMarkdown(base)).toBe(
       [
         "# Deep dive: [Label A]",
         "",
-        "- [Label A] started in [City]. [[example.org](https://example.org/x)]",
+        "| [Label A] | |",
+        "|---|---|",
+        "| **Origin** | London[1] |",
+        "| **Founded** | 1990[2] |",
+        "",
+        "[Label A] is a record label in London.[1] It is known for [Genre].[3]",
+        "",
+        "## Origins",
+        "",
+        "[Label A] was founded in 1990 by [Founder].[1][2] The founders were DJs. **[verify]**",
+        "",
+        "## Career",
+        "",
+        "It signed [Artist A] in 1995.[3]",
         "",
         "## Connects to your list",
         "",
-        '- **[Artist A] – "[Title A]":** [Artist A] recorded for [Label A]. [[example.org](https://example.org/x)]',
-        "",
-        "## Could not verify",
-        "",
-        "- **[verify]** [Label A] is part of [Group]. — Only one source: example.org [[example.org](https://example.org/x)]",
+        '- **[Artist A] – "[Title A]":** [Artist A] recorded for [Label A].[3]',
         "",
         "On Rhythm Lab: 3 shows in 2026, last Oct 16, 2026",
         "",
+        "## What I couldn't verify",
+        "",
+        "- The founders were DJs (no source found)",
+        "",
+        "**Note:** Two pages are from the same magazine.",
+        "",
+        "## References",
+        "",
+        "1. [Page A](https://a.example/a) · a.example",
+        "2. [Page B](https://b.example/b) · b.example",
+        "3. [Page C](https://c.example/c) · c.example",
+        "",
       ].join("\n"),
     );
+  });
+
+  it("a brief written with the old kinds still reads as an article: each kind lands in its section, in submitted order", () => {
+    const old: DeepDiveView = {
+      ...base,
+      pastShows: undefined,
+      entry: {
+        key: "brief",
+        claims: [
+          claim("fun-fact", "Legacy one.", [A]),
+          claim("release", "Records one.", [A], { value: "X" }),
+          claim("bio", "Origins one.", [A]),
+          claim("samples", "Sound one.", [B]),
+          claim("story", "Career one.", [A]),
+          claim("detail", "Career two.", [A]),
+          claim("song", "Sound two.", [B]),
+          claim("label", "Records two.", [C], { value: "Y", status: "conflict" }),
+          claim("chart", "Records three.", [C]),
+        ],
+      },
+    };
+    const md = deepDiveMarkdown(old);
+    const headings = md.split("\n").filter((l) => l.startsWith("## "));
+    expect(headings).toEqual(["## Origins", "## Career", "## Sound and influences", "## Key records", "## Legacy", "## What I couldn't verify", "## References"]);
+    expect(md).toContain("## Career\n\nCareer one.[1] Career two.[1]\n");
+    expect(md).toContain("## Sound and influences\n\nSound one.[2] Sound two.[2]\n");
+    expect(md).toContain("## Key records\n\nRecords one.[1] Records two. Sources disagree: c says Y.[3] **[verify]** Records three.[3]\n");
+    expect(md).not.toContain("| **");
   });
 
   it("never asserts zero past shows (R10: a zero cannot be known), and marks an embargoed subject", () => {
     const md = deepDiveMarkdown({ ...base, pastShows: { count: 0, year: 2026 }, embargo: { until: null } });
     expect(md).not.toMatch(/No past shows|On Rhythm Lab/);
     expect(md).toContain("# Deep dive: [Label A]\n\n**PRIVATE · embargoed (date not known)**\n");
+  });
+
+  it("Tarik's edit replaces the generated article; the past-shows line stays", () => {
+    const md = deepDiveMarkdown({ ...base, entry: { ...base.entry!, edited: { text: "My own brief." } } });
+    expect(md).toBe("# Deep dive: [Label A]\n\nMy own brief.\n\nOn Rhythm Lab: 3 shows in 2026, last Oct 16, 2026\n");
   });
 });

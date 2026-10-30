@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { LIMITS } from "@aircheck/core";
+import { deepDiveQueries, INFOBOX_FIELDS, LIMITS } from "@aircheck/core";
 import { api, internal } from "./_generated/api";
 import { RESEARCH_BODY_BYTES } from "./agentSubmit";
 import schema from "./schema";
@@ -255,6 +255,39 @@ describe("POST /agent/research (submitEntry)", () => {
     expect((await entries(t, jobId))[0]!.claims[1]).toEqual({ kind: "bio", text: "Born in Leeds.", status: "could-not-verify", sources: [], check: "No source found." });
     const dive = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
     expect(await submit(t, { job: dive.jobId, key: "brief", claims: [{ kind: "bio", text: "Born in London.", sources: [] }], sources: SOURCES })).toMatchObject({ status: 200, data: { claims: 1, verify: 1, dropped: [] } });
+  });
+
+  test("Oct 30 (decision 023): a brief is an article: up to 28 section facts, 8 infobox rows from the allowlist and 3 connections", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist", showDate: DATE });
+    const fact = (kind: string, i: number) => ({ kind, text: `Alfa Mist fact ${i}.`, sources: [{ id: "S1aaaa" }] });
+    const kinds = ["lead", "origins", "career", "sound", "records", "legacy"];
+    const facts = Array.from({ length: LIMITS.briefFactsMax }, (_, i) => fact(kinds[i % kinds.length]!, i));
+    const fields = ["Origin", "Years active", "Genres", "Labels", "Members", "Founded", "Released", "Producer"];
+    const infobox = fields.map((f) => ({ kind: "infobox", text: f, value: "London", sources: [{ id: "S1aaaa" }] }));
+    const connects = ["H1.1", "H1.2", "H2.1"].map((key) => ({ kind: "connection", text: "Same scene.", value: key, sources: [{ id: "S1aaaa" }] }));
+    const full = [...facts, ...infobox, ...connects];
+    expect(full).toHaveLength(LIMITS.briefClaims);
+    // The deep dive above has no tracklist; give it this show's tracks to connect to.
+    await t.run(async (ctx) => {
+      const j = await ctx.db.query("research").withIndex("by_jobId", (q) => q.eq("jobId", jobId)).unique();
+      const tracks = [1, 2].map((h) => ({ key: `H${h === 1 ? "1.1" : "2.1"}`, hour: h as 1 | 2, position: 1, artist: "A", title: "B", closing: false }));
+      await ctx.db.patch(j!._id, { tracks: [...tracks, { key: "H1.2", hour: 1, position: 2, artist: "C", title: "D", closing: false }] });
+    });
+    expect(await submit(t, { job: jobId, key: "brief", claims: full, sources: SOURCES })).toMatchObject({ status: 200, data: { claims: LIMITS.briefClaims } });
+    const tooMany = await submit(t, { job: jobId, key: "brief", claims: [...full, fact("career", 99)], sources: SOURCES });
+    expect(tooMany.data.problems).toEqual(expect.arrayContaining([`At most ${LIMITS.briefClaims} claims in the brief.`, `A brief has at most ${LIMITS.briefFactsMax} section facts.`]));
+    const nine = await submit(t, { job: jobId, key: "brief", claims: [...facts.slice(0, 10), ...infobox, { ...infobox[0]! }], sources: SOURCES });
+    expect(nine.data.problems).toEqual([`A brief has at most ${LIMITS.infoboxMax} infobox rows.`]);
+    const odd = await submit(t, { job: jobId, key: "brief", claims: [{ kind: "infobox", text: "Shoe size", value: "10", sources: [] }, { kind: "infobox", text: "Origin", sources: [] }], sources: SOURCES });
+    expect(odd.data.problems).toEqual([
+      `An infobox row's text is one of: ${INFOBOX_FIELDS.join(", ")}.`,
+      "An infobox row needs a value.",
+    ]);
+    // A show-notes track keeps its 12, and takes no infobox row.
+    const notes = await startNotes(t);
+    const track = await submit(t, { job: notes.jobId, key: "H1.1", claims: [...Array.from({ length: 13 }, (_, i) => detail(`Fact ${i}.`)), { kind: "infobox", text: "Origin", value: "London", sources: [] }], sources: SOURCES });
+    expect(track.data.problems).toEqual(["At most 12 claims in one block.", "Only a deep dive's brief takes infobox rows."]);
   });
 
   test("a pre-air check still drops a sourceless claim and names it: checking a line needs a source", async () => {
@@ -677,7 +710,25 @@ describe("first searches (Oct 29 prefetch: POST /agent/research-prefetch and /ag
     expect(await plan(t, jobId)).toEqual({ status: 409, data: { error: "Tarik took over; stop now." } });
     await finishRun(t, runId, "cancelled");
     const verify = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "pasted", text: "Out Oct 10." }, tracklistText: TRACKLIST });
-    expect((await plan(t, verify.jobId)).data).toEqual({ error: "Only show notes have first searches; use source_search." });
+    expect((await plan(t, verify.jobId)).data).toEqual({ error: "Only show notes and deep dives have first searches; use source_search." });
+  });
+
+  test("Oct 30 (decision 023): a deep dive lists its brief with five searches on the subject; a done brief is not listed", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId } = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    const q = deepDiveQueries({ type: "artist", name: "Alfa Mist" });
+    expect(await plan(t, jobId)).toEqual({ status: 200, data: { tracks: [{ key: "brief", query: q[0], query2: q[1], extra: q.slice(2) }], embargoed: [] } });
+    await submit(t, { job: jobId, key: "brief", claims: [{ kind: "lead", text: "Alfa Mist is a London musician.", sources: [{ id: "S1aaaa" }] }], sources: SOURCES });
+    expect(await plan(t, jobId)).toEqual({ status: 200, data: { tracks: [], embargoed: [] } });
+  });
+
+  test("a deep dive on an embargoed subject gets no first searches and is named by key only (R2, R8)", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Alfa Mist", title: "Organic Rust", embargo: { until: "2026-11-07" } }));
+    const { jobId } = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "release", name: "Organic Rust" });
+    expect(await plan(t, jobId)).toEqual({ status: 200, data: { tracks: [], embargoed: ["brief"] } });
+    const artist = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    expect((await plan(t, artist.jobId)).data).toEqual({ tracks: [], embargoed: ["brief"] });
   });
 
   test("search-done gives back failed searches (never below zero) and adds Tavily credits to today's line in Settings", async () => {

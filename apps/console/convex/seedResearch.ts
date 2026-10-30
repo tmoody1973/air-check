@@ -82,16 +82,26 @@ const CHECK: Row[] = [
   },
   { key: "L7", block: "line", claims: [claim({ kind: "label", text: "On [Label D].", value: "[Label D]", status: "could-not-verify", sources: [src("d1")], check: "Only one source: example.org" })] },
 ];
+// Oct 30 (decision 023): the sample brief is an article, so the demo shows the infobox, sections and references.
 const DIVE: Row[] = [{
   key: "brief", block: "brief",
   claims: [
-    claim({ kind: "bio", text: "[Artist A] is a bassist from [City].", status: "sourced", sources: [src("a3")] }),
-    claim({ kind: "detail", text: "[Artist A] co-produced [Title A] with [Producer].", status: "sourced", sources: [src("a2")] }),
-    claim({ kind: "label", text: "[Artist A] has released on [Label A] since [Year].", value: "[Label A]", status: "confirmed", sources: [src("a1", true), src("a4")] }),
-    claim({ kind: "detail", text: "[Artist A] toured with [Band] in [Year].", status: "sourced", sources: [src("a5")] }),
-    claim({ kind: "detail", text: "[Artist A] scored a short film, [Film].", status: "sourced", sources: [src("a6")] }),
+    claim({ kind: "infobox", text: "Origin", value: "[City]", status: "sourced", sources: [src("a3")] }),
+    claim({ kind: "infobox", text: "Labels", value: "[Label A]", status: "confirmed", sources: [src("a1", true), src("a4")] }),
+    claim({ kind: "lead", text: "[Artist A] is a bassist and producer from [City].", status: "sourced", sources: [src("a3")] }),
+    claim({ kind: "lead", text: "[Artist A] is known for long-form records that move between jazz and electronic music.", status: "sourced", sources: [src("a5")] }),
+    claim({ kind: "origins", text: "[Artist A] grew up in [City] and studied bass at [School].", status: "sourced", sources: [src("a3")] }),
+    claim({ kind: "origins", text: "The first recordings were self-released on [Platform] in [Year].", status: "sourced", sources: [src("a6")] }),
+    claim({ kind: "career", text: "[Artist A] toured with [Band] in [Year].", status: "sourced", sources: [src("a5")] }),
+    claim({ kind: "career", text: "In [Year], [Artist A] scored a short film, [Film].", status: "sourced", sources: [src("a6")] }),
+    claim({ kind: "sound", text: "Reviews describe the sound as slow, bass-led and built on live drums.", status: "sourced", sources: [src("a2")] }),
+    claim({ kind: "sound", text: "[Artist A] has named [Influence] as an early influence.", status: "sourced", sources: [src("a5")] }),
+    claim({ kind: "records", text: "[Artist A] has released on [Label A] since [Year].", value: "[Label A]", status: "confirmed", sources: [src("a1", true), src("a4")] }),
+    claim({ kind: "records", text: "[Artist A] co-produced [Title A] with [Producer].", status: "sourced", sources: [src("a2")] }),
+    claim({ kind: "records", text: "[Artist A] played on [Album X].", status: "could-not-verify", sources: [src("x1")], check: "Only one source: example.org" }),
+    claim({ kind: "legacy", text: "Younger players in [City] cite [Artist A] as a model for releasing music independently.", status: "sourced", sources: [src("a5")] }),
+    claim({ kind: "legacy", text: "[Title A] was reissued on vinyl in [Year].", status: "sourced", sources: [src("a1", true)] }),
     claim({ kind: "connection", text: "[Artist D] and [Artist A] share a producer, [Producer].", value: "H2.1", status: "sourced", sources: [src("a2")] }),
-    claim({ kind: "credit", text: "[Artist A] played on [Album X].", status: "could-not-verify", sources: [src("x1")], check: "Only one source: example.org" }),
   ],
   note: "Two of the interviews come from the same tour.",
 }];

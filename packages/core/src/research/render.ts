@@ -21,9 +21,7 @@ const uniqueSources = (sources: CitedSource[]) => [...new Map(sources.map((s) =>
 const links = (sources: CitedSource[]) => uniqueSources(sources).map((s) => `[[${s.host}](${s.url})]`).join(" ");
 const withLinks = (text: string, sources: CitedSource[]) => (sources.length ? `${text} ${links(sources)}` : text);
 const matched = (c: JudgedClaim) => c.sources.filter((s) => s.matched);
-const fact = (c: JudgedClaim) => `- ${withLinks(c.text, matched(c))}`;
 const checked = (c: JudgedClaim) => (c.check ? `${c.text} — ${c.check}` : c.text);
-const verifyBullet = (c: JudgedClaim) => `- **[verify]** ${withLinks(checked(c), c.sources)}`;
 /** Paper-style: "2026-10-16" -> "Oct 16, 2026", "2026-10" -> "Oct 2026"; anything else as written. */
 function paperDate(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
@@ -70,6 +68,8 @@ const SECTION_OF: Record<ClaimKind, Section> = {
   release: "Album and label", label: "Album and label", "release-date": "Album and label", "track-number": "Album and label", length: "Album and label",
   credit: "Album and label", chart: "Chart", bio: "Artist bio", story: "Story", song: "Song", detail: "Song",
   samples: "Samples and connections", connection: "Samples and connections", thread: "Samples and connections", video: "Video", "fun-fact": "Fun fact",
+  // A deep dive's article kinds, should one reach a track (Oct 30).
+  lead: "Artist bio", origins: "Artist bio", career: "Story", sound: "Song", records: "Album and label", legacy: "Fun fact", infobox: "Album and label",
 };
 const SECTION_ORDER: readonly Section[] = ["Album and label", "Chart", "Artist bio", "Story", "Song", "Samples and connections", "Video", "Fun fact"];
 /** Fewer facts that hold than this, and a track reads as his "What I could verify / What I couldn't verify" pair. */
@@ -268,30 +268,97 @@ export function verifyReport(view: VerifyView): { changes: VerifyChange[]; open:
   return { changes, open };
 }
 
-/** A deep-dive brief: facts, connections by track name, what could not be verified, and the code-written past shows. */
-export function deepDiveMarkdown(view: DeepDiveView): string {
+// ---- deep dive, as an article (Oct 30, decision 023: "our own custom Wikipedia page") ----
+
+export type ArticleSection = "Origins" | "Career" | "Sound and influences" | "Key records" | "Legacy";
+const ARTICLE_ORDER: readonly ArticleSection[] = ["Origins", "Career", "Sound and influences", "Key records", "Legacy"];
+/** Where each kind sits in the article. Older briefs (5 to 8 bullet facts) map their kinds onto the sections. */
+const PART_OF: Record<ClaimKind, ArticleSection | "lead" | "infobox" | "connection"> = {
+  lead: "lead", infobox: "infobox", connection: "connection",
+  origins: "Origins", bio: "Origins",
+  career: "Career", story: "Career", detail: "Career",
+  sound: "Sound and influences", samples: "Sound and influences", song: "Sound and influences", thread: "Sound and influences",
+  records: "Key records", release: "Key records", "release-date": "Key records", label: "Key records", credit: "Key records",
+  chart: "Key records", "track-number": "Key records", length: "Key records", video: "Key records",
+  legacy: "Legacy", "fun-fact": "Legacy",
+};
+
+/** One sentence: the model's text, code's conflict sentence, its reference numbers (ascending) and whether it is [verify]. */
+export interface ArticleSentence { text: string; conflict?: string; refs: number[]; verify: boolean }
+export interface ArticleReference { n: number; url: string; title: string; host: string }
+export interface DeepDiveArticle {
+  infobox: { field: string; value: ArticleSentence }[];
+  lead: ArticleSentence[];
+  sections: { title: ArticleSection; sentences: ArticleSentence[] }[];
+  connects: { track: ViewTrack; sentence: ArticleSentence }[];
+  /** Code's checks for each [verify] claim, as show notes word them (Notes for Your Review). */
+  unverified: string[];
+  references: ArticleReference[];
+}
+
+/**
+ * The brief as an article, the one structure the Paper export and the page both render: infobox, lead, sections in a
+ * fixed order (each claim in submitted order), connections to the list (never a closing track), code's checks, and
+ * references numbered by first appearance in that reading order. Tarik's edit replaces it all (the caller shows it).
+ */
+export function deepDiveArticle(view: DeepDiveView): DeepDiveArticle {
   const e = view.entry;
   const claims = e && !e.edited ? e.claims : [];
-  const mark = marker(view.embargo, e?.private !== undefined);
   const tracks = new Map(view.tracks.filter((t) => !t.closing).map((t) => [t.key, t]));
-  const facts = claims.filter((c) => !isVerify(c) && c.kind !== "connection").map(fact);
-  const connects = claims
-    .filter((c) => !isVerify(c) && c.kind === "connection" && c.value !== undefined && tracks.has(c.value))
-    .slice(0, LIMITS.connectsMax)
-    .map((c) => `- **${trackLabel(tracks.get(c.value!)!)}:** ${withLinks(c.text, matched(c))}`);
-  const unverified = claims.filter(isVerify).map(verifyBullet);
+  const of = (part: string) => claims.filter((c) => PART_OF[c.kind] === part);
+  const infobox = of("infobox").filter((c) => c.value?.trim()).slice(0, LIMITS.infoboxMax);
+  const lead = of("lead");
+  const sections = ARTICLE_ORDER.map((title) => ({ title, claims: of(title) })).filter((x) => x.claims.length);
+  const connects = of("connection").filter((c) => c.value !== undefined && tracks.has(c.value)).slice(0, LIMITS.connectsMax);
+
+  // Numbered in reading order, so the first source cited is [1].
+  const numbers = new Map<string, ArticleReference>();
+  const sentence = (c: JudgedClaim, text = c.text): ArticleSentence => {
+    const refs = linkedSources(c).map((s) => {
+      if (!numbers.has(s.url)) numbers.set(s.url, { n: numbers.size + 1, url: s.url, title: s.title.trim() || s.host, host: s.host });
+      return numbers.get(s.url)!.n;
+    });
+    const conflict = disagreement(c);
+    return { text, ...(conflict && { conflict }), refs: [...new Set(refs)].sort((a, b) => a - b), verify: isVerify(c) };
+  };
+  return {
+    infobox: infobox.map((c) => ({ field: c.text, value: sentence(c, c.value!) })),
+    lead: lead.map((c) => sentence(c)),
+    sections: sections.map((x) => ({ title: x.title, sentences: x.claims.map((c) => sentence(c)) })),
+    connects: connects.map((c) => ({ track: tracks.get(c.value!)!, sentence: sentence(c) })),
+    unverified: claims.filter(isVerify).map(reviewItem),
+    references: [...numbers.values()],
+  };
+}
+
+const cell = (text: string) => text.replace(/\s+/g, " ").replace(/\|/g, "\\|");
+const mdSentence = (s: ArticleSentence) => `${s.text}${s.conflict ? ` ${s.conflict}` : ""}${s.refs.map((n) => `[${n}]`).join("")}${s.verify ? " **[verify]**" : ""}`;
+const mdParagraph = (list: ArticleSentence[]) => list.map(mdSentence).join(" ");
+const mdTitle = (title: string) => title.replace(/([[\]])/g, "\\$1");
+
+/** A deep-dive brief as Markdown for "Copy for Paper", shaped like a Wikipedia article (deepDiveArticle). */
+export function deepDiveMarkdown(view: DeepDiveView): string {
+  const e = view.entry;
+  const a = deepDiveArticle(view);
+  const mark = marker(view.embargo, e?.private !== undefined);
   const p = view.pastShows;
   // R10 (Hard Rule 10): a zero cannot be known (missing tracklists, the year's first weeks), so only a count is said.
   const past = p && p.count > 0 ? [`On Rhythm Lab: ${p.count} show${p.count === 1 ? "" : "s"} in ${p.year}${p.last ? `, last ${paperDate(p.last)}` : ""}`] : [];
+  const infobox = a.infobox.length
+    ? [[`| ${cell(view.subject.name)} | |`, "|---|---|", ...a.infobox.map((r) => `| **${cell(r.field)}** | ${cell(mdSentence(r.value))} |`)].join("\n")]
+    : [];
   const chunks = [
     `# Deep dive: ${view.subject.name}`,
     ...(mark ? [mark] : []),
     ...(e?.edited ? [e.edited.text] : []),
-    ...(facts.length ? [facts.join("\n")] : []),
-    ...(connects.length ? ["## Connects to your list", connects.join("\n")] : []),
-    ...(unverified.length ? ["## Could not verify", unverified.join("\n")] : []),
-    ...(e?.note ? [`**Note:** ${e.note}`] : []),
+    ...infobox,
+    ...(a.lead.length ? [mdParagraph(a.lead)] : []),
+    ...a.sections.flatMap((x) => [`## ${x.title}`, mdParagraph(x.sentences)]),
+    ...(a.connects.length ? ["## Connects to your list", a.connects.map((c) => `- **${trackLabel(c.track)}:** ${mdSentence(c.sentence)}`).join("\n")] : []),
     ...past,
+    ...(a.unverified.length ? ["## What I couldn't verify", a.unverified.map((u) => `- ${u}`).join("\n")] : []),
+    ...(e?.note && !e.edited ? [`**Note:** ${e.note}`] : []),
+    ...(a.references.length ? ["## References", a.references.map((r) => `${r.n}. [${mdTitle(r.title)}](${r.url}) · ${r.host}`).join("\n")] : []),
   ];
   return `${chunks.join("\n\n")}\n`;
 }
