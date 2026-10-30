@@ -4,6 +4,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
 import { searchTextOf } from "./radar";
 import { createdAtOf, statusOf } from "./runDefaults";
+import { clearDemoResearch, seedSampleResearch } from "./seedResearch";
 import {
   DEMO_MP3_SHA256,
   GOLDEN_ALTERNATES,
@@ -14,7 +15,10 @@ import {
 } from "./seedData";
 
 const WS = "demo" as const;
-/** Tables written only by this seed in the demo workspace: wiped and re-inserted on every run. */
+/**
+ * Tables written only by this seed in the demo workspace: wiped and re-inserted on every run. `verifications` is no
+ * longer seeded (Plan 7 Task 5: nothing reads it); the wipe empties the old demo rows before Task 6 drops the table.
+ */
 const SEED_ONLY = ["verifications", "releases"] as const;
 const SEEDED_PACKAGES = new Set(["demo-10-2-26", "demo-long-title"]);
 const SEEDED_RUN = "demo-run-1";
@@ -58,7 +62,7 @@ const ACTIVITY = [
   [59, { kind: "network", result: "allowed", title: "Model call (Nemotron 3 Super)", destination: "Nebius Token Factory" }],
   [77, { kind: "network", result: "blocked", title: "Hermes contacted its maker", destination: "portal.nousresearch.com", reason: "Not on the allow-list" }],
   [90, { kind: "action", result: "done", title: "Updated skill: title style (you shortened a title)" }],
-  [128, { kind: "network", result: "allowed", title: "Web search for release dates", destination: "api.tavily.com" }],
+  [128, { kind: "network", result: "allowed", title: "Web search for release dates (source_search)", destination: "Air Check bridge" }],
   [150, { kind: "network", result: "allowed", title: "Checked for new Telegram messages", destination: "api.telegram.org" }],
   [298, { kind: "action", result: "done", title: "Fact-checked 31 tracks (2 open claims)" }],
 ] as const;
@@ -119,6 +123,7 @@ async function clearDemo(ctx: MutationCtx, now: number) {
   }
   // Every message has a run created with it, so a message younger than 24 h keeps its conversation.
   for (const m of await ctx.db.query("messages").filter((q) => q.eq(q.field("workspace"), WS)).collect()) if (dropped.has(m.conversationId)) await ctx.db.delete(m._id);
+  await clearDemoResearch(ctx, now);
 }
 
 /** Refreshes the demo workspace (see clearDemo). Never reads, changes or deletes a "real" row. */
@@ -142,9 +147,6 @@ export const seedDemo = internalMutation({
     const newest = now - 60_000;
     for (const [secondsBefore, row] of ACTIVITY) await ctx.db.insert("activity", { workspace: WS, at: newest - secondsBefore * 1000, ...row });
 
-    await ctx.db.insert("verifications", { workspace: WS, claim: "ALA.NI release date", status: "conflict" });
-    await ctx.db.insert("verifications", { workspace: WS, claim: "Silvan Strauss project credit", status: "could-not-verify", show: "10-2-26" });
-
     // Sample Honesty Rule (DESIGN.md): bracketed placeholders, never invented releases. Both radar tabs, one undated
     // embargo, and no players or links: no real music in the demo or the video (Plan 8, Hard Rule 9).
     for (const [i, row] of SAMPLE_RELEASES.entries()) {
@@ -154,6 +156,8 @@ export const seedDemo = internalMutation({
       const fields = { artist: "[Artist]", title: "[Release title]", label: "[Label]", ...row, ...("tags" in row && { tags: [...row.tags] }) };
       await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...sender, ...fields, searchText: searchTextOf(fields) });
     }
+
+    await seedSampleResearch(ctx, now);
 
     await ctx.db.insert("runs", {
       workspace: WS,

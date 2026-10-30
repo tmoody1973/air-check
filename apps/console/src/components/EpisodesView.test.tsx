@@ -366,3 +366,32 @@ describe("review fixes 4 and 6", () => {
     expect(within(r).getAllByText("—")).toHaveLength(3);
   });
 });
+
+describe("EpisodesView research (Plan 7)", () => {
+  it("a row with a tracklist offers Show notes; one with notes offers Pre-air verify; each opens the research page", async () => {
+    const startShowNotes = vi.fn(async () => ({ jobId: "rj-notes1" }));
+    const startVerify = vi.fn(async () => ({ jobId: "rj-check1" }));
+    const openResearch = vi.fn();
+    setup(
+      [ep("2026-01-09"), ep("2026-01-16", { notes: { status: "missing" } }), ep("2026-01-23", { tracklist: { status: "missing" }, notes: { status: "missing" } })],
+      { acts: actions({ startShowNotes, startVerify, openResearch }) },
+    );
+    await act(async () => fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Show notes" })));
+    expect(startShowNotes).toHaveBeenCalledWith({ showDate: "2026-01-09" });
+    expect(openResearch).toHaveBeenCalledWith("rj-notes1");
+    await act(async () => fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Pre-air verify" })));
+    expect(startVerify).toHaveBeenCalledWith({ showDate: "2026-01-09" });
+    expect(openResearch).toHaveBeenCalledWith("rj-check1");
+    expect(within(rowOf("2026-01-16")).queryByRole("button", { name: "Pre-air verify" })).not.toBeInTheDocument();
+    expect(within(rowOf("2026-01-23")).queryByRole("button", { name: "Show notes" })).not.toBeInTheDocument();
+  });
+
+  it("a refused start says why in the row", async () => {
+    const startShowNotes = vi.fn(async () => {
+      throw new ConvexError({ code: "BAD_INPUT", message: "Show notes for 2026-01-09 are already being written." });
+    });
+    setup([ep("2026-01-09")], { acts: actions({ startShowNotes, startVerify: vi.fn(), openResearch: vi.fn() }) });
+    await act(async () => fireEvent.click(within(rowOf("2026-01-09")).getByRole("button", { name: "Show notes" })));
+    expect(within(rowOf("2026-01-09")).getByRole("alert")).toHaveTextContent("already being written");
+  });
+});

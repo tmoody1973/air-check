@@ -2,17 +2,22 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-/** What must survive a restart: which ready cards went out, and a hash (never the key) of the connection Mixcloud refused. */
-export interface PublisherState { sentCards: string[]; rejectedToken?: string }
+/**
+ * What must survive a restart: which ready cards and which research cards went out (D12: kept apart, because ready
+ * cards are pruned to the packages in review), and a hash (never the key) of the connection Mixcloud refused.
+ */
+export interface PublisherState { sentCards: string[]; sentResearch: string[]; rejectedToken?: string }
 export interface StateBox { get(): PublisherState; update(change: (s: PublisherState) => PublisherState): Promise<void> }
 
 /** Missing or unreadable state starts empty. Every update is written whole and renamed into place (atomic). */
 export async function openState(path: string): Promise<StateBox> {
-  let current: PublisherState = { sentCards: [] };
+  let current: PublisherState = { sentCards: [], sentResearch: [] };
+  const ids = (x: unknown) => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string") : []);
   try {
     const raw = JSON.parse(await readFile(path, "utf8")) as Partial<PublisherState>;
     current = {
-      sentCards: Array.isArray(raw.sentCards) ? raw.sentCards.filter((x): x is string => typeof x === "string") : [],
+      sentCards: ids(raw.sentCards),
+      sentResearch: ids(raw.sentResearch),
       ...(typeof raw.rejectedToken === "string" ? { rejectedToken: raw.rejectedToken } : {}),
     };
   } catch { /* first run, or a damaged file: start empty */ }

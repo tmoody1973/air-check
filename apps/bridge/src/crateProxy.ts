@@ -19,8 +19,11 @@ export interface CrateProxy {
 const MAX_TIMEOUTS_IN_A_ROW = 3;
 const CONNECT_TIMEOUT_MS = 30_000;
 
-/** A stdio MCP client to Crate that shows and forwards allowlisted tools only. */
-export function createCrateProxy(opts: CrateProxyOptions): CrateProxy {
+/**
+ * A stdio MCP client to Crate that shows and forwards allowlisted tools only. `onResult` sees each successful result
+ * before the agent does (the source ledger's hook, Plan 7).
+ */
+export function createCrateProxy(opts: CrateProxyOptions, onResult?: (tool: string, result: CallToolResult) => CallToolResult): CrateProxy {
   const timeout = opts.timeoutMs;
   let current: Promise<Client> | undefined;
   let timeoutsInARow = 0;
@@ -77,7 +80,7 @@ export function createCrateProxy(opts: CrateProxyOptions): CrateProxy {
           timeout,
         });
         timeoutsInARow = 0;
-        return result as CallToolResult;
+        return onResult ? onResult(name, result as CallToolResult) : (result as CallToolResult);
       } catch (e) {
         // A child that keeps hanging without exiting is closed, so the next call spawns a fresh one.
         if (e instanceof McpError && e.code === ErrorCode.RequestTimeout && ++timeoutsInARow >= MAX_TIMEOUTS_IN_A_ROW) {

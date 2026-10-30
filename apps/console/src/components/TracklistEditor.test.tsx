@@ -141,3 +141,49 @@ describe("TracklistEditor", () => {
     expect(screen.queryByText("Signing you in…")).not.toBeInTheDocument();
   });
 });
+
+describe("TracklistEditor research entry points (Plan 7)", () => {
+  it("Write show notes starts show notes with the editor text and opens the research page", async () => {
+    const writeNotes = vi.fn(async () => ({ jobId: "rj-abc123" }));
+    const onNotes = vi.fn();
+    setup({ writeNotes, onNotes });
+    const write = screen.getByRole("button", { name: "Write show notes" });
+    expect(write).toBeDisabled();
+    type("Show date", "2026-10-02");
+    type("Tracklist", GOLDEN);
+    fireEvent.click(write);
+    await waitFor(() => expect(onNotes).toHaveBeenCalledWith("rj-abc123"));
+    expect(writeNotes).toHaveBeenCalledWith({ showDate: "2026-10-02", tracklistText: GOLDEN });
+  });
+
+  it("a refused start shows its plain reason", async () => {
+    const writeNotes = vi.fn(async () => {
+      throw new ConvexError({ code: "BAD_INPUT", message: "Show notes for 2026-10-02 are already being written." });
+    });
+    setup({ writeNotes, onNotes: vi.fn() });
+    type("Show date", "2026-10-02");
+    type("Tracklist", GOLDEN);
+    fireEvent.click(screen.getByRole("button", { name: "Write show notes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Show notes for 2026-10-02 are already being written.");
+  });
+
+  it("Use Air Check show notes fills the notes box for the date", async () => {
+    const loadNotes = vi.fn(async () => "- [Artist A] co-produced it. [[example.org](https://example.org/a)]");
+    setup({ loadNotes });
+    const use = screen.getByRole("button", { name: "Use Air Check show notes" });
+    expect(use).toBeDisabled();
+    type("Show date", "2026-10-02");
+    fireEvent.click(use);
+    await waitFor(() => expect(screen.getByLabelText(/Private notes/)).toHaveValue("- [Artist A] co-produced it. [[example.org](https://example.org/a)]"));
+    expect(loadNotes).toHaveBeenCalledWith("2026-10-02");
+  });
+
+  it("no finished show notes: says so and leaves the box alone", async () => {
+    setup({ loadNotes: vi.fn(async () => "") });
+    type("Show date", "2026-10-02");
+    type(/Private notes/, "mine");
+    fireEvent.click(screen.getByRole("button", { name: "Use Air Check show notes" }));
+    expect(await screen.findByText("No finished Air Check show notes for this date yet.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Private notes/)).toHaveValue("mine");
+  });
+});

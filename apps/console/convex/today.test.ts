@@ -24,9 +24,6 @@ describe("today.summary", () => {
       await t.mutation(internal.packages.attachAudio, { packageId: d.id, audio: { hour1Id: "a", hour2Id: "b", mp3Sha256: HASH } });
     }
     await t.run(async (ctx) => {
-      await ctx.db.insert("verifications", { workspace: "real", claim: "A", status: "conflict" });
-      await ctx.db.insert("verifications", { workspace: "real", claim: "B", status: "confirmed" });
-      await ctx.db.insert("verifications", { workspace: "demo", claim: "C", status: "could-not-verify" });
       const at = Date.now();
       await ctx.db.insert("releases", { workspace: "real", artist: "X", title: "1", label: "L1", receivedAt: at, source: "bandcamp" });
       await ctx.db.insert("releases", { workspace: "real", artist: "Y", title: "2", label: "L1", receivedAt: at, source: "bandcamp" });
@@ -38,14 +35,12 @@ describe("today.summary", () => {
 
     const r = await t.withIdentity(human).query(api.today.summary, {});
     expect(r?.awaiting).toEqual([{ packageId: "real-1", title: real.title, tracks: real.tracks.length, flags: real.flags?.length ?? 0 }]);
-    expect(r?.openClaims).toEqual([{ claim: "A", status: "conflict" }]);
     // Fix round 1: labels and items are the Bandcamp tab's only; co-signs are counted in byTab.
     expect(r?.releases).toMatchObject({ count: 3, labels: ["L1"], byTab: { bandcamp: 2, cosign: 1 } });
     expect(r?.releases.items.map((i) => i.tab)).toEqual(["bandcamp", "bandcamp"]);
 
     const d = await t.withIdentity(demo).query(api.today.summary, {});
     expect(d?.awaiting.map((a) => a.packageId)).toEqual(["demo-1"]);
-    expect(d?.openClaims).toEqual([{ claim: "C", status: "could-not-verify" }]);
     expect(d?.releases.count).toBe(1);
   });
 
@@ -102,5 +97,55 @@ describe("today.summary", () => {
     const r = await t.withIdentity(human).query(api.today.summary, {});
     expect(r?.blockedSince).toBe(2);
     expect(r?.blockedLatest).toEqual({ title: "newest", destination: "evil.example" });
+  });
+
+  describe("openClaims (Plan 7: from research)", () => {
+    type Ws = "real" | "demo";
+    const track = (key: string, artist: string, title: string, closing = false) => ({ key, hour: 1 as const, position: Number(key.split(".")[1]), artist, title, closing });
+    const tracks = [track("H1.1", "Alpha", "One"), track("H1.2", "Beta", "Secret"), track("H1.3", "Gamma", "Three", true)];
+    const claim = (kind: string, status: string) => ({ kind, text: "[x]", status, sources: [] });
+    async function seedJob(t: ReturnType<typeof convexTest>, j: { workspace?: Ws; jobId: string; kind?: "show-notes" | "verify"; showDate: string; status?: string; createdAt: number; lines?: unknown[] }, rows: [string, unknown[]][]) {
+      await t.run(async (ctx) => {
+        const workspace = j.workspace ?? "real";
+        await ctx.db.insert("research", { workspace, jobId: j.jobId, kind: j.kind ?? "show-notes", showDate: j.showDate, tracks, ...(j.lines && { lines: j.lines }), angles: true, status: j.status ?? "done", runIds: ["r"], continuations: 0, createdAt: j.createdAt, updatedAt: j.createdAt } as never);
+        for (const [key, claims] of rows) await ctx.db.insert("researchEntries", { workspace, jobId: j.jobId, key, block: key.startsWith("L") ? "line" : key.includes("threads") ? "threads" : "track", claims, savedAt: 1, updatedAt: 1 } as never);
+      });
+    }
+
+    test("newest done job per show date in the last 14 days; labels built in code; embargoed counted, never named", async () => {
+      vi.setSystemTime(Date.parse("2026-10-29T17:00:00Z"));
+      const t = convexTest(schema, modules);
+      await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Beta", title: "Secret", receivedAt: 1, embargo: { until: null } } as never));
+      // 10-23: show notes, done.
+      await seedJob(t, { jobId: "rj-notes1", showDate: "2026-10-23", createdAt: 10 }, [
+        ["H1.1", [claim("release-date", "conflict"), claim("label", "confirmed")]],
+        ["H1.2", [claim("label", "could-not-verify")]],
+        ["H1.threads", [claim("thread", "could-not-verify")]],
+      ]);
+      // R12: a block Tarik marked private is counted like an embargoed one, never named.
+      await t.run((ctx) => ctx.db.insert("researchEntries", { workspace: "real", jobId: "rj-notes1", key: "H2.9", block: "track", claims: [claim("label", "conflict")], private: { by: "tarik" }, savedAt: 1, updatedAt: 1 } as never));
+      // 10-30: an older done show-notes job is replaced by the newer done verify job; a running job is ignored.
+      await seedJob(t, { jobId: "rj-old001", showDate: "2026-10-30", createdAt: 20 }, [["H1.1", [claim("bio", "conflict")]]]);
+      await seedJob(t, { jobId: "rj-check1", kind: "verify", showDate: "2026-10-30", createdAt: 30, lines: [{ id: "L1", text: "x", trackKey: "H1.1", closing: false }, { id: "L2", text: "y", closing: false }] }, [
+        ["L1", [claim("credit", "could-not-verify")]],
+        ["L2", [claim("release-date", "conflict")]],
+      ]);
+      await seedJob(t, { jobId: "rj-run001", showDate: "2026-10-30", createdAt: 40, status: "running" }, [["H1.1", [claim("label", "conflict")]]]);
+      // Too old, and another workspace.
+      await seedJob(t, { jobId: "rj-older1", showDate: "2026-10-09", createdAt: 5 }, [["H1.1", [claim("label", "conflict")]]]);
+      await seedJob(t, { workspace: "demo", jobId: "rj-demo01", showDate: "2026-10-30", createdAt: 50 }, [["H1.1", [claim("label", "conflict")]]]);
+
+      const r = (await t.withIdentity(human).query(api.today.summary, {}))!;
+      expect(r.openClaims).toEqual([
+        { jobId: "rj-check1", label: "Alpha · credit", status: "could-not-verify" },
+        { jobId: "rj-check1", label: "L2 · release date", status: "conflict" },
+        { jobId: "rj-notes1", label: "Alpha · release date", status: "conflict" },
+        { jobId: "rj-notes1", label: "Hour 1 thread", status: "could-not-verify" },
+      ]);
+      expect(r.openClaimsPrivate).toBe(2);
+      expect(JSON.stringify(r)).not.toMatch(/Beta|Secret/);
+      const d = (await t.withIdentity(demo).query(api.today.summary, {}))!;
+      expect(d.openClaims).toEqual([{ jobId: "rj-demo01", label: "Alpha · label", status: "conflict" }]);
+    });
   });
 });

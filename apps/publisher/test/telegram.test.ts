@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, test } from "vitest";
 import { openState } from "../src/state.js";
-import { readTelegramSecrets, sendReadyCards, telegramSender } from "../src/telegram.js";
+import { cardsPass, readTelegramSecrets, sendReadyCards, sendResearchCards, telegramSender } from "../src/telegram.js";
 import { BOT_TOKEN, fakeConvex, fakeServer, workspace } from "./helpers.js";
 
 type Server = Awaited<ReturnType<typeof fakeServer>>;
@@ -21,14 +21,15 @@ async function setup() {
   const ws = await workspace();
   await writeFile(ws.secretsFile, `OTHER_SECRET=nope\nTELEGRAM_BOT_TOKEN=${BOT_TOKEN}\nTELEGRAM_ALLOWED_IDS=4242,999\n`);
   const list = [...review];
-  const fake = fakeConvex([], { review: list });
+  const research = [{ jobId: "rj-abc123", showDate: "2026-10-30", ready: true, changes: 2, open: 3 }, { jobId: "rj-def456", showDate: "2026-10-23", ready: true, changes: 0, open: 1 }];
+  const fake = fakeConvex([], { review: list, research });
   const logs: string[] = [];
   const deps = async () => ({
     convex: fake.convex, state: await openState(ws.stateFile), appUrl: "https://aircheck.example/",
     send: telegramSender(ws.secretsFile, server!.base), log: (l: string) => logs.push(l),
   });
   const sent = () => server!.seen.filter((s) => s.path.endsWith("/sendMessage"));
-  return { ws, fake, logs, deps, sent, list };
+  return { ws, fake, logs, deps, sent, list, research };
 }
 
 describe("ready cards", () => {
@@ -67,6 +68,72 @@ describe("ready cards", () => {
     const s = await setup();
     const send = telegramSender(s.ws.secretsFile, "http://127.0.0.1:1");
     expect(await send("hello")).toBe(false);
+  });
+});
+
+// Plan 7 Task 5 (D12): a finished pre-air check gets one Telegram line with a link to the signed-in console. Never the
+// report's text, never a button: nothing is approved or changed in Telegram.
+describe("research cards", () => {
+  test("one card per job, link only; two passes, a ready-card pass and a restart send no second card", async () => {
+    const s = await setup();
+    await sendResearchCards(await s.deps());
+    await sendResearchCards(await s.deps());
+    await sendReadyCards(await s.deps()); // prunes sentCards to packages in review; must not forget research cards
+    await sendResearchCards(await s.deps()); // a restart: fresh memory, same state file
+    const texts = s.sent().map((x) => JSON.parse(x.body.toString())).filter((b) => b.text.startsWith("Pre-air"));
+    expect(texts.map((b) => b.text)).toEqual([
+      "Pre-air verify · 10-30-26\n2 changes · 3 open\nOpen report: https://aircheck.example/research/rj-abc123",
+      "Pre-air verify · 10-23-26\n0 changes · 1 open\nOpen report: https://aircheck.example/research/rj-def456",
+    ]);
+    for (const b of texts) expect(b).not.toHaveProperty("reply_markup");
+    const state = JSON.parse(await readFile(s.ws.stateFile, "utf8"));
+    expect(state.sentResearch).toEqual(["rj-abc123", "rj-def456"]);
+    const lines = s.logs.filter((l) => l.includes("step=research_card"));
+    expect(lines).toHaveLength(2);
+    for (const line of lines) expect(line).toMatch(/^publish research=rj-[a-z0-9]+ step=research_card ok=true ms=\d+$/);
+  });
+
+  test("done -> queued (Regenerate or Resume) -> done again sends exactly one card; a job not ready yet waits", async () => {
+    const s = await setup();
+    s.research.splice(1, 1);
+    s.research[0] = { ...s.research[0]!, ready: false };
+    await sendResearchCards(await s.deps());
+    expect(s.sent()).toHaveLength(0);
+    s.research[0] = { ...s.research[0]!, ready: true };
+    await sendResearchCards(await s.deps());
+    s.research[0] = { ...s.research[0]!, ready: false }; // requeued: still listed, so its id is kept
+    await sendResearchCards(await s.deps());
+    expect(JSON.parse(await readFile(s.ws.stateFile, "utf8")).sentResearch).toEqual(["rj-abc123"]);
+    s.research[0] = { ...s.research[0]!, ready: true, changes: 3 };
+    await sendResearchCards(await s.deps());
+    expect(s.sent()).toHaveLength(1);
+  });
+
+  test("a failed send is retried next pass; a job past its 48 hours is forgotten", async () => {
+    const s = await setup();
+    await writeFile(s.ws.secretsFile, "TELEGRAM_ALLOWED_IDS=4242\n");
+    await sendResearchCards(await s.deps());
+    expect(s.sent()).toHaveLength(0);
+    await writeFile(s.ws.secretsFile, `TELEGRAM_BOT_TOKEN=${BOT_TOKEN}\nTELEGRAM_ALLOWED_IDS=4242\n`);
+    await sendResearchCards(await s.deps());
+    expect(s.sent()).toHaveLength(2);
+    s.research.splice(0, 1);
+    await sendResearchCards(await s.deps());
+    expect(JSON.parse(await readFile(s.ws.stateFile, "utf8")).sentResearch).toEqual(["rj-def456"]);
+  });
+});
+
+describe("cardsPass", () => {
+  test("ready cards then research cards, each failing alone with its own log step", async () => {
+    const s = await setup();
+    const deps = await s.deps();
+    await cardsPass({ ...deps, convex: { ...deps.convex, awaitingReview: async () => { throw new Error("down"); } } });
+    expect(s.logs).toContain("publish package=- step=cards ok=false ms=0");
+    expect(s.sent().map((x) => JSON.parse(x.body.toString()).text).filter((t: string) => t.startsWith("Pre-air"))).toHaveLength(2);
+    s.logs.length = 0;
+    await cardsPass({ ...deps, convex: { ...deps.convex, researchReady: async () => { throw new Error("down"); } } });
+    expect(s.logs).toContain("publish package=- step=research-cards ok=false ms=0");
+    expect(s.sent().map((x) => JSON.parse(x.body.toString()).text).filter((t: string) => t.startsWith("Rhythm Lab"))).toHaveLength(2);
   });
 });
 

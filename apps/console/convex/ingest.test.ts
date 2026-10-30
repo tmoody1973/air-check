@@ -265,6 +265,64 @@ describe("ingest.requestDraft", () => {
     expect(notes.endsWith("\n\nTarik's answers\nQ: Keep it?\nA: Yes.")).toBe(true);
   });
 
+  // Plan 7 Task 5 (design spec 5.7, R9): with no Paper notes, the draft's NOTES are Air Check's newest done show notes,
+  // as notesForDraft renders them: sourced facts only, no private block, no track an embargo holds (undated included).
+  describe("notes from Air Check's show notes", () => {
+    const rtrack = (t: (typeof TRACKS)[number]) => ({ key: `H${t.hour}.${t.position}`, hour: t.hour, position: t.position, artist: t.artist, title: t.title, closing: t.closing });
+    const fact = (text: string) => ({ kind: "detail" as const, text, status: "sourced" as const, sources: [{ url: "https://label.example/a", host: "label.example", title: "A", via: "tavily", primary: true, matched: true }] });
+    async function notesJob(t: T, jobId: string, status: "done" | "stopped", createdAt: number, entries: Record<string, { text: string; private?: true }>) {
+      await t.run(async (ctx) => {
+        await ctx.db.insert("research", {
+          workspace: "real", jobId, kind: "show-notes", showDate: "2026-01-02", tracks: TRACKS.map(rtrack), angles: false, status, runIds: [`run-${jobId}`],
+          continuations: 0, createdAt, updatedAt: createdAt, finishedAt: createdAt,
+        });
+        for (const [key, e] of Object.entries(entries))
+          await ctx.db.insert("researchEntries", {
+            workspace: "real", jobId, key, block: key.endsWith(".threads") ? "threads" : "track", claims: [fact(e.text)], savedAt: createdAt, updatedAt: createdAt,
+            ...(e.private && { private: { by: "tarik" as const } }),
+          });
+      });
+    }
+    const seed = async (t: T) => {
+      await t.run((ctx) => ctx.db.insert("releases", { workspace: "real", artist: "Kokoroko", title: "Abusey Junction", embargo: { until: null } }));
+      await notesJob(t, "rj-done01", "done", 1, {
+        "H1.1": { text: "Alfa fact from a label page." }, "H2.1": { text: "Kokoroko embargo fact." },
+        "H1.threads": { text: "Private thread text.", private: true }, "H2.threads": { text: "A shared thread." },
+      });
+      await notesJob(t, "rj-stop01", "stopped", 2, { "H1.1": { text: "Stopped job fact." } });
+    };
+
+    test("Paper notes missing: NOTES come from the newest done job, with nothing private or embargoed", async () => {
+      const t = convexTest(schema, modules);
+      await upsert(t, episode({ notes: { status: "missing" } }));
+      await seed(t);
+      expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" })).toMatchObject({ queued: true });
+      const [run] = await runs(t);
+      const notes = run!.form!.notes;
+      expect(notes).toMatch(/Alfa fact from a label page\./);
+      expect(notes).toMatch(/A shared thread\./);
+      for (const leak of [/Kokoroko/, /Abusey/, /Private thread/, /Stopped job/]) expect(notes).not.toMatch(leak);
+      expect(run!.input!.indexOf("Alfa fact")).toBeGreaterThan(run!.input!.indexOf("NOTES (untrusted)"));
+    });
+
+    test("Paper notes present: they are used, and Air Check's are not added", async () => {
+      const t = convexTest(schema, modules);
+      await upsert(t, episode());
+      await seed(t);
+      await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" });
+      const notes = (await runs(t))[0]!.form!.notes;
+      expect(notes).toBe("Private: Alfa Mist told me about the new record.");
+    });
+
+    test("held to the 20,000-character cap", async () => {
+      const t = convexTest(schema, modules);
+      await upsert(t, episode({ notes: { status: "missing" } }));
+      await notesJob(t, "rj-long01", "done", 1, Object.fromEntries(Array.from({ length: 2 }, (_, i) => [i ? "H2.1" : "H1.1", { text: "x".repeat(15_000) }])));
+      await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" });
+      expect((await runs(t))[0]!.form!.notes.length).toBeLessThanOrEqual(20_000);
+    });
+  });
+
   // Review Focus 4: two scans in a row queue one run.
   test("is idempotent per show date: a second request while the run is open queues nothing", async () => {
     const t = convexTest(schema, modules);

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -469,5 +469,309 @@ describe("deploy files", () => {
     const w = read("hermes/watchdog.sh");
     expect(w).toContain('"Hermes forward|systemctl is-active --quiet aircheck-hermes-forward"');
     expect(w).toContain('"Demo Hermes forward|systemctl is-active --quiet aircheck-hermes-demo-forward"');
+  });
+});
+
+// Plan 7 Task 6 step 0: the scripts Tarik runs to go live. Each runs here against stub commands, with fake secrets
+// that must never be printed.
+describe("Plan 7 go-live scripts", { timeout: 30_000 }, () => {
+  const stub = (dir: string, name: string, body: string) => {
+    writeFileSync(join(dir, name), `#!/bin/bash\n${body}\n`);
+    chmodSync(join(dir, name), 0o755);
+  };
+  const run = (script: string, args: string[], env: Record<string, string>, input = "") => {
+    try {
+      const out = execFileSync("bash", [resolve(__dirname, script), ...args], { env: { ...process.env, ...env }, input, encoding: "utf8", stdio: "pipe" });
+      return { code: 0, out, err: "" };
+    } catch (e: any) {
+      return { code: e.status as number, out: String(e.stdout), err: String(e.stderr) };
+    }
+  };
+  const SECRETS = ["fake-tavily-value", "crate-token-value", "aircheck-token-value", "old-gw-token", "new-gw-token", "TEAMFAKE01", "KEYFAKE001", "FAKEKEYBODY"];
+  const noSecrets = (text: string) => SECRETS.forEach((s) => expect(text).not.toContain(s));
+
+  describe("reonboard-without-tavily.sh", () => {
+    const sh = read("hermes/reonboard-without-tavily.sh");
+    const REPO = resolve(__dirname, "..");
+    const SKILLS = ["rlr-description-safety", "rlr-mixcloud-title-and-tags", "rlr-show-notes", "rlr-pre-air-verify", "rlr-deep-dive"];
+    const OVERRIDE = 'SECRETS="${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"\nset -a; . "$SECRETS"; set +a';
+    const ONBOARD_LOG = 'echo "secrets=$SECRETS mode=$(ls -l "$SECRETS" | cut -c1-10) search_key_lines=$(printenv | grep -c "^TAV[I]LY_API_KEY=") telegram=${TELEGRAM_BOT_TOKEN:+present}" >> "$HOME/onboard.log"'; // never names it, or the guard stops
+
+    const setup = (
+      o: { reonboard?: string; busy?: boolean | "after-prompt"; policy?: string; gateway?: string; extraSkill?: string; status?: string; backupFails?: boolean; bridgeEnv?: string } = {},
+    ) => {
+      const home = mkdtempSync(join(tmpdir(), "reonboard-"));
+      const bin = join(home, ".local/bin");
+      for (const d of [".local/bin", ".aircheck", ".airc", "fix/skills/rlr-show-notes"]) mkdirSync(join(home, d), { recursive: true });
+      writeFileSync(join(home, "fix/config.yaml"), "skills:\n  write_approval: true\n");
+      writeFileSync(join(home, "fix/skills/rlr-show-notes/SKILL.md"), "x");
+      writeFileSync(join(home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nexport TAVILY_API_KEY=fake-tavily-value\nCOMPATIBLE_API_KEY=m\n");
+      writeFileSync(join(home, ".aircheck/bridge.env"), o.bridgeEnv ?? "CRATE_MCP_TOKEN=crate-token-value\nAIRCHECK_MCP_TOKEN=aircheck-token-value\n");
+      writeFileSync(join(home, ".aircheck/relay.env"), "CONVEX_URL=https://x\nAIRC_GATEWAY_TOKEN=old-gw-token\n");
+      writeFileSync(join(home, ".aircheck/watchdog.sh"), read("hermes/watchdog.sh"));
+      writeFileSync(join(home, ".aircheck/reonboard.sh"), `${o.reonboard ?? OVERRIDE}\n${ONBOARD_LOG}\n`);
+      const row = (n: string) => `│ ${n} │ │ local │ local │ enabled │`;
+      const listing = [...SKILLS, ...(o.extraSkill ? [o.extraSkill] : [])].map(row).join("\n");
+      stub(bin, "id", '[ "$1" = -un ] && echo user || echo 1001');
+      const estab = 'echo "ESTAB 0 0 127.0.0.1:8642 127.0.0.1:50000"';
+      // "after-prompt": quiet at the first look, busy at the second (a run started while Tarik read the prompt).
+      stub(bin, "ss", o.busy === "after-prompt" ? `echo x >> "${home}/ss.count"; [ "$(wc -l < "${home}/ss.count")" -ge 2 ] && ${estab}; true` : o.busy ? estab : "true");
+      stub(bin, "sudo", `echo "$*" >> "${home}/sudo.log"`);
+      stub(bin, "systemctl", "echo active");
+      stub(bin, "curl", "echo 200");
+      stub(bin, "timeout", 'shift; exec "$@"');
+      stub(bin, "openshell", `case "$*" in
+  *tar*) ${o.backupFails ? 'echo "sandbox not found" >&2; exit 1' : `tar -czf - -C "${home}/fix" config.yaml skills`} ;;
+  *"skills list"*) printf '%s\\n' '${listing}' ;;
+  *"config get"*) printf '0\\ntrue\\n' ;;
+esac`);
+      stub(bin, "nemohermes", `echo "$*" >> "${home}/nemohermes.log"
+case "$*" in
+  "airc status") echo "${o.status ?? "Phase: Ready"}"; echo "Policies: pypi, telegram" ;;
+  "airc policy get") printf '%s\\n' '${o.policy ?? "network_policies:\\n  telegram_bot: {}"}' ;;
+  "airc mcp status crate --json --tools") echo '{"registered": true, "state": "ready"}' ;;
+  "airc mcp status aircheck --json --tools") echo '{"registered": true, "tools": ["package_submit", "source_search", "research_submit"]}' ;;
+  "airc gateway-token --quiet") echo "${o.gateway ?? "new-gw-token"}" ;;
+  *"skill list") printf '%s\\n' ${SKILLS.join(" ")} ;;
+esac`);
+      const go = (...flags: string[]) => run("hermes/reonboard-without-tavily.sh", [...flags, REPO], { HOME: home, PATH: `${bin}:${process.env.PATH}`, TAVILY_API_KEY: "fake-tavily-value" }, "rebuild\n");
+      const file = (f: string) => (existsSync(join(home, f)) ? readFileSync(join(home, f), "utf8") : "");
+      return { home, go, file };
+    };
+    const RESTORE = ["systemctl start --no-block aircheck-hermes-forward", "systemctl start aircheck-relay aircheck-watchdog.timer"];
+    const PAUSE = "systemctl stop aircheck-watchdog.timer aircheck-watchdog.service aircheck-relay aircheck-hermes-forward";
+
+    it("never holds a key, and pins DEPLOY's crate command with every --deny-tool flag", () => {
+      expect(sh).not.toMatch(/tvly-|TAVILY_API_KEY=[^'"\s]/);
+      const crate = read("../docs/DEPLOY.md").split("\n").find((l) => l.startsWith("nemohermes airc mcp add crate "))!;
+      expect(crate.match(/--deny-tool/g)).toHaveLength(9);
+      expect(sh.split("\n")).toContain(crate);
+      expect(sh.split("\n")).toContain("nemohermes airc mcp add aircheck --url https://10.104.0.41:8443/aircheck/mcp --env AIRCHECK_MCP_TOKEN --trusted-private-host 10.104.0.41");
+      expect(sh).toContain('bash "$REPO/deploy/hermes/apply-agent-config.sh" --with-skills "$REPO"');
+      expect(sh).toContain("trap cleanup EXIT");
+      // The checks, in order, at the end.
+      const checks = ["ok: nemohermes airc status lists no tavily policy", "ok: policy get has no _provider_airc_tavily_search and no api.tavily.com",
+        "ok: mcp status crate is ready", "ok: mcp status aircheck --tools lists source_search and research_submit",
+        "ok: skill list shows the rlr- skills", "ok: skills.creation_nudge_interval 0 and skills.write_approval true read back",
+        "ok: /health on 8642 is 200", "send the Telegram bot a message and confirm it replies"];
+      const at = checks.map((c) => sh.indexOf(c));
+      expect(at.every((i) => i > sh.indexOf("== 9. Checks"))).toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+    });
+
+    it("rebuilds with a mode-600 secrets copy minus TAVILY_API_KEY, backs up, re-adds MCP, locks skills, restores, and passes", () => {
+      const t = setup();
+      const r = t.go();
+      expect(r.err).toBe("");
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("All checks passed.");
+      noSecrets(r.out + r.err);
+      const onboard = t.file("onboard.log");
+      expect(onboard).toMatch(/^secrets=.*\/\.aircheck\/secrets\.reonboard\.\w+ mode=-rw------- search_key_lines=0 telegram=present\n$/);
+      const copy = onboard.split(" ")[0]!.slice("secrets=".length);
+      expect(existsSync(copy)).toBe(false); // deleted on exit
+      expect(t.file(".airc/secrets.env")).toContain("TAVILY_API_KEY=fake-tavily-value"); // the original is untouched
+      const backups = execFileSync("ls", [join(t.home, ".aircheck/agent-skill-backup")], { encoding: "utf8" }).trim().split("\n");
+      expect(backups).toHaveLength(1);
+      expect(backups[0]).toMatch(/^airc-\d{8}-\d{6}\.tgz$/);
+      const nh = t.file("nemohermes.log").split("\n");
+      expect(nh.filter((l) => l.startsWith("airc mcp add ")).map((l) => l.split(" ")[3])).toEqual(["crate", "aircheck"]);
+      expect(nh.indexOf("airc mcp restart")).toBeGreaterThan(nh.findIndex((l) => l.startsWith("airc mcp add aircheck")));
+      for (const sb of ["airc", "aircdemo"]) for (const s of SKILLS) expect(nh).toContain(`${sb} skill install ${REPO}/skills/${s}`);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      expect(t.file(".aircheck/relay.env")).toBe("CONVEX_URL=https://x\nAIRC_GATEWAY_TOKEN=new-gw-token\n");
+      expect(t.file(".aircheck/relay.env.pre-reonboard")).toContain("old-gw-token");
+    });
+
+    it("stops before changing anything while a run uses 8642, or when reonboard.sh has no secrets setting to point at a copy", () => {
+      const busy = setup({ busy: true }).go();
+      expect(busy.code).toBe(1);
+      expect(busy.err).toContain("a draft or research run is talking to Hermes on 8642");
+      const fixed = setup({ reonboard: '. "$HOME/.airc/secrets.env"\nSECRETS=x' });
+      const r = fixed.go();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain('replace the secrets.env path on the line(s) above with "${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"');
+      expect(r.err).toContain('1:. "$HOME/.airc/secrets.env"');
+      expect(fixed.file("sudo.log")).toBe("");
+      expect(fixed.file("onboard.log")).toBe("");
+      const named = setup({ reonboard: `${OVERRIDE}\nexport NEMOCLAW_POLICY_PRESETS=pypi,tavily,telegram` });
+      const n = named.go();
+      expect(n.code).toBe(1);
+      expect(n.err).toContain("3:export NEMOCLAW_POLICY_PRESETS=<hidden>");
+      expect(named.file("sudo.log")).toBe("");
+      const extra = setup();
+      writeFileSync(join(extra.home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nTAVILY_API_KEY=fake-tavily-value\nTAVILY_PROJECT=fake-tavily-value\n");
+      const e = extra.go();
+      expect(e.code).toBe(1);
+      expect(e.err).toContain("secrets.env names Tavily in more than TAVILY_API_KEY (names only):\nTAVILY_PROJECT\n");
+      expect(extra.file("sudo.log")).toBe("");
+      noSecrets(e.out + e.err);
+    });
+
+    it("a failure mid-way still restores the forward, relay and watchdog, and deletes the secrets copy", () => {
+      const t = setup({ gateway: "" });
+      const r = t.go();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("gateway-token printed nothing");
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      expect(execFileSync("ls", [join(t.home, ".aircheck")], { encoding: "utf8" })).not.toContain("secrets.reonboard");
+      noSecrets(r.out + r.err);
+    });
+
+    it("stops and prints the Tavily provider rule when it comes back; stops on an agent-made skill", () => {
+      const back = setup({ policy: "network_policies:\\n  _provider_airc_tavily_search:\\n    endpoints: [api.tavily.com/search, api.tavily.com/extract]" }).go();
+      expect(back.code).toBe(1);
+      expect(back.err).toContain("_provider_airc_tavily_search:");
+      expect(back.err).toContain("do not try to delete it");
+      const extra = setup({ extraSkill: "mixcloud-package-submission" }).go();
+      expect(extra.code).toBe(1);
+      expect(extra.err).toContain("a skill the repo did not install: mixcloud-package-submission");
+    });
+
+    const AGAIN = "Run this script again (add --from-error if the sandbox is not Ready).";
+
+    it("a stop after the re-onboard step (or reonboard.sh failing) says to run this script again, never reonboard.sh", () => {
+      const tok = setup({ gateway: "" }).go();
+      expect(tok.code).toBe(1);
+      expect(tok.err).toContain(AGAIN);
+      const t = setup({ reonboard: `${OVERRIDE}\nexit 3` });
+      const r = t.go();
+      expect(r.code).not.toBe(0);
+      expect(r.err).toContain(AGAIN);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      expect(execFileSync("ls", [join(t.home, ".aircheck")], { encoding: "utf8" })).not.toContain("secrets.reonboard");
+      // A stop before the re-onboard step does not say it.
+      const before = setup({ busy: true }).go();
+      expect(before.err).not.toContain(AGAIN);
+      noSecrets(tok.out + tok.err + r.out + r.err);
+    });
+
+    it("an airc that is not Ready stops (Phase: *Ready, not a bare Ready) and points at --from-error", () => {
+      for (const status of ["Phase: Error", "Phase: Provisioning\nGateway: Ready"]) {
+        const t = setup({ status });
+        const r = t.go();
+        expect(r.code, status).toBe(1);
+        expect(r.err).toContain("--from-error");
+        expect(t.file("sudo.log")).toBe("");
+      }
+      expect(sh).toContain("'Phase: *Ready'");
+    });
+
+    it("--from-error skips the Ready check, goes on without a backup when airc is unreachable, and does the key-free rebuild", () => {
+      const t = setup({ status: "Phase: Error", backupFails: true });
+      const r = t.go("--from-error");
+      expect(r.err).not.toContain("STOP");
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("All checks passed.");
+      expect(r.out).toContain("no backup");
+      expect(t.file("onboard.log")).toMatch(/search_key_lines=0 telegram=present\n$/);
+      expect(existsSync(join(t.home, ".aircheck/agent-skill-backup")) ? execFileSync("ls", [join(t.home, ".aircheck/agent-skill-backup")], { encoding: "utf8" }) : "").toBe("");
+      const nh = t.file("nemohermes.log").split("\n");
+      expect(nh.filter((l) => l.startsWith("airc mcp add ")).map((l) => l.split(" ")[3])).toEqual(["crate", "aircheck"]);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+      noSecrets(r.out + r.err);
+      // Without the flag, a failed backup still stops before the rebuild.
+      const strict = setup({ backupFails: true });
+      const s = strict.go();
+      expect(s.code).toBe(1);
+      expect(s.err).toContain("airc was not rebuilt");
+      expect(strict.file("onboard.log")).toBe("");
+    });
+
+    it("re-checks 8642 after the prompt, advises tmux before it, and stops kindly on a missing bridge token", () => {
+      const late = setup({ busy: "after-prompt" });
+      const l = late.go();
+      expect(l.code).toBe(1);
+      expect(l.err).toContain("a draft or research run is talking to Hermes on 8642");
+      expect(late.file("sudo.log")).toBe("");
+      expect(sh.indexOf("run inside tmux (or nohup)")).toBeGreaterThan(-1);
+      expect(sh.indexOf("run inside tmux (or nohup)")).toBeLessThan(sh.indexOf("Type rebuild"));
+      expect(l.out).toContain("a dropped SSH session mid-rebuild is the riskiest moment");
+      const tok = setup({ bridgeEnv: "CRATE_MCP_TOKEN=crate-token-value\n" });
+      const r = tok.go();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN");
+      expect(tok.file("sudo.log")).toBe("");
+      noSecrets(r.out + r.err);
+    });
+
+    it("DEPLOY rebuilds airc only through this script, Error section included", () => {
+      const deploy = read("../docs/DEPLOY.md");
+      const errSection = deploy.slice(deploy.indexOf("**If the sandbox is in `Error` anyway**"), deploy.indexOf("### The supervised forwards"));
+      expect(errSection).toContain("bash ~/air-check/deploy/hermes/reonboard-without-tavily.sh --from-error");
+      expect(deploy).not.toMatch(/[Rr]un `?~\/\.aircheck\/reonboard\.sh/);
+      expect(deploy).toContain(AGAIN);
+    });
+  });
+
+  it("install-skills.sh installs the two description skills and the three research skills (Plan 7)", () => {
+    expect(read("hermes/install-skills.sh").split("\n")).toContain(
+      "SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags rlr-show-notes rlr-pre-air-verify rlr-deep-dive)",
+    );
+    for (const s of ["rlr-show-notes", "rlr-pre-air-verify", "rlr-deep-dive"]) expect(existsSync(resolve(__dirname, `../skills/${s}/SKILL.md`))).toBe(true);
+  });
+
+  describe("bridge/add-research-keys.sh", () => {
+    const sh = read("bridge/add-research-keys.sh");
+    const setup = () => {
+      const home = mkdtempSync(join(tmpdir(), "research-keys-"));
+      const bin = join(home, "bin");
+      for (const d of ["bin", ".aircheck/bridge", ".airc", ".aircheck-local"]) mkdirSync(join(home, d), { recursive: true });
+      // An empty placeholder from bridge.env.example, and no final newline.
+      writeFileSync(join(home, ".aircheck/bridge.env"), "BRIDGE_HOST=10.0.0.9\nBRIDGE_PORT=8443\nTAVILY_API_KEY=\nCRATE_MCP_TOKEN=crate-token-value");
+      chmodSync(join(home, ".aircheck/bridge.env"), 0o600);
+      writeFileSync(join(home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nexport TAVILY_API_KEY=fake-tavily-value\n");
+      writeFileSync(join(home, ".aircheck-local/applemusic.env"), "APPLE_MUSIC_TEAM_ID=TEAMFAKE01\nAPPLE_MUSIC_KEY_ID=KEYFAKE001\n# note\n");
+      const p8 = join(home, "AuthKey_KEYFAKE001.p8");
+      writeFileSync(p8, "-----BEGIN PRIVATE KEY-----\nFAKEKEYBODY\n-----END PRIVATE KEY-----\n");
+      stub(bin, "ssh", 'shift; exec bash -c "$1"'); // the "VM" is this machine, HOME included
+      stub(bin, "sudo", `echo "$*" >> "${home}/sudo.log"`);
+      stub(bin, "curl", "echo ok");
+      stub(bin, "journalctl", "echo 'bridge listening on 10.0.0.9:8443'; echo 'apple_music=available'");
+      const env = { HOME: home, PATH: `${bin}:${process.env.PATH}`, AIRCHECK_VM: "user@vm" };
+      return { home, p8, go: () => run("bridge/add-research-keys.sh", [p8], env), file: (f: string) => readFileSync(join(home, f), "utf8") };
+    };
+
+    it("holds no secret, guards a missing final newline, and refuses a second line for a name", () => {
+      expect(sh).not.toMatch(/tvly-|(TAVILY_API_KEY|APPLE_MUSIC_TEAM_ID|APPLE_MUSIC_KEY_ID)=[A-Za-z0-9]/);
+      expect(sh).toContain('[ -z "$(tail -c1 "$f")" ] || echo >> "$f"');
+      expect(sh).toContain('if has "$name"; then echo "$name: already set in bridge.env, left alone"; continue; fi');
+    });
+
+    it("adds each key once, VM to VM for Tavily, prints only counts, /healthz and apple_music=; a second run changes nothing", () => {
+      const t = setup();
+      const first = t.go();
+      expect(first.err).toBe("");
+      expect(first.code).toBe(0);
+      noSecrets(first.out);
+      const env = t.file(".aircheck/bridge.env");
+      expect(env).toBe(
+        "BRIDGE_HOST=10.0.0.9\nBRIDGE_PORT=8443\nCRATE_MCP_TOKEN=crate-token-value\nTAVILY_API_KEY=fake-tavily-value\nAPPLE_MUSIC_TEAM_ID=TEAMFAKE01\n" +
+          `APPLE_MUSIC_KEY_ID=KEYFAKE001\nAPPLE_MUSIC_KEY_FILE=${t.home}/.aircheck/bridge/AuthKey.p8\n`,
+      );
+      expect(t.file(".aircheck/bridge/AuthKey.p8")).toBe(readFileSync(t.p8, "utf8"));
+      for (const f of [".aircheck/bridge/AuthKey.p8", ".aircheck/bridge.env"]) expect(statSync(join(t.home, f)).mode & 0o777, f).toBe(0o600);
+      for (const n of ["TAVILY_API_KEY", "APPLE_MUSIC_TEAM_ID", "APPLE_MUSIC_KEY_ID", "APPLE_MUSIC_KEY_FILE"]) expect(first.out).toContain(`${n}: 1 line(s)`);
+      expect(first.out).toContain("bridge /healthz: ok");
+      expect(first.out.trim().split("\n").at(-1)).toBe("apple_music=available");
+      expect(t.file("sudo.log")).toBe("systemctl restart aircheck-bridge\n");
+      const second = t.go();
+      expect(second.code).toBe(0);
+      expect(t.file(".aircheck/bridge.env")).toBe(env);
+      expect(second.out.match(/already set in bridge.env, (left alone|key file left alone)/g)).toHaveLength(4);
+      noSecrets(second.out);
+    });
+
+    it("a key file path from bridge.env.example whose file is missing counts as unset: writes the .p8 and keeps one line", () => {
+      expect(read("bridge/bridge.env.example").split("\n")).toContain("APPLE_MUSIC_KEY_FILE=");
+      const t = setup();
+      writeFileSync(join(t.home, ".aircheck/bridge.env"), "BRIDGE_HOST=10.0.0.9\nBRIDGE_PORT=8443\nAPPLE_MUSIC_KEY_FILE=/nowhere/AuthKey.p8\n");
+      const r = t.go();
+      expect(r.code).toBe(0);
+      const env = t.file(".aircheck/bridge.env");
+      expect(env.match(/^APPLE_MUSIC_KEY_FILE=.*$/gm)).toEqual([`APPLE_MUSIC_KEY_FILE=${t.home}/.aircheck/bridge/AuthKey.p8`]);
+      expect(t.file(".aircheck/bridge/AuthKey.p8")).toBe(readFileSync(t.p8, "utf8"));
+      noSecrets(r.out);
+    });
   });
 });

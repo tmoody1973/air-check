@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Fragment, useState, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { fetchErrorText } from "../lib/episodes";
-import { AnswerBox, AudioAsk, DraftFailedLine, LINK, MarkForm, RerunLine, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
+import { AnswerBox, AudioAsk, DraftFailedLine, LINK, MarkForm, RerunLine, ResearchButtons, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
 import { CorrectedLine, FixControl, hasAudioFix, TracklistFixButton, withoutHandCopy } from "./FixControl";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl } from "./PublishStatus";
@@ -157,6 +157,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
   if (marking && canMark) details.push(<MarkForm key="mark" showDate={showDate} ctx={ctx} onClose={() => setMarking(false)} />);
   const date = showDateLabel(showDate);
   const id = `ep-${showDate}`;
+  const research = e && ctx.actions.openResearch ? <ResearchButtons e={e} ctx={ctx} className={ROW_ACTION} /> : null;
 
   if (layout === "card")
     return (
@@ -177,10 +178,11 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
         ) : (
           <p className="mt-2 text-sm text-muted">{BLANK}</p>
         )}
-        {(link || watch || onEdit || onMark) && (
+        {(link || watch || onEdit || onMark || research) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-4">
             {link}
             {watch}
+            {research}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
           </div>
@@ -203,6 +205,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
             <Pill tone={tone}>{word}</Pill>
             {link}
             {watch}
+            {research}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
           </div>

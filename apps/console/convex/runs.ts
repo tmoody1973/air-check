@@ -1,5 +1,8 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx } from "./_generated/server";
+import { sessionKeyOf } from "./demoLimits";
 import { actorOf, workspaceOf } from "./gate";
 import { sourceOf, statusOf } from "./runDefaults";
 
@@ -20,21 +23,29 @@ export const get = query({
 });
 
 /**
- * Stop button. queued (or a scripted run) -> cancelled, Hermes never started or the replay halts;
- * running -> stopping + stopRequested, which the relay picks up; anything finished is left alone.
+ * Stops one run. queued (or a scripted run) -> cancelled, Hermes never started or the replay halts; running -> stopping
+ * + stopRequested, which the relay picks up; anything finished is left alone. A research run cancelled here gets no
+ * relay.finished, so its job's hook is scheduled here instead.
  */
+export async function stopRun(ctx: MutationCtx, run: Doc<"runs">): Promise<void> {
+  const now = Date.now();
+  const status = statusOf(run);
+  if (status === "queued" || (status === "running" && sourceOf(run) === "scripted")) {
+    await ctx.db.patch(run._id, { status: "cancelled", state: { ...run.state, status: "cancelled" }, updatedAt: now });
+    if (run.kind === "research") await ctx.scheduler.runAfter(0, internal.research.onRunFinished, { runId: run.runId });
+  } else if (status === "running") {
+    await ctx.db.patch(run._id, { status: "stopping", stopRequested: true, state: { ...run.state, status: "stopping" }, updatedAt: now });
+  }
+}
+
+/** Stop button. In the demo only the visitor who started the run may stop it (the same rule as research's ownJob). */
 export const requestStop = mutation({
   args: { runId: v.string() },
   handler: async (ctx, { runId }) => {
     const ws = workspaceOf(await actorOf(ctx));
     const run = ws ? await ctx.db.query("runs").withIndex("by_runId", (q) => q.eq("runId", runId)).unique() : null;
     if (!run || run.workspace !== ws) throw new ConvexError({ code: "NOT_FOUND" });
-    const now = Date.now();
-    const status = statusOf(run);
-    if (status === "queued" || (status === "running" && sourceOf(run) === "scripted")) {
-      await ctx.db.patch(run._id, { status: "cancelled", state: { ...run.state, status: "cancelled" }, updatedAt: now });
-    } else if (status === "running") {
-      await ctx.db.patch(run._id, { status: "stopping", stopRequested: true, state: { ...run.state, status: "stopping" }, updatedAt: now });
-    }
+    if (ws === "demo" && run.sessionKey !== (await sessionKeyOf(ctx))) throw new ConvexError({ code: "NOT_FOUND" });
+    await stopRun(ctx, run);
   },
 });

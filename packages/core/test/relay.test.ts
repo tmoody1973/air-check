@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type AgentPackageInput, buildTitle, DESCRIPTION_SKILL_TEXT, titleLeadsBudget, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine, RUN_INSTRUCTIONS } from "../src/index";
+import { type AgentPackageInput, buildTitle, DESCRIPTION_SKILL_TEXT, titleLeadsBudget, applyRunEvent, buildPackageDraft, formatTrack, draftPackageInput, initialRun, parseAuditLine, RESEARCH_SKILL_TEXT, researchInput, type ResearchTrack, RUN_INSTRUCTIONS, numberLines, showNotesMarkdown } from "../src/index";
+import { sampleView } from "./helpers/researchSample";
 import { goldenDescription, goldenPackageTitles, leadsOf } from "./helpers/fixtures";
 import { goldenDraft, goldenTracks } from "./helpers/goldens";
 
@@ -129,7 +130,71 @@ describe("RUN_INSTRUCTIONS", () => {
     expect(RUN_INSTRUCTIONS).toMatch(/rlr-description-safety skill/);
     expect(RUN_INSTRUCTIONS).toMatch(/descriptionSources/);
     expect(RUN_INSTRUCTIONS).toMatch(/package_get before revising/);
-    expect(RUN_INSTRUCTIONS.length).toBeLessThan(800);
+    // Plan 7 added the source_search sentence (977 characters then); the cap stays well under Hermes's limit.
+    expect(RUN_INSTRUCTIONS.length).toBeLessThan(1000);
+    expect(RUN_INSTRUCTIONS).toMatch(/source_search/);
+    expect(RUN_INSTRUCTIONS).toMatch(/never write or save skills/);
     expect(RUN_INSTRUCTIONS).not.toContain(DESCRIPTION_SKILL_TEXT.slice(0, 40));
+  });
+});
+
+describe("researchInput", () => {
+  const T = (key: string, artist: string, title: string, closing = false): ResearchTrack => {
+    const [h, p] = key.slice(1).split(".").map(Number);
+    return { key, hour: h as 1 | 2, position: p!, artist, title, closing };
+  };
+  const tracks = [T("H1.1", "Opener Artist", "First"), T("H1.2", "Second Artist", "Middle"), T("H1.15", "Closer Artist", "Last Song", true), T("H2.1", "Third Artist", "Late")];
+  const job = { jobId: "rj-abc123", kind: "show-notes" as const, showDate: "2026-10-30", tracks, keys: ["H1.intro", "H1.1", "H2.1"], angles: true, searchesLeft: 7 };
+
+  it("lists only the keys still to do, a closing track as skipped by key only, the searches left and the skill (Review Focus 3)", () => {
+    const text = researchInput(job);
+    expect(text).toContain("rj-abc123");
+    expect(text).toContain("H1.1 Opener Artist – \"First\"");
+    expect(text).toContain("H1.intro");
+    expect(text).toContain("H1.15 · closing track, skipped");
+    expect(text.match(/H1\.15/g)).toHaveLength(1);
+    expect(text).not.toContain("Closer Artist");
+    expect(text).not.toContain("Second Artist");
+    expect(text).toContain("7 web searches left today");
+    expect(text).toMatch(/Crate first/);
+    expect(text).toMatch(/untrusted/);
+    expect(text).toContain("If research_submit refuses twice for the same key, skip it and move on");
+    expect(text).toContain("never send artist, title or URL fields");
+    expect(text).toContain(RESEARCH_SKILL_TEXT["show-notes"]);
+    expect(text).toMatch(/On-air angle|angle/);
+  });
+
+  it("does not ask for angles when they are off", () => {
+    expect(researchInput({ ...job, angles: false })).toMatch(/Do not write angles/);
+  });
+
+  it("keeps an embargoed track off web search without saying why (R2, R8)", () => {
+    const text = researchInput({ ...job, embargoes: [{ artist: "Third Artist", title: "Late", until: "2026-11-06" }] });
+    const keyPart = text.slice(text.indexOf(RESEARCH_SKILL_TEXT["show-notes"]) + RESEARCH_SKILL_TEXT["show-notes"].length);
+    expect(keyPart).toContain("H2.1 Third Artist – \"Late\" · Crate only, no source_search");
+    expect(keyPart).not.toContain("H1.1 Opener Artist – \"First\" · Crate only");
+    expect(keyPart).not.toMatch(/embargo|2026-11-06/i);
+  });
+
+  it("offers a verify job its line ids, never a closing track's lines, and no embargo marker from Air Check's own notes (D3)", () => {
+    const view = { ...sampleView };
+    const lines = numberLines(showNotesMarkdown(view, { forAgent: true }), view.tracks);
+    const text = researchInput({ jobId: "rj-ver001", kind: "verify", showDate: "2026-10-30", lines, embargoes: view.embargoes, angles: true, searchesLeft: 0 });
+    expect(text).toContain(RESEARCH_SKILL_TEXT.verify);
+    expect(text).not.toMatch(/embargoed|2026-11-06|date not known/i);
+    expect(text).not.toContain("[Artist C]");
+    expect(text).not.toContain("[Artist E]");
+    expect(text).toMatch(/No web searches left today/);
+    const l = lines.find((x) => x.text.startsWith("- [Artist A] co-produced"))!;
+    expect(text).toContain(`${l.id} [H1.1] ${l.text}`);
+  });
+
+  it("asks a deep dive for one brief block with connections by key", () => {
+    const text = researchInput({ jobId: "rj-dd0001", kind: "deep-dive", subject: { type: "label", name: "[Label A]" }, tracks, angles: true, searchesLeft: 3 });
+    expect(text).toContain("[Label A]");
+    expect(text).toContain("brief");
+    expect(text).toContain("H1.15 · closing track, skipped");
+    expect(text).not.toContain("Closer Artist");
+    expect(text).toContain(RESEARCH_SKILL_TEXT["deep-dive"]);
   });
 });

@@ -84,7 +84,7 @@ fi
 # Agent-made skills. On Oct 27 the agent wrote itself a skill with wrong limits (docs/FRICTION_LOG.md, Oct 28).
 # Any local skill the repo did not install gets one alert per sandbox and name, remembered in SKILLS_SEEN.
 # Keep REPO_SKILLS equal to SKILLS in install-skills.sh (deploy/deploy.test.ts checks). Names only.
-REPO_SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags)
+REPO_SKILLS=(rlr-description-safety rlr-mixcloud-title-and-tags rlr-show-notes rlr-pre-air-verify rlr-deep-dive)
 SKILLS_SEEN="${HOME}/.aircheck/watchdog.skills-seen"
 for sb in airc aircdemo; do
   # Reads what the Agent skills probe saved this run. Rows look like

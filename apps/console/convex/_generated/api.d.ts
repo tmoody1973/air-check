@@ -29,6 +29,7 @@ import type * as packages from "../packages.js";
 import type * as publisher from "../publisher.js";
 import type * as radar from "../radar.js";
 import type * as relay from "../relay.js";
+import type * as research from "../research.js";
 import type * as runDefaults from "../runDefaults.js";
 import type * as runs from "../runs.js";
 import type * as sandbox from "../sandbox.js";
@@ -36,6 +37,7 @@ import type * as scripted from "../scripted.js";
 import type * as scriptedEvents from "../scriptedEvents.js";
 import type * as seed from "../seed.js";
 import type * as seedData from "../seedData.js";
+import type * as seedResearch from "../seedResearch.js";
 import type * as today from "../today.js";
 import type * as tracklist from "../tracklist.js";
 
@@ -67,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   publisher: typeof publisher;
   radar: typeof radar;
   relay: typeof relay;
+  research: typeof research;
   runDefaults: typeof runDefaults;
   runs: typeof runs;
   sandbox: typeof sandbox;
@@ -74,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   scriptedEvents: typeof scriptedEvents;
   seed: typeof seed;
   seedData: typeof seedData;
+  seedResearch: typeof seedResearch;
   today: typeof today;
   tracklist: typeof tracklist;
 }>;

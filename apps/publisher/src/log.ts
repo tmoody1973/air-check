@@ -1,6 +1,7 @@
-/** A package id, or a description update and its package (Plan 5c Task 4). */
-export type Who = string | { update: string; package: string };
-export const whoTag = (who: Who) => (typeof who === "string" ? `package=${who}` : `update=${who.update} package=${who.package}`);
+/** A package id, a description update and its package (Plan 5c Task 4), or a research job (Plan 7). */
+export type Who = string | { update: string; package: string } | { research: string };
+export const whoTag = (who: Who) =>
+  typeof who === "string" ? `package=${who}` : "research" in who ? `research=${who.research}` : `update=${who.update} package=${who.package}`;
 
 /**
  * Hard Rule 8: the only log lines, `publish package=<id> step=<step> ok=<bool> ms=<n>` and, for a description update,

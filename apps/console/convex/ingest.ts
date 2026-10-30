@@ -1,24 +1,17 @@
 import { episodeStatus, formatTracklist } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
-import { sameToken } from "./agentSubmit";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import { requireIngest } from "./agentSubmit";
 import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, inScope, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
+import { draftNotesFromResearch } from "./research";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
-import { MAX_NOTES, queueDraft } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES, queueDraft } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
-// INGEST_TOKEN first, in constant time, and fails closed when it is unset or shorter than 32 characters. A token equal
-// to another service's or the agent's would let one act as the other, so that refuses everything too (M7).
+// INGEST_TOKEN first (requireIngest, in agentSubmit.ts beside sameToken), in constant time, and fails closed.
 // Hard Rule 1: nothing here reaches a package. requestDraft only queues the Tracklist page's draft-package run: the agent
 // drafts, Tarik approves. Hard Rule 2: the episode shape has no field for a credential or a URL.
-export function requireIngest(token: string): void {
-  const { INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN } = process.env;
-  const shared = [MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN].includes(INGEST_TOKEN);
-  if (shared || !sameToken(token, INGEST_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
-}
-
-const MAX_NOTES_BYTES = 65_536;
 const MAX_TRACKS = 100;
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
@@ -145,13 +138,16 @@ export const setFetch = mutation({
 
 /**
  * The draft's notes: the Paper text, then Tarik's answers (R4). Both land in the instruction's untrusted-notes section.
- * M3: held to the Tracklist page's cap; the Paper text is cut first so the answers survive.
+ * Plan 7 Task 5 (design spec 5.7): with no Paper notes, Air Check's newest done show notes for the date stand in, as
+ * notesForDraft renders them (sourced facts only; nothing private, edited or embargoed; R9).
+ * M3: held to the Tracklist page's cap; the notes are cut first so the answers survive.
  */
-function draftNotes(e: Doc<"episodes">): string {
+async function draftNotes(ctx: QueryCtx, e: Doc<"episodes">): Promise<string> {
   const answered = e.questions.filter((q) => q.answer);
   const answers = answered.length ? ["Tarik's answers", ...answered.map((q) => `Q: ${q.text}\nA: ${q.answer}`)].join("\n") : "";
   const room = Math.max(0, MAX_NOTES - (answers ? answers.length + 2 : 0));
-  return [(e.notes.text ?? "").slice(0, room), answers].filter(Boolean).join("\n\n").slice(0, MAX_NOTES);
+  const notes = e.notes.text?.trim() ? e.notes.text : await draftNotesFromResearch(ctx, "real", e.showDate);
+  return [notes.slice(0, room), answers].filter(Boolean).join("\n\n").slice(0, MAX_NOTES);
 }
 
 /**
@@ -184,7 +180,7 @@ export const requestDraft = mutation({
     if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;
     const tracks = row.tracklist.tracks ?? [];
     if (!tracks.length) return { queued: false, reason: "missing-tracklist" } as const;
-    const runId = await queueDraft(ctx, "real", { showDate, tracklistText: formatTracklist(tracks), notes: draftNotes(row) });
+    const runId = await queueDraft(ctx, "real", { showDate, tracklistText: formatTracklist(tracks), notes: await draftNotes(ctx, row) });
     return { queued: true, runId } as const;
   },
 });

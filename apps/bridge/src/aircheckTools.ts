@@ -24,10 +24,10 @@ const properties: Record<keyof AgentPackageInput, object> = {
 };
 const FIELDS = Object.keys(properties);
 
-const result = (text: string, isError = false): CallToolResult => ({ content: [{ type: "text", text }], isError });
+export const result = (text: string, isError = false): CallToolResult => ({ content: [{ type: "text", text }], isError });
 
 /** POSTs only the named fields of `args` with the bearer token; null when Air Check could not be reached. */
-async function postFields(
+export async function postFields(
   doFetch: typeof fetch,
   url: string,
   token: string,
@@ -44,13 +44,15 @@ async function postFields(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
-    return { status: res.status, data: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+    const data: unknown = await res.json().catch(() => ({}));
+    // JSON null, a number or an array is no answer object: treat it as empty so callers can read fields safely.
+    return { status: res.status, data: data !== null && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {} };
   } catch {
     return null;
   }
 }
 
-const problemList = (data: Record<string, unknown>) => (Array.isArray(data.problems) ? data.problems.map(String) : ["(no details)"]);
+export const problemList = (data: Record<string, unknown>) => (Array.isArray(data.problems) ? data.problems.map(String) : ["(no details)"]);
 
 export interface PackageSubmitTool {
   tool: Tool;

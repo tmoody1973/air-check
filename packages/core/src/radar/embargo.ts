@@ -37,8 +37,11 @@ export function embargoTitle(s: string): string {
   return normalize(t);
 }
 
-/** Every artist an artist field credits, folded: the whole field and each part split on &, ",", x, and, with, feat. */
-function credits(s: string): Set<string> {
+/**
+ * Every artist an artist field credits, folded: the whole field and each part split on &, ",", x, and, with, feat.
+ * Shared with Plan 7's past-show counts; callers compare parts by whole equality, so "Ama" never matches "Ama Ferrell".
+ */
+export function credits(s: string): Set<string> {
   const l = lower(s);
   return new Set([normalize(l), ...l.split(CREDIT).map(normalize)].filter(Boolean));
 }

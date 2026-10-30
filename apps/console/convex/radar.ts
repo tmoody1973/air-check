@@ -25,7 +25,7 @@ import { internalQuery, mutation, type MutationCtx, query, type QueryCtx } from 
 import { sameToken } from "./agentSubmit";
 import { requireRealHuman } from "./episodes";
 import { actorOf, type Workspace, workspaceOf } from "./gate";
-import { requireIngest } from "./ingest";
+import { requireIngest } from "./agentSubmit";
 import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from "./schema";
 
 // Plan 8: the release radar. Forwarded email is untrusted data (Hard Rule 5). The one write an email may cause is its

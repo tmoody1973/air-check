@@ -5,7 +5,7 @@ import { ConvexError } from "convex/values"; // untyped on purpose: apps/console
 export interface PendingRun {
   runId: string;
   workspace: "real" | "demo";
-  kind: "chat" | "draft-package";
+  kind: "chat" | "draft-package" | "research";
   input: string;
   /** Fixed scope (core RUN_INSTRUCTIONS); undefined on rows queued before the field existed. */
   instructions: string | undefined;

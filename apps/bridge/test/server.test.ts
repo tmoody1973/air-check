@@ -30,6 +30,7 @@ beforeAll(async () => {
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       convexHits.push({ auth: req.headers.authorization, body, url: req.url });
+      if (req.url === "/agent/research") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ saved: "H1.1", claims: 1, verify: 0, dropped: [] }));
       if (req.url === "/agent/packages/get") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", status: "awaiting_review" }));
       const revise = req.url === "/agent/packages/revise";
       res.writeHead(revise ? 200 : 201, { "content-type": "application/json" }).end(JSON.stringify({ packageId: "pkg-stub", ...(revise && { status: "awaiting_review" }) }));
@@ -54,7 +55,8 @@ beforeAll(async () => {
   };
   server = await startServer({ ...base, demoMcpToken: demoToken, demoSubmitToken: "m".repeat(40) });
   port = (server.address() as AddressInfo).port;
-  bareServer = await startServer(base);
+  // An unreadable Apple Music key must not stop the bridge (R6): the option just says it is not configured.
+  bareServer = await startServer({ ...base, appleMusic: { teamId: "TEAM123456", keyId: "KEY1234567", keyFile: `${dir}/missing.p8` } });
   barePort = (bareServer.address() as AddressInfo).port;
 });
 afterAll(async () => {
@@ -122,7 +124,7 @@ describe("bridge HTTPS server", () => {
     const r = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/list") });
     expect(r.status).toBe(200);
     const names = JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep"]);
+    expect(names).toEqual(["bandcamp_search_bandcamp", "musicbrainz_echo", "musicbrainz_exit", "musicbrainz_sleep", "wikipedia_links"]);
   });
 
   it("/crate/mcp forwards an allowed call and refuses a hidden one", async () => {
@@ -151,9 +153,9 @@ describe("bridge HTTPS server", () => {
     expect(r.status).toBe(400);
   });
 
-  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun and radar_get only", async () => {
+  it("/aircheck/mcp lists package_submit, package_revise, package_get, episode_mark_rerun, radar_get, source_search and research_submit only", async () => {
     const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/list") });
-    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get"]);
+    expect(JSON.parse(r.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
   });
 
   it("/aircheck/mcp refuses an unknown tool name", async () => {
@@ -214,7 +216,7 @@ describe("bridge HTTPS server", () => {
 
   it("/aircheck-demo/mcp lists package_submit and submits with the demo Convex token", async () => {
     const list = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
-    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get"]);
+    expect(JSON.parse(list.body).result.tools.map((t: { name: string }) => t.name)).toEqual(["package_submit", "package_revise", "package_get", "episode_mark_rerun", "radar_get", "source_search", "research_submit"]);
     convexHits.length = 0;
     const args = { showDate: "2026-10-09", tracklistText: "t", leads: ["A"], tags: ["x"], description: "d", hour1Id: "1", hour2Id: "2" };
     const r = await send("/aircheck-demo/mcp", {
@@ -232,6 +234,39 @@ describe("bridge HTTPS server", () => {
     expect(onDemo.status).toBe(401);
     const onReal = await send("/aircheck/mcp", { method: "POST", token: demoToken, body: rpc("tools/list") });
     expect(onReal.status).toBe(401);
+  });
+
+  it("Crate results carry source ids that research_submit on /aircheck/mcp resolves (one ledger)", async () => {
+    const crate = await send("/crate/mcp", { method: "POST", token: crateToken, body: rpc("tools/call", { name: "wikipedia_links", arguments: {} }) });
+    const content = JSON.parse(crate.body).result.content as { text: string }[];
+    const sources = content.at(-1)!.text;
+    // R8b: the off-family link (label.example) gets no id.
+    expect(sources).toMatch(/^Sources:\n\[S[0-9a-z]{5}\] en\.wikipedia\.org$/);
+    const ids = [...sources.matchAll(/\[(S[0-9a-z]{5})\]/g)].map((m) => m[1]!);
+    convexHits.length = 0;
+    const claim = { kind: "release-date", text: "Album A came out on 2026-10-10.", value: "2026-10-10", sources: ids.map((id) => ({ id })) };
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, body: rpc("tools/call", { name: "research_submit", arguments: { job: "rj-abc123", key: "H1.1", claims: [claim] } }) });
+    const out = JSON.parse(r.body).result;
+    expect(out.content[0].text).toBe("Saved H1.1: 1 claim (0 marked [verify]).");
+    expect(convexHits).toHaveLength(1);
+    expect(convexHits[0]!.url).toBe("/agent/research");
+    expect(convexHits[0]!.auth).toBe(`Bearer ${"s".repeat(40)}`);
+    const posted = JSON.parse(convexHits[0]!.body);
+    expect(Object.values(posted.sources).map((s) => (s as { url: string }).url)).toEqual(["https://en.wikipedia.org/wiki/Album_A"]);
+  });
+
+  it("source_search without a Tavily key answers plainly and calls nothing", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck-demo/mcp", { method: "POST", token: demoToken, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a" } }) });
+    expect(JSON.parse(r.body).result.content[0].text).toBe("Web search is not configured on the bridge. Tell the operator; do not retry.");
+    expect(convexHits).toHaveLength(0);
+  });
+
+  it("starts with an unreadable Apple Music key, and source_search apple_music answers plainly and calls nothing", async () => {
+    convexHits.length = 0;
+    const r = await send("/aircheck/mcp", { method: "POST", token: aircheckToken, port: barePort, body: rpc("tools/call", { name: "source_search", arguments: { query: "artist a", source: "apple_music" } }) });
+    expect(JSON.parse(r.body).result.content[0].text).toBe("Apple Music is not configured on the bridge. Use web search or Crate instead; do not retry.");
+    expect(convexHits).toHaveLength(0);
   });
 
   it("has no /aircheck-demo/mcp route when the demo pair is unset", async () => {

@@ -1,4 +1,5 @@
-import type { AgentPackageInput } from "@aircheck/core";
+import type { AgentPackageInput, ClaimKind, ResolvedSource } from "@aircheck/core";
+import { ConvexError } from "convex/values";
 
 export const MIN_TOKEN_LENGTH = 32;
 
@@ -16,6 +17,17 @@ function sameBytes(a: string, b: string): boolean {
 export function sameToken(given: string, expected: string | undefined): boolean {
   if (!expected || expected.length < MIN_TOKEN_LENGTH) return false;
   return sameBytes(given, expected);
+}
+
+/**
+ * The ingest service's check (Plan 6), here beside sameToken so ingest.ts and radar.ts share it without importing each
+ * other's modules. INGEST_TOKEN in constant time; fails closed when unset or shorter than 32 characters. A token equal
+ * to another service's or the agent's would let one act as the other, so that refuses everything too (M7).
+ */
+export function requireIngest(token: string): void {
+  const { INGEST_TOKEN, MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN } = process.env;
+  const shared = [MEDIA_TOKEN, PUBLISHER_TOKEN, RELAY_TOKEN, AGENT_SUBMIT_TOKEN, DEMO_AGENT_SUBMIT_TOKEN, INBOX_TOKEN].includes(INGEST_TOKEN);
+  if (shared || !sameToken(token, INGEST_TOKEN)) throw new ConvexError({ code: "UNAUTHORIZED" });
 }
 
 export function tokenMatches(header: string | null, expected: string | undefined): boolean {
@@ -99,4 +111,84 @@ export function pickRevision(body: unknown): AgentRevision | null {
   if (typeof b.packageId !== "string" || typeof b.description !== "string") return null;
   // Optional; its shape is checked (with plain messages) by checkDescriptionChange.
   return { packageId: b.packageId, description: b.description, ...(b.descriptionSources !== undefined && { descriptionSources: b.descriptionSources }) };
+}
+
+// Plan 7: the research route's body. Known fields only, at every level (Review Focus 4): an artist, title or URL the agent
+// adds is dropped here, so a block can only carry the agent's own words and the cited sources' text.
+type ResearchClaim = { kind: ClaimKind; text: string; value?: string; sources: { id: string; says?: string; primary?: boolean }[] };
+export type ResearchSource = ResolvedSource & { id: string };
+export type ResearchSubmit = {
+  job: string;
+  key: string;
+  claims?: ResearchClaim[];
+  intro?: string;
+  threads?: ResearchClaim[];
+  angle?: string;
+  note?: string;
+  replacement?: string;
+  private?: { reason?: string };
+  sources: ResearchSource[];
+};
+// A Record keyed by core's type, so a kind added or removed in core fails the typecheck here.
+const CLAIM_KINDS: Record<ClaimKind, true> = {
+  release: true, "release-date": true, label: true, credit: true, "track-number": true, length: true, bio: true, detail: true, thread: true, connection: true,
+};
+const MAX_ID = 40;
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+const optStr = (x: unknown) => x === undefined || typeof x === "string";
+const shortStr = (x: unknown): x is string => typeof x === "string" && x.length > 0 && x.length <= MAX_ID;
+
+function pickClaim(c: unknown): ResearchClaim | null {
+  if (!isObj(c) || typeof c.kind !== "string" || !Object.hasOwn(CLAIM_KINDS, c.kind) || typeof c.text !== "string" || !optStr(c.value) || !Array.isArray(c.sources)) return null;
+  const sources: ResearchClaim["sources"] = [];
+  for (const s of c.sources) {
+    if (!isObj(s) || !shortStr(s.id) || !optStr(s.says) || (s.primary !== undefined && typeof s.primary !== "boolean")) return null;
+    sources.push({ id: s.id, ...(s.says !== undefined && { says: s.says as string }), ...(s.primary !== undefined && { primary: s.primary as boolean }) });
+  }
+  return { kind: c.kind as ClaimKind, text: c.text, ...(c.value !== undefined && { value: c.value as string }), sources };
+}
+
+function pickSource(id: string, s: unknown): ResearchSource | null {
+  if (!isObj(s)) return null;
+  const { url, host, title, via, text } = s;
+  if (![url, host, title, via, text].every((x) => typeof x === "string")) return null;
+  return { id, url: url as string, host: host as string, title: title as string, via: via as string, text: text as string };
+}
+
+/** The research block the agent posts, or plain problems. Only the cited ids' sources are kept. */
+export function pickResearch(body: unknown): { input: ResearchSubmit } | { problems: string[] } {
+  if (!isObj(body) || !shortStr(body.job) || !shortStr(body.key)) return { problems: ["body must have job and key, the ids from your research job"] };
+  const problems: string[] = [];
+  const input: ResearchSubmit = { job: body.job, key: body.key, sources: [] };
+  for (const field of ["claims", "threads"] as const) {
+    const list = body[field];
+    if (list === undefined) continue;
+    const picked = Array.isArray(list) ? list.map(pickClaim) : [null];
+    if (picked.some((c) => c === null)) problems.push(`${field} must be a list of { kind, text, value?, sources: [{ id, says?, primary? }] }`);
+    else input[field] = picked as ResearchClaim[];
+  }
+  for (const field of ["intro", "angle", "note", "replacement"] as const) {
+    if (!optStr(body[field])) problems.push(`${field} must be text`);
+    else if (body[field] !== undefined) input[field] = body[field] as string;
+  }
+  if (body.private !== undefined) {
+    if (!isObj(body.private) || !optStr(body.private.reason)) problems.push("private must be { reason }");
+    else input.private = body.private.reason === undefined ? {} : { reason: body.private.reason as string };
+  }
+  const cited = new Set([...(input.claims ?? []), ...(input.threads ?? [])].flatMap((c) => c.sources.map((s) => s.id)));
+  const given = isObj(body.sources) ? body.sources : {};
+  for (const id of cited) {
+    if (!Object.hasOwn(given, id)) continue; // reported by submitEntry, which names the id
+    const s = pickSource(id, given[id]);
+    if (s) input.sources.push(s);
+    else problems.push("sources must be the cited ids' sources, as the bridge sends them");
+  }
+  return problems.length ? { problems: [...new Set(problems)] } : { input };
+}
+
+/** POST /agent/search-usage: `{ query }` (web) or `{ query, source: "apple_music" }`; anything else is null. */
+export function pickSearchUsage(body: unknown): { query: string; source?: "apple_music" } | null {
+  if (!isObj(body) || typeof body.query !== "string" || body.query.length > 1_000) return null;
+  if (body.source === undefined || body.source === "web") return { query: body.query };
+  return body.source === "apple_music" ? { query: body.query, source: "apple_music" } : null;
 }

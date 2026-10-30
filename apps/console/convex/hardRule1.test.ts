@@ -63,20 +63,30 @@ test("the public writes are exactly the allowlist", async () => {
       "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed",
       // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
       "radar.setFavorite",
+      // Plan 7: a signed-in human (the demo actor in the demo workspace) starts and steers research. Research writes only
+      // research rows and queues research runs; none can reach a package or the publisher.
+      "research.startShowNotes", "research.startVerify", "research.startDeepDive", "research.takeOver", "research.resume",
+      "research.regenerate", "research.editEntry", "research.setPrivate", "research.setSuppliedNote", "research.retarget",
       // Listening-queue brief B: the catch-up script (INBOX_TOKEN, not a human) repairs artist, title and label from the
       // same kept email and re-queues a Bandcamp page fetch. It reaches no package (Hard Rule 1).
       "radar.reparse",
     ].sort(),
   );
   expect(internal.sort()).toEqual(
-    ["episodes.agentMarkRerun", "packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo"].sort(),
+    [
+      "episodes.agentMarkRerun", "packages.attachAudio", "packages.claimForPublish", "packages.recordResult", "packages.revise", "packages.submit", "scripted.step", "seed.seedDemo",
+      // Plan 7: the agent's research route, its search counter, and the hook relay.finished schedules for research runs.
+      "research.submitEntry", "research.countSearch", "research.onRunFinished",
+      // Plan 7 Task 5: the Thursday/Friday cron's verify start, and the play-history lookup with its one save.
+      "research.scheduledVerify", "research.playContext", "research.savePlayContext",
+    ].sort(),
   );
 });
 
 // The chat/run/relay code sits next to the publish path, so it must not touch it: no publish or decide
 // function by name, no calls into packages.ts, and the packages table is only ever read (relay.events reads it
 // for the run's packageId). This is a source-text check: it cannot see a call built from a computed string.
-const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "sandbox", "enqueue", "applyEvents", "runs", "runDefaults"];
+const RUN_FILES = ["relay", "chat", "tracklist", "scripted", "scriptedEvents", "demoLimits", "sandbox", "enqueue", "applyEvents", "runs", "runDefaults", "research"];
 const src = (name: string) => readFileSync(new URL(`./${name}.ts`, import.meta.url), "utf8");
 
 test("run, chat and relay code never reach packages.decide or the publish functions", () => {
@@ -108,12 +118,15 @@ test("run, chat and relay code never write the packages table", () => {
   }
 });
 
-test("the only HTTP routes are the agent's submit, revise, read-only get, rerun mark and read-only radar", () => {
-  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([["/agent/episodes/rerun", "POST"], ["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"], ["/agent/radar", "POST"]]);
+test("the only HTTP routes are the agent's submit, revise, read-only get, rerun mark, read-only radar, research and search usage", () => {
+  expect(http.getRoutes().map(([path, method]) => [path, method]).sort()).toEqual([
+    ["/agent/episodes/rerun", "POST"], ["/agent/packages", "POST"], ["/agent/packages/get", "POST"], ["/agent/packages/revise", "POST"], ["/agent/radar", "POST"],
+    ["/agent/research", "POST"], ["/agent/search-usage", "POST"],
+  ]);
 });
 
-test("the agent routes reach only internal.packages.submit, internal.packages.revise, internal.packages.agentGet, internal.episodes.agentMarkRerun and internal.radar.agentList", () => {
-  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet", "internal.episodes.agentMarkRerun", "internal.radar.agentList"];
+test("the agent routes reach only internal.packages.submit, internal.packages.revise, internal.packages.agentGet, internal.episodes.agentMarkRerun, internal.radar.agentList, internal.research.submitEntry and internal.research.countSearch", () => {
+  const allowed = ["internal.packages.submit", "internal.packages.revise", "internal.packages.agentGet", "internal.episodes.agentMarkRerun", "internal.radar.agentList", "internal.research.submitEntry", "internal.research.countSearch"];
   for (const file of ["./http.ts", "./agentSubmit.ts"]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const refs = new Set(src.match(/\b(?:internal|api)\.\w+\.\w+/g) ?? []);
@@ -143,6 +156,27 @@ const fnBody = (text: string, decl: string) => {
   const body = text.slice(text.indexOf(decl));
   return body.slice(0, body.indexOf("\n});"));
 };
+
+// Plan 7 (Hard Rule 1): each research route runs exactly one internal mutation, its own, through agentRequest (so the
+// ingest and inbox tokens are refused, R11). research.ts never touches a package or a description update.
+test("the research routes each run one ctx.runMutation to their own function, and research.ts stays off the publish path", () => {
+  const text = src("http");
+  for (const [handler, ref, path] of [["submitResearch", "internal.research.submitEntry", "/agent/research"], ["searchUsage", "internal.research.countSearch", "/agent/search-usage"]] as const) {
+    const body = fnBody(text, `const ${handler} = httpAction(`);
+    expect([...body.matchAll(/ctx\.(\w+)\(([^,)]*)/g)].map((m) => `${m[1]} ${m[2]}`), handler).toEqual([`runMutation ${ref}`]);
+    expect(body, handler).toMatch(/await agentRequest\(req\)/);
+    expect(text).toContain(`path: "${path}", method: "POST", handler: ${handler}`);
+  }
+  const research = src("research");
+  for (const banned of ["packages", "descriptionUpdates", "gateFor", "ApprovalGate", "publisher", "runAction", "fetch("]) expect(research, `research.ts mentions ${banned}`).not.toContain(banned);
+  for (const name of ["submitEntry", "countSearch", "onRunFinished", "scheduledVerify", "savePlayContext"]) expect(research).toMatch(new RegExp(`export const ${name} = internalMutation\\(`));
+  // Plan 7 Task 5: the one network use is play history, through core's lastPlayed (Hard Rule 3 is checked there).
+  expect(research).toMatch(/export const playContext = internalAction\(/);
+  expect([...research.matchAll(/\bfetch\b/g)]).toHaveLength(research.match(/lastPlayed\(fetch, /g)?.length ?? -1);
+  expect(research.match(/lastPlayed\(fetch, /g)).toHaveLength(1);
+  // No import cycle: ingest.ts reads research.ts (Air Check notes for a draft), so research.ts and radar.ts never import ingest.ts.
+  for (const name of ["research", "radar"]) expect(src(name), `${name}.ts imports ingest`).not.toMatch(/from "\.\/ingest"/);
+});
 
 test("packages.revise (the agent's) calls only gateFor(ctx).revise, after the workspace check", () => {
   const fn = fnBody(src("packages"), "export const revise = internalMutation(");
@@ -232,7 +266,7 @@ test("the agent route files import only what they should and make one ctx.run ca
   const agent = read("./agentSubmit.ts");
   expect(agent).not.toMatch(/_generated/);
   expect(agent).not.toMatch(/\bctx\b/);
-  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation", "ctx.runQuery"]);
+  expect(httpSrc.match(/ctx\.run\w*/g)).toEqual(["ctx.runMutation", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation", "ctx.runQuery", "ctx.runMutation", "ctx.runMutation"]);
 });
 
 // The agent reads a package before it revises one. Read-only: an internal query (Convex gives it no writer), and its
@@ -354,6 +388,7 @@ test("the relay's, the agent's and the ingest service's tokens are refused by ev
       t.mutation(api.publisher.setMixcloud, { token, state: "connected" }),
       t.mutation(api.publisher.unclaim, { token, packageId: id }),
       t.query(api.publisher.awaitingReview, { token }),
+      t.query(api.publisher.researchReady, { token }),
       t.query(api.media.statuses, { token, packageIds: [id] }),
       t.mutation(api.descriptionUpdates.claim, { token }),
     ];

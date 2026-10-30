@@ -44,6 +44,7 @@ export default function TodayPage() {
   const { isSignedIn } = useAuth();
   // Plan 8: the card counts the Bandcamp tab only; co-signs get their own line.
   const bandcampNew = s?.releases.byTab.bandcamp ?? 0;
+  const openCount = s ? s.openClaims.length + s.openClaimsPrivate : 0;
 
   return (
     <Shell title="Today">
@@ -96,21 +97,29 @@ export default function TodayPage() {
 
               <Card
                 title="Claims that failed verification"
-                badge={s.openClaims.length > 0 && <Pill tone="caution">{s.openClaims.length} open</Pill>}
+                badge={openCount > 0 && <Pill tone="caution">{openCount} open</Pill>}
               >
-                {s.openClaims.length === 0 ? (
+                {openCount === 0 ? (
                   <Empty>No open claims.</Empty>
                 ) : (
-                  <ul className="divide-y divide-line">
-                    {s.openClaims.map((c, i) => (
-                      <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-sm first:pt-0">
-                        <span>{c.claim}</span>
-                        <Pill tone={c.status === "conflict" ? "caution" : "problem"}>
-                          {c.status === "conflict" ? "Sources disagree" : "Could not verify"}
-                        </Pill>
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {s.openClaims.length > 0 && (
+                      <ul className="divide-y divide-line">
+                        {s.openClaims.map((c, i) => (
+                          <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-sm first:pt-0">
+                            <Link href={`/research/${c.jobId}`} className={`${link} [overflow-wrap:anywhere]`}>{c.label}</Link>
+                            <Pill tone={c.status === "conflict" ? "caution" : "problem"}>
+                              {c.status === "conflict" ? "Sources disagree" : "Could not verify"}
+                            </Pill>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {/* Counted, never named: no artist or title of a private block or an embargoed release reaches the digest. */}
+                    {s.openClaimsPrivate > 0 && (
+                      <p className="pt-2.5 text-sm text-ink-soft">{s.openClaimsPrivate}{s.openClaims.length > 0 ? " more" : ""} on private or embargoed blocks (not named)</p>
+                    )}
+                  </>
                 )}
               </Card>
 
@@ -187,7 +196,7 @@ export default function TodayPage() {
                     <li>
                       Bandcamp: {plural(bandcampNew, "release")}, {plural(s.releases.labels.length, "label")}
                     </li>
-                    <li>Verification: {plural(s.openClaims.length, "open item")}</li>
+                    <li>Verification: {plural(openCount, "open item")}</li>
                     <li>Blocked overnight: {plural(s.blockedSince, "request")}</li>
                   </ul>
                 </div>

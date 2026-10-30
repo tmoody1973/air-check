@@ -1,0 +1,125 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ResearchProgress } from "./ResearchProgress";
+import { claim, deepDiveView, entry, notesView, verifyView } from "./research.fixture";
+
+afterEach(cleanup);
+
+const noop = () => Promise.resolve();
+const rowOf = (key: string) => screen.getByText(key).closest("li")!;
+
+describe("ResearchProgress", () => {
+  it("counts and time left come from research.get; closing rows are skipped; the next undone key reads Next", () => {
+    render(<ResearchProgress view={notesView()} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("2 of 4 tracks · 2 closing tracks skipped")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("about 3 min left")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+    expect(within(rowOf("H1.1")).getByText("Done")).toBeInTheDocument();
+    expect(within(rowOf("H1.3")).getByText("Next")).toBeInTheDocument();
+    expect(within(rowOf("H1.4")).getByText("Skipped")).toBeInTheDocument();
+    expect(within(rowOf("H1.4")).getByText(/closing track, no notes/)).toBeInTheDocument();
+    // Code never knows which key the agent is on.
+    expect(screen.queryByText("Working")).not.toBeInTheDocument();
+    expect(within(rowOf("H1.3")).getByText("checking label on Discogs…")).toBeInTheDocument();
+  });
+
+  it("source hosts as chips and [verify] chips in the caution style", () => {
+    render(<ResearchProgress view={notesView()} onTakeOver={noop} onResume={noop} />);
+    const row = rowOf("H1.1");
+    expect(within(row).getByText("musicbrainz.org")).toBeInTheDocument();
+    const chip = within(row).getByText("[verify] release date: sources disagree");
+    expect(chip).toHaveClass("bg-caution-bg");
+    expect(within(rowOf("H1.2")).getByText("Private")).toBeInTheDocument();
+    expect(within(rowOf("H1.1")).queryByText("Private")).not.toBeInTheDocument();
+  });
+
+  it("Take over: R1 copy, calls the handler", () => {
+    const onTakeOver = vi.fn(noop);
+    render(<ResearchProgress view={notesView()} onTakeOver={onTakeOver} onResume={noop} />);
+    expect(screen.getByText("Stops now. Everything saved so far stays.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    expect(onTakeOver).toHaveBeenCalledOnce();
+    expect(screen.getByText(/Live from the agent's run/)).toBeInTheDocument();
+  });
+
+  it("taken over with keys left: Resume, no Next", () => {
+    const onResume = vi.fn(noop);
+    render(<ResearchProgress view={notesView({ secondsLeft: undefined, lastStep: undefined }, { status: "taken-over" })} onTakeOver={noop} onResume={onResume} />);
+    expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Next")).not.toBeInTheDocument();
+    expect(within(rowOf("H1.3")).getByText("Not researched")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(onResume).toHaveBeenCalledOnce();
+  });
+
+  it("a refused Resume shows its plain reason", async () => {
+    const onResume = () => Promise.reject({ data: { code: "PAUSED", message: "Live research is paused for the demo today. The sample report is below." } });
+    render(<ResearchProgress view={notesView({}, { status: "stopped" })} onTakeOver={noop} onResume={onResume} />);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Live research is paused for the demo today.");
+  });
+
+  it("a seeded sample says Sample, never Live", () => {
+    render(<ResearchProgress view={notesView({ sample: true }, { status: "done" })} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.queryByText("Live · Nemotron")).not.toBeInTheDocument();
+  });
+
+  it("verify and deep dive: counts without track rows", () => {
+    render(<ResearchProgress view={verifyView({}, )} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("2 of 3 lines checked · 1 line under closing tracks skipped")).toBeInTheDocument();
+    cleanup();
+    render(<ResearchProgress view={deepDiveView(5, { progress: { done: 0, total: 1 } })} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("Writing the brief")).toBeInTheDocument();
+  });
+
+  it("two open claims of the same kind each get a chip, with unique keys", () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const v = notesView();
+    const twin = claim({ kind: "label", text: "x", status: "could-not-verify" });
+    v.entries = [...v.entries, entry("H1.3", { claims: [twin, { ...twin, text: "y" }] })];
+    render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} />);
+    expect(within(rowOf("H1.3")).getAllByText("[verify] label: could not verify")).toHaveLength(2);
+    expect(err.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+    err.mockRestore();
+  });
+
+  it("Resume counts every open block (intros and threads), not only tracks", () => {
+    const v = notesView({ progress: { done: 6, total: 8 } }, { status: "stopped" });
+    v.entries = [...v.entries, entry("H1.3"), entry("H2.1")];
+    render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("4 of 4 tracks · 2 closing tracks skipped")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("a done job with work left (a retarget added keys) still offers Resume", () => {
+    render(<ResearchProgress view={notesView({ progress: { done: 6, total: 8 } }, { status: "done" })} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("I3: done show notes offer Pre-air verify; running, sample or other kinds do not", async () => {
+    const onVerify = vi.fn(noop);
+    const done = notesView({ progress: { done: 8, total: 8 } }, { status: "done" });
+    render(<ResearchProgress view={done} onTakeOver={noop} onResume={noop} onVerify={onVerify} />);
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pre-air verify" }));
+    expect(onVerify).toHaveBeenCalledOnce();
+    cleanup();
+    const refused = () => Promise.reject({ data: { code: "PAUSED", message: "Live research is paused for the demo today. The sample report is below." } });
+    render(<ResearchProgress view={done} onTakeOver={noop} onResume={noop} onVerify={refused} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pre-air verify" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Live research is paused for the demo today.");
+    for (const v of [notesView(), notesView({ sample: true, progress: { done: 8, total: 8 } }, { status: "done" }), verifyView({ progress: { done: 3, total: 3 } })]) {
+      cleanup();
+      render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} onVerify={onVerify} />);
+      expect(screen.queryByRole("button", { name: "Pre-air verify" })).not.toBeInTheDocument();
+    }
+  });
+
+  it("the Live tag never wraps", () => {
+    render(<ResearchProgress view={notesView()} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("Live · Nemotron")).toHaveClass("whitespace-nowrap");
+  });
+});

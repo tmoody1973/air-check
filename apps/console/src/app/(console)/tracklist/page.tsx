@@ -1,6 +1,6 @@
 "use client";
 
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { api } from "../../../../convex/_generated/api";
@@ -13,6 +13,8 @@ function Editor() {
   const from = useSearchParams().get("from");
   const run = useQuery(api.runs.get, from ? { runId: from } : "skip");
   const draft = useMutation(api.tracklist.draft);
+  const startShowNotes = useMutation(api.research.startShowNotes);
+  const convex = useConvex();
 
   if (from && run === undefined) return <p className="text-ink-soft">Loading…</p>;
   const initial = run?.form ?? undefined;
@@ -24,6 +26,10 @@ function Editor() {
       initial={initial}
       loadFailed={Boolean(from) && !initial}
       authReady={!isLoading && isAuthenticated}
+      writeNotes={(f) => startShowNotes({ ...f, angles: true })}
+      onNotes={(jobId) => router.push(`/research/${jobId}`)}
+      // Read once on click, not subscribed: a later save must not replace what Tarik is typing.
+      loadNotes={(showDate) => convex.query(api.research.notesForDraft, { showDate })}
     />
   );
 }

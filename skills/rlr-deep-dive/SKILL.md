@@ -10,16 +10,17 @@ A deep dive is research with sources. It is not a script and not on-air copy. Ta
 Adapted from Crate's artist-deep-dive, sample-archaeology and scene-mapping workflows.
 
 ## Steps
-1. Identify the subject with MusicBrainz (artist, label or release) so every later lookup uses the right entity. Ask if two matches are plausible.
-2. Pull facts through Crate: discography highlights, label history and roster (Discogs), credits and collaborators, sample and influence links where the sources show them, and what Genius, Last.fm and Wikipedia add.
-3. Look for connections inside the current draft: other tracks, artists or labels in the same list, and what links them.
-4. Check recent news with Tavily (new release, tour, interview).
-5. Write the brief.
+1. Identify the subject with MusicBrainz (artist, label or release) so every later lookup uses the right entity. If two matches are plausible, say so in the brief's note and stop.
+2. Pull facts through Crate (MusicBrainz, Wikipedia, Bandcamp search, iTunes): discography highlights, label history, credits and collaborators, sample and influence links where the sources show them. Use `source_search` for what Crate cannot confirm (the web, or `source: "apple_music"` for the Apple Music catalog: release date, label, ℗ line).
+3. Look for connections inside the current draft: other tracks, artists or labels in the same list, and what links them. Refer to tracks by key (`H1.4`).
+4. Check recent news with `source_search` (new release, tour, interview).
+5. Submit the brief as one `brief` block with `research_submit`. Cite sources only by `[S…]` id.
 
 ## Brief format (phone-readable)
-- Five to eight short facts, each with a source link.
-- "Connects to your list": up to three links to other items in the draft.
-- "Could not verify": claims found in one source only, or in conflict.
+- Five to eight short facts, each citing its sources.
+- "Connects to your list": up to three `connection` claims, each with the track's key as its value.
+- "Could not verify": Air Check lists claims found in one source only, or in conflict.
+- The "On Rhythm Lab" line (past shows) comes from Air Check. Do not write it.
 
 ## Rules
 - Release dates, labels and credits need two sources or a primary source. Otherwise mark `could-not-verify`.

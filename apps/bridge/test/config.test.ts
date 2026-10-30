@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 
 const env = {
@@ -48,6 +48,37 @@ describe("loadConfig", () => {
 
   it("rejects a non-https Convex URL", () => {
     expect(() => loadConfig({ ...env, CONVEX_SITE_URL: "http://x.convex.site" })).toThrow("CONVEX_SITE_URL");
+  });
+
+  it("reads TAVILY_API_KEY as optional", () => {
+    expect(loadConfig(env).tavilyApiKey).toBeUndefined();
+    expect(loadConfig({ ...env, TAVILY_API_KEY: "  " }).tavilyApiKey).toBeUndefined();
+    expect(loadConfig({ ...env, TAVILY_API_KEY: " tvly-abc " }).tavilyApiKey).toBe("tvly-abc");
+  });
+
+  it("reads the Apple Music trio as optional: all three or none, never a crash", () => {
+    const apple = { APPLE_MUSIC_TEAM_ID: " TEAM123456 ", APPLE_MUSIC_KEY_ID: "KEY1234567", APPLE_MUSIC_KEY_FILE: "/home/u/.aircheck/AuthKey.p8" };
+    expect(loadConfig(env).appleMusic).toBeUndefined();
+    expect(loadConfig({ ...env, ...apple }).appleMusic).toEqual({ teamId: "TEAM123456", keyId: "KEY1234567", keyFile: "/home/u/.aircheck/AuthKey.p8" });
+    expect(loadConfig({ ...env, ...apple, APPLE_MUSIC_KEY_FILE: " " }).appleMusic).toBeUndefined();
+    expect(loadConfig({ ...env, APPLE_MUSIC_TEAM_ID: "TEAM123456" }).appleMusic).toBeUndefined();
+  });
+
+  it("logs a half-set Apple Music trio by the missing names only, never a value", () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")));
+    try {
+      loadConfig({ ...env, APPLE_MUSIC_TEAM_ID: "TEAM123456", APPLE_MUSIC_KEY_ID: "KEY1234567" });
+      loadConfig({ ...env, APPLE_MUSIC_KEY_FILE: "/home/u/.aircheck/AuthKey.p8" });
+      loadConfig(env); // none set: nothing to say
+      loadConfig({ ...env, APPLE_MUSIC_TEAM_ID: "TEAM123456", APPLE_MUSIC_KEY_ID: "KEY1234567", APPLE_MUSIC_KEY_FILE: "/k.p8" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(logs).toEqual([
+      "apple_music=unavailable reason=partial_config missing=APPLE_MUSIC_KEY_FILE",
+      "apple_music=unavailable reason=partial_config missing=APPLE_MUSIC_TEAM_ID,APPLE_MUSIC_KEY_ID",
+    ]);
   });
 
   describe("demo sandbox tokens", () => {
