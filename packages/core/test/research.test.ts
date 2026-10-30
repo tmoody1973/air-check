@@ -214,7 +214,12 @@ describe("judgeClaim (Review Focus 1 and 2)", () => {
   it("calls a non-critical fact with a source sourced, and with none could-not-verify", () => {
     const bio: ClaimInput = { kind: "bio", text: "A bassist from Detroit.", sources: [{ id: "S1" }] };
     expect(judgeClaim(bio, { S1: S("pitchfork.com", "anything") }).status).toBe("sourced");
-    expect(judgeClaim({ ...bio, sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source" });
+    expect(judgeClaim({ ...bio, sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source found.", sources: [] });
+  });
+
+  it("Oct 29 (Tarik): a fact with no source at all is kept as could-not-verify, 'No source found.', whatever its kind", () => {
+    expect(judgeClaim(date([]), {})).toMatchObject({ status: "could-not-verify", check: "No source found.", value: "2026-10-10" });
+    expect(judgeClaim({ kind: "detail", text: "It was a DJ Mag track of the year.", sources: [] }, {})).toMatchObject({ status: "could-not-verify", check: "No source found." });
   });
 });
 

@@ -245,11 +245,22 @@ describe("POST /agent/research (submitEntry)", () => {
     expect(await entries(t, jobId)).toEqual([]);
   });
 
-  test("a sourceless claim is dropped and named; the rest is saved", async () => {
+  test("Oct 29 (Tarik): a sourceless fact in show notes or a deep dive is kept as could-not-verify, 'No source found.'", async () => {
     const t = convexTest(schema, modules);
     const { jobId } = await startNotes(t);
     const r = await submit(t, { job: jobId, key: "H1.2", claims: [detail(), { kind: "bio", text: "Born in Leeds.", sources: [] }], sources: SOURCES });
-    expect(r).toEqual({ status: 200, data: { saved: "H1.2", claims: 1, verify: 0, dropped: ["Claim 2 has no source. No source, no sentence."] } });
+    expect(r).toEqual({ status: 200, data: { saved: "H1.2", claims: 2, verify: 1, dropped: [] } });
+    expect((await entries(t, jobId))[0]!.claims[1]).toEqual({ kind: "bio", text: "Born in Leeds.", status: "could-not-verify", sources: [], check: "No source found." });
+    const dive = await t.withIdentity(human).mutation(api.research.startDeepDive, { type: "artist", name: "Alfa Mist" });
+    expect(await submit(t, { job: dive.jobId, key: "brief", claims: [{ kind: "bio", text: "Born in London.", sources: [] }], sources: SOURCES })).toMatchObject({ status: 200, data: { claims: 1, verify: 1, dropped: [] } });
+  });
+
+  test("a pre-air check still drops a sourceless claim and names it: checking a line needs a source", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("episodes", episode() as never));
+    const { jobId } = await t.withIdentity(human).mutation(api.research.startVerify, { showDate: DATE, notes: { from: "paper" } });
+    const r = await submit(t, { job: jobId, key: "L2", claims: [detail(), { kind: "bio", text: "Born in Leeds.", sources: [] }], sources: SOURCES });
+    expect(r).toEqual({ status: 200, data: { saved: "L2", claims: 1, verify: 0, dropped: ["Claim 2 has no source. A pre-air check needs one."] } });
   });
 
   test("a claim's value and a source's says pass the same text checks as the claim (I1)", async () => {

@@ -171,6 +171,7 @@ export function sourceSays(text: string, kind: ClaimKind, value: string, near: r
 }
 
 const unique = (xs: string[]) => [...new Set(xs)];
+export const NO_SOURCE = "No source found.";
 
 /**
  * The two-source rule, in code. `near` is the block's track (artist, title) or subject: on a long source the value must
@@ -197,6 +198,8 @@ export function judgeClaim(claim: ClaimInput, sources: Record<string, ResolvedSo
     return out;
   });
   const base = { kind: claim.kind, text: claim.text, ...(claim.value !== undefined ? { value: claim.value } : {}), sources: cited };
+  // Oct 29 (Tarik, decision 021): a fact with no source is kept, marked [verify]; he confirms it himself.
+  if (!cited.length) return { ...base, status: "could-not-verify", check: NO_SOURCE };
   const usable = cited.filter((s) => s.matched);
   if (!usable.length) {
     const check = valueKind && claim.value !== undefined ? `No source shows ${claim.value}` : "No source";

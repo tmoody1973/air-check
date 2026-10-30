@@ -299,7 +299,7 @@ describe("research_submit", () => {
 
   it.each([
     [200, { saved: "H1.4", claims: 6, verify: 2, dropped: [] }, "Saved H1.4: 6 claims (2 marked [verify]).", false],
-    [200, { saved: "H1.4", claims: 1, verify: 0, dropped: ['"Album A was recorded in Lagos." No source, no sentence.'] }, 'Saved H1.4: 1 claim (0 marked [verify]). Not saved: "Album A was recorded in Lagos." No source, no sentence.', false],
+    [200, { saved: "H1.4", claims: 1, verify: 0, dropped: ['Claim 1 has no source. A pre-air check needs one.'] }, 'Saved H1.4: 1 claim (0 marked [verify]). Not saved: Claim 1 has no source. A pre-air check needs one.', false],
     [400, { problems: ["The angle reads as talk: \"Coming up next\"."] }, 'Not saved. Fix these and submit again:\n- The angle reads as talk: "Coming up next".', true],
     [404, { error: "NOT_FOUND" }, "No such research job; stop.", true],
     [409, { error: "H1.4 was edited by Tarik; skip it." }, "H1.4 was edited by Tarik; skip it.", true],

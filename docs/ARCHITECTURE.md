@@ -231,13 +231,13 @@ The agent writes 3 to 5 theme cards (working title, pitch, evidence links, 8 to 
 ### 3.11 Show notes (Oct 19 decision, P1)
 Today Tarik runs a Perplexity prompt per show and pastes the result into a Dropbox Paper doc. Air Check replaces both steps for new shows.
 
-**Flow.** Tracklist (draft or final) in Convex -> `generate_show_notes` -> per track: Crate lookups and Tavily search (the same source-checking path as deep dives and pre-air verify) -> the model writes entries only from retrieved sources -> code attaches source links, checks that every claim has one, and flags single-source or conflicting dates, labels and credits as **[verify]** -> `ShowNotes` card and Markdown export.
+**Flow.** Tracklist (draft or final) in Convex -> `generate_show_notes` -> per track: Crate lookups and Tavily search (the same source-checking path as deep dives and pre-air verify) -> the model writes entries from retrieved sources, and may add a fact it found no source for -> code attaches source links and flags unsourced facts and single-source or conflicting dates, labels and credits as **[verify]** (decision 021) -> `ShowNotes` card and Markdown export.
 
 **Format** (from his existing notes): per hour an intro, Show Threads, then numbered track entries with Release/Album, Details, Artist, optional On-air angle, inline **[verify]** flags, and a Pre-Air Verify List at the end.
 
 **Storage.** Notes live in Convex as the source of truth for new shows. Export is "Copy for Paper" (Markdown with headings, bullets and links). Air Check does not write to Paper: the agent has no Dropbox credentials, and a worker write to Paper is uncertain and not needed. The backlog's old Paper notes stay read-only inputs for the ingest worker.
 
-**Rules.** Same as 3.10: sources or `could-not-verify`, two sources for dates, labels and credits, closing tracks skipped, embargo private, no scripts. Notes Tarik supplies by hand are labeled unchecked and kept apart from sourced facts. Show notes are private and never copied into a Mixcloud description.
+**Rules.** Same as 3.10: sources or `could-not-verify` (a fact with no source is kept and marked, decision 021), two sources for dates, labels and credits, closing tracks skipped, embargo private, no scripts. Notes Tarik supplies by hand are labeled unchecked and kept apart from sourced facts. Show notes are private and never copied into a Mixcloud description; the draft's notes take confirmed and sourced facts only.
 
 **Tools.** `generate_show_notes` (orchestrates Crate and Tavily; model writes), `regenerate_track`, `export_show_notes` (code). **Component:** `ShowNotes`. **Skill:** `rlr-show-notes`.
 
