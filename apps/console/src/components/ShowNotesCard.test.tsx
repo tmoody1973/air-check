@@ -89,7 +89,7 @@ describe("ShowNotesCard", () => {
   });
 
   it("the shared demo sample is read-only: no block controls", () => {
-    render(<ShowNotesCard view={notesView({}, { status: "done", runIds: [] })} today={TODAY} actions={actions()} />);
+    render(<ShowNotesCard view={notesView({ sample: true }, { status: "done" })} today={TODAY} actions={actions()} />);
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 

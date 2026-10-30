@@ -122,6 +122,8 @@ describe("today.summary", () => {
         ["H1.2", [claim("label", "could-not-verify")]],
         ["H1.threads", [claim("thread", "could-not-verify")]],
       ]);
+      // R12: a block Tarik marked private is counted like an embargoed one, never named.
+      await t.run((ctx) => ctx.db.insert("researchEntries", { workspace: "real", jobId: "rj-notes1", key: "H2.9", block: "track", claims: [claim("label", "conflict")], private: { by: "tarik" }, savedAt: 1, updatedAt: 1 } as never));
       // 10-30: an older done show-notes job is replaced by the newer done verify job; a running job is ignored.
       await seedJob(t, { jobId: "rj-old001", showDate: "2026-10-30", createdAt: 20 }, [["H1.1", [claim("bio", "conflict")]]]);
       await seedJob(t, { jobId: "rj-check1", kind: "verify", showDate: "2026-10-30", createdAt: 30, lines: [{ id: "L1", text: "x", trackKey: "H1.1", closing: false }, { id: "L2", text: "y", closing: false }] }, [
@@ -140,7 +142,7 @@ describe("today.summary", () => {
         { jobId: "rj-notes1", label: "Alpha · release date", status: "conflict" },
         { jobId: "rj-notes1", label: "Hour 1 thread", status: "could-not-verify" },
       ]);
-      expect(r.openClaimsEmbargoed).toBe(1);
+      expect(r.openClaimsPrivate).toBe(2);
       expect(JSON.stringify(r)).not.toMatch(/Beta|Secret/);
       const d = (await t.withIdentity(demo).query(api.today.summary, {}))!;
       expect(d.openClaims).toEqual([{ jobId: "rj-demo01", label: "Alpha · label", status: "conflict" }]);

@@ -50,7 +50,8 @@ function TrackRows({ view }: { view: ResearchView }) {
         const e = byKey.get(t.key);
         const done = isDoneEntry(e);
         const claims = e?.claims ?? [];
-        const chips = [...hostsOf(claims).map((h) => ({ text: h, verify: false })), ...claims.filter(isOpenClaim).map((c) => ({ text: verifyChip(c), verify: true }))];
+        const chips = [...hostsOf(claims).map((h) => ({ text: h, verify: false })), ...claims.filter(isOpenClaim).map((c) => ({ text: verifyChip(c), verify: true }))]
+          .map((c, i) => ({ ...c, key: `${i}-${c.text}` }));
         const isNext = t.key === next;
         const status = done ? word("Done", "text-signal-deep") : isNext ? word("Next", "font-semibold text-ink") : word(active ? "Waiting" : "Not researched");
         return (
@@ -61,7 +62,7 @@ function TrackRows({ view }: { view: ResearchView }) {
             {embargoOf(t) && <span className="ml-2 inline-block rounded-full bg-problem-bg px-2 py-px text-xs font-medium text-problem-text">Private</span>}
             {(chips.length > 0 || (isNext && view.lastStep)) && (
               <span className="mt-1.5 flex flex-wrap gap-1.5">
-                {chips.map((c) => <span key={c.text} className={c.verify ? VERIFY_CHIP : NEUTRAL_CHIP}>{c.text}</span>)}
+                {chips.map((c) => <span key={c.key} className={c.verify ? VERIFY_CHIP : NEUTRAL_CHIP}>{c.text}</span>)}
                 {isNext && view.lastStep && <span className={NEUTRAL_CHIP}>{view.lastStep}</span>}
               </span>
             )}
@@ -88,7 +89,8 @@ export function ResearchProgress({ view, onTakeOver, onResume, authReady = true 
   const sample = isSample(view);
   const p = progressOf(view);
   const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
-  const left = p.total - p.done;
+  // Every open block counts (intros and threads too), not only the track rows shown.
+  const left = view.progress.total - view.progress.done;
   const canResume = !active && !sample && left > 0 && status !== "done";
   const byKey = new Map(view.entries.map((e) => [e.key, e]));
   const nextHour = active ? view.tracks.find((t) => !t.closing && !isDoneEntry(byKey.get(t.key)))?.hour : undefined;

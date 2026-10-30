@@ -66,7 +66,7 @@ const linkClass = "inline-flex min-h-11 items-center text-sm font-semibold under
 
 export function LiveTag() {
   return (
-    <span className="inline-block rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] leading-none tracking-[0.1em] text-muted uppercase">
+    <span className="inline-block whitespace-nowrap rounded-md border border-line px-1.5 py-1 font-mono text-[10.5px] leading-none tracking-[0.1em] text-muted uppercase">
       Live · Nemotron
     </span>
   );

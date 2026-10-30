@@ -39,7 +39,7 @@ describe("Today when the summary is null", () => {
 });
 
 describe("Today backlog line", () => {
-  const summary = { awaiting: [], openClaims: [], openClaimsEmbargoed: 0, releases: { count: 0, labels: [], items: [], embargoed: { bandcamp: 0, cosign: 0 }, byTab: { bandcamp: 0, cosign: 0 } }, blockedSince: 0 };
+  const summary = { awaiting: [], openClaims: [], openClaimsPrivate: 0, releases: { count: 0, labels: [], items: [], embargoed: { bandcamp: 0, cosign: 0 }, byTab: { bandcamp: 0, cosign: 0 } }, blockedSince: 0 };
   const ep = (status: string) => ({ status });
 
   it("links to Episodes with the count still to clear", () => {
@@ -65,7 +65,7 @@ describe("Today release radar card", () => {
     embargoed: { bandcamp: 1, cosign: 2 },
     byTab: { bandcamp: 2, cosign: 2 },
   };
-  const summary = { awaiting: [], openClaims: [], openClaimsEmbargoed: 0, releases, blockedSince: 0 };
+  const summary = { awaiting: [], openClaims: [], openClaimsPrivate: 0, releases, blockedSince: 0 };
 
   it("counts only new Bandcamp-tab records and links to the radar", () => {
     results["today.summary"] = summary;
@@ -108,7 +108,7 @@ describe("Today open claims (Plan 7: from research)", () => {
         { jobId: "rj-abc123", label: "[Artist A] · release date", status: "conflict" },
         { jobId: "rj-abc123", label: "[Artist C] · label", status: "could-not-verify" },
       ],
-      openClaimsEmbargoed: 0,
+      openClaimsPrivate: 0,
     };
     render(<TodayPage />);
     const card = screen.getByRole("heading", { name: "Claims that failed verification" }).closest("section")!;
@@ -118,12 +118,12 @@ describe("Today open claims (Plan 7: from research)", () => {
     expect(card).toHaveTextContent("Could not verify");
   });
 
-  it("claims on embargoed releases are counted, never named", () => {
-    results["today.summary"] = { ...base, openClaims: [], openClaimsEmbargoed: 2 };
+  it("claims on private or embargoed blocks are counted, never named", () => {
+    results["today.summary"] = { ...base, openClaims: [], openClaimsPrivate: 2 };
     render(<TodayPage />);
     const card = screen.getByRole("heading", { name: "Claims that failed verification" }).closest("section")!;
     expect(card).toHaveTextContent("2 open");
-    expect(card).toHaveTextContent("2 on embargoed releases (private)");
+    expect(card).toHaveTextContent("2 on private or embargoed blocks (not named)");
     expect(card).not.toHaveTextContent("No open claims.");
   });
 });

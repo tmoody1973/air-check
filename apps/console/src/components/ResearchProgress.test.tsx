@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResearchProgress } from "./ResearchProgress";
-import { deepDiveView, notesView, verifyView } from "./research.fixture";
+import { claim, deepDiveView, entry, notesView, verifyView } from "./research.fixture";
 
 afterEach(cleanup);
 
@@ -62,7 +62,7 @@ describe("ResearchProgress", () => {
   });
 
   it("a seeded sample says Sample, never Live", () => {
-    render(<ResearchProgress view={notesView({}, { status: "done", runIds: [] })} onTakeOver={noop} onResume={noop} />);
+    render(<ResearchProgress view={notesView({ sample: true }, { status: "done" })} onTakeOver={noop} onResume={noop} />);
     expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.queryByText("Live · Nemotron")).not.toBeInTheDocument();
   });
@@ -73,5 +73,29 @@ describe("ResearchProgress", () => {
     cleanup();
     render(<ResearchProgress view={deepDiveView(5, { progress: { done: 0, total: 1 } })} onTakeOver={noop} onResume={noop} />);
     expect(screen.getByText("Writing the brief")).toBeInTheDocument();
+  });
+
+  it("two open claims of the same kind each get a chip, with unique keys", () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const v = notesView();
+    const twin = claim({ kind: "label", text: "x", status: "could-not-verify" });
+    v.entries = [...v.entries, entry("H1.3", { claims: [twin, { ...twin, text: "y" }] })];
+    render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} />);
+    expect(within(rowOf("H1.3")).getAllByText("[verify] label: could not verify")).toHaveLength(2);
+    expect(err.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+    err.mockRestore();
+  });
+
+  it("Resume counts every open block (intros and threads), not only tracks", () => {
+    const v = notesView({ progress: { done: 6, total: 8 } }, { status: "stopped" });
+    v.entries = [...v.entries, entry("H1.3"), entry("H2.1")];
+    render(<ResearchProgress view={v} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("4 of 4 tracks · 2 closing tracks skipped")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("the Live tag never wraps", () => {
+    render(<ResearchProgress view={notesView()} onTakeOver={noop} onResume={noop} />);
+    expect(screen.getByText("Live · Nemotron")).toHaveClass("whitespace-nowrap");
   });
 });

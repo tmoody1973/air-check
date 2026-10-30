@@ -14,6 +14,8 @@ describe("ClaimLine", () => {
     expect(link).toHaveAttribute("href", "https://musicbrainz.org/a1");
     expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
     expect(link).toHaveAttribute("target", "_blank");
+    // The chip stays small; its hit area reaches 44 px (R12).
+    expect(link).toHaveClass("relative", "after:absolute", "after:-inset-y-2.5");
   });
 
   it("a non-http source is shown as text, never a link", () => {

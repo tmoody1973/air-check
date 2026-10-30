@@ -4,12 +4,13 @@ import { useState } from "react";
 import { verifyReport } from "@aircheck/core";
 import { showDateLabel } from "@/lib/date";
 import { embargoOf as trackHold, isOpenClaim, type ResearchView } from "@/lib/research";
-import { ClaimLine } from "./ClaimLine";
+import { ClaimLine, SourceChips } from "./ClaimLine";
 import { Pill } from "./Pill";
 import { type BlockActions, BlockControls, BlockPills, LABEL } from "./ShowNotesCard";
 
 // Plan 7 pre-air verify, phone first: what is still open sits on top, then each change as "Now:" and "Change to:" with
-// its own Copy, so Tarik can fix Paper line by line. Which lines get a replacement is core's verifyReport (code), never
+// its own Copy, so Tarik can fix Paper line by line. The screen shows the plain line and its source chips; Copy puts the
+// exact Paper Markdown (links appended by core) on the clipboard. Which lines get a replacement is core's verifyReport (code), never
 // the model's call. Station play context is shown apart and labelled as context, not a claim.
 
 const COPY_BTN = "inline-flex min-h-11 items-center rounded-control border border-line-strong bg-surface px-4 text-sm font-semibold hover:bg-surface-quiet";
@@ -76,7 +77,8 @@ export function ClaimReport({ view, today, actions }: { view: ResearchView; toda
             </div>
             <div className="flex flex-col gap-0.5">
               <p className={LABEL}>Change to:</p>
-              <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{ch.replacement}</p>
+              <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{ch.text}</p>
+              <SourceChips sources={ch.sources} />
             </div>
             <div className="flex flex-wrap items-center gap-x-4">
               <button type="button" className={COPY_BTN} onClick={() => copy(ch.lineId, ch.replacement)}>Copy</button>

@@ -41,6 +41,7 @@ import { activeEmbargoes } from "./radar";
 import { createdAtOf } from "./runDefaults";
 import { stopRun } from "./runs";
 import { claimKindV, workspaceV } from "./schema";
+import { SAMPLE_JOB_PREFIX } from "./seedResearch";
 import { MAX_TRACKLIST } from "./tracklist";
 
 // Plan 7: sourced research jobs. A job is a Hermes run (kind `research`) whose prompt is built here, in code. The agent
@@ -87,11 +88,18 @@ async function callerWorkspace(ctx: QueryCtx): Promise<Workspace> {
   return ws;
 }
 
-/** The caller's own job; another workspace's is NOT_FOUND, so nothing leaks. */
-async function ownJob(ctx: QueryCtx, jobId: string): Promise<Job> {
+const SAMPLE_REFUSAL = "The sample report can't be changed. Start your own from Plan.";
+
+/**
+ * The caller's own job, for every write. Another workspace's job, or (R11) another demo visitor's, is NOT_FOUND, so
+ * nothing leaks. The seeded sample is shared by every demo visitor, so no one may change it or queue runs on it.
+ */
+async function ownJob(ctx: MutationCtx, jobId: string): Promise<Job> {
   const ws = await callerWorkspace(ctx);
   const job = await jobById(ctx, jobId);
   if (!job || job.workspace !== ws) throw new ConvexError({ code: "NOT_FOUND" });
+  if (job.jobId.startsWith(SAMPLE_JOB_PREFIX)) throw refuse(SAMPLE_REFUSAL, "SAMPLE");
+  if (ws === "demo" && job.sessionKey !== (await sessionKeyOf(ctx))) throw new ConvexError({ code: "NOT_FOUND" });
   return job;
 }
 
@@ -373,7 +381,8 @@ export const takeOver = mutation({
 });
 
 async function requeue(ctx: MutationCtx, job: Job, keys: string[], scope?: string[]): Promise<{ runId: string }> {
-  const runId = await queueRun(ctx, job, keys);
+  // R12: a demo Resume or Regenerate counts against the visitor who owns the job (ownJob checked it is the caller).
+  const runId = await queueRun(ctx, job, keys, job.sessionKey);
   if (!runId) throw refuse(PAUSED, "PAUSED");
   await ctx.db.patch(job._id, { status: "queued", runIds: [...job.runIds, runId], continuations: 0, scope, finishedAt: undefined, updatedAt: Date.now() });
   return { runId };
@@ -504,6 +513,7 @@ export const get = query({
     const { _id, _creationTime, sessionKey, ...fields } = job;
     return {
       job: fields,
+      sample: job.jobId.startsWith(SAMPLE_JOB_PREFIX),
       tracks: (job.tracks ?? []).map((t) => {
         const embargo = trackEmbargo(t, active);
         return embargo ? { ...t, embargo } : t;

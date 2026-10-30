@@ -2,7 +2,7 @@
 
 import { LIMITS } from "@aircheck/core";
 import { showDateLabel } from "@/lib/date";
-import { isOpenClaim, type ResearchView, trackName } from "@/lib/research";
+import { embargoOf, isOpenClaim, type ResearchView, trackName } from "@/lib/research";
 import { ClaimLine } from "./ClaimLine";
 import { Pill } from "./Pill";
 import { type BlockActions, BlockControls, BlockPills, Claims } from "./ShowNotesCard";
@@ -52,6 +52,7 @@ export function DeepDiveCard({ view, today, actions }: { view: ResearchView; tod
                 {connects.map((c, i) => (
                   <li key={i} className="flex flex-col gap-1">
                     <span className="font-medium [overflow-wrap:anywhere]">{trackName(tracks.get(c.value!)!)}</span>
+                    <BlockPills embargo={embargoOf(tracks.get(c.value!))} today={today} />
                     <ClaimLine claim={c} />
                   </li>
                 ))}

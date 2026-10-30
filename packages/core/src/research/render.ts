@@ -192,9 +192,12 @@ export function notesForDraft(view: ShowNotesView): string {
 }
 
 /** Replacements for the notes (original verbatim, links appended by code) and every check still open. */
-export function verifyReport(view: VerifyView): { changes: { lineId: string; original: string; replacement: string }[]; open: string[] } {
+/** One offered change: `replacement` is the exact Paper Markdown (links appended); `text` and `sources` are its parts. */
+export interface VerifyChange { lineId: string; original: string; replacement: string; text: string; sources: CitedSource[] }
+
+export function verifyReport(view: VerifyView): { changes: VerifyChange[]; open: string[] } {
   const entry = entryLookup(view.entries);
-  const changes: { lineId: string; original: string; replacement: string }[] = [];
+  const changes: VerifyChange[] = [];
   const open: string[] = [];
   for (const line of view.lines) {
     const e = entry(line.id);
@@ -203,7 +206,9 @@ export function verifyReport(view: VerifyView): { changes: { lineId: string; ori
     // An agent replacement is offered only when every claim on the line holds; otherwise the line stays open.
     const holds = e.claims.length > 0 && !e.claims.some(isVerify);
     const replacement = e.edited?.text ?? (e.replacement && holds ? withLinks(e.replacement, cited) : undefined);
-    if (replacement) changes.push({ lineId: line.id, original: line.text, replacement });
+    const text = e.edited?.text ?? e.replacement ?? "";
+    const sources = e.edited ? [] : uniqueSources(cited);
+    if (replacement) changes.push({ lineId: line.id, original: line.text, replacement, text, sources });
     open.push(...e.claims.filter(isVerify).map((c) => `${line.id}: ${checked(c)}`));
   }
   return { changes, open };

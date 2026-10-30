@@ -120,9 +120,17 @@ describe("verifyReport", () => {
         lineId: "L2",
         original: "- “Café” came out on Oct 10 2026 on Brownswood Recordings.",
         replacement: "“Café” came out on October 17, 2026 on Brownswood Recordings. [[example.org](https://example.org/x)] [[example.org](https://example.org/y)]",
+        // R12: the plain line and its cited sources, so a screen never parses the Markdown.
+        text: "“Café” came out on October 17, 2026 on Brownswood Recordings.",
+        sources: [link, { ...link, url: "https://example.org/y" }],
       },
     ]);
     expect(r.open).toEqual(["L1: It came out on 2026-10-03. — Only one source: discogs.com"]);
+  });
+
+  it("an edited line: text is Tarik's edit, with no sources", () => {
+    const edited = { ...view, entries: view.entries.map((e) => (e.key === "L2" ? { ...e, edited: { text: "My own line." } } : e)) };
+    expect(verifyReport(edited).changes[0]).toMatchObject({ lineId: "L2", replacement: "My own line.", text: "My own line.", sources: [] });
   });
 });
 

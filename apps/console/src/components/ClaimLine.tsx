@@ -20,7 +20,8 @@ export function SourceChips({ sources }: { sources: JudgedClaim["sources"] }) {
         return href ? (
           <a
             key={s.url} href={href} target="_blank" rel="noopener noreferrer nofollow" title={s.title}
-            className={`${NEUTRAL_CHIP} hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal`}
+            // The chip stays small; the ::after box gives it a 44 px tall hit area (R12).
+            className={`${NEUTRAL_CHIP} relative after:absolute after:-inset-y-2.5 after:inset-x-0 after:content-[''] hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal`}
           >
             {s.host}
           </a>

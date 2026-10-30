@@ -26,9 +26,12 @@ describe("ClaimReport", () => {
     expect(within(change).getByText("Now:")).toBeInTheDocument();
     expect(within(change).getByText("Out Oct 9 on [Label A].")).toBeInTheDocument();
     expect(within(change).getByText("Change to:")).toBeInTheDocument();
-    expect(within(change).getByText(/^Out Oct 16 on \[Label A\]\./)).toBeInTheDocument();
+    // R12: the plain line plus source chips; the Markdown is only what Copy puts on the clipboard.
+    expect(within(change).getByText("Out Oct 16 on [Label A].")).toBeInTheDocument();
+    expect(change).not.toHaveTextContent("[[");
+    expect(within(change).getByRole("link", { name: "discogs.com" })).toHaveAttribute("href", "https://discogs.com/a2");
     await act(async () => fireEvent.click(within(change).getByRole("button", { name: "Copy" })));
-    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Out Oct 16 on \[Label A\]\./));
+    expect(writeText).toHaveBeenCalledWith("Out Oct 16 on [Label A]. [[example.org](https://example.org/a1)] [[discogs.com](https://discogs.com/a2)]");
     expect(screen.getByRole("status")).toHaveTextContent("Copied the change for L2.");
   });
 

@@ -44,6 +44,16 @@ describe("DeepDiveCard", () => {
     expect(screen.getByText("Embargoed · date not known")).toBeInTheDocument();
   });
 
+  it("a connection to an embargoed track is marked Private", () => {
+    const v = deepDiveView(5);
+    v.entries[0]!.claims.push({ kind: "connection", text: "Same studio.", value: "H1.2", status: "sourced", sources: [] });
+    render(<DeepDiveCard view={v} today={TODAY} actions={actions} />);
+    const item = screen.getByText("[Artist B] – “[Title B]”").closest("li")!;
+    expect(item).toHaveTextContent("Private");
+    expect(item).toHaveTextContent("Embargoed until Nov 7");
+    expect(screen.getByText("[Artist C] – “[Title C]”").closest("li")!).not.toHaveTextContent("Private");
+  });
+
   it("no brief yet", () => {
     render(<DeepDiveCard view={deepDiveView(0, { entries: [] })} today={TODAY} actions={actions} />);
     expect(screen.getByText("No brief yet.")).toBeInTheDocument();

@@ -618,3 +618,59 @@ describe("verify submits", () => {
     expect((await submit(t, { job: jobId, key: "L2", angle: "A connection?", sources: SOURCES })).data).toEqual({ problems: ["L2 does not take angle."] });
   });
 });
+
+describe("R11: the demo sample and other visitors' jobs cannot be changed", () => {
+  const SAMPLE = { code: "SAMPLE", message: "The sample report can't be changed. Start your own from Plan." };
+
+  test("edit, private, note, regenerate, resume, take over and retarget on rj-sample-* are refused; nothing changes; no run", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const d = t.withIdentity(demo());
+    const before = await entries(t, "rj-sample-notes");
+    const jobBefore = await job(t, "rj-sample-notes");
+    const runsBefore = (await runs(t)).length;
+    for (const call of [
+      d.mutation(api.research.editEntry, { jobId: "rj-sample-notes", key: "H1.1", text: "defaced" }),
+      d.mutation(api.research.setPrivate, { jobId: "rj-sample-notes", key: "H1.1", private: true }),
+      d.mutation(api.research.setSuppliedNote, { jobId: "rj-sample-notes", key: "H1.1", note: "x" }),
+      d.mutation(api.research.regenerate, { jobId: "rj-sample-notes", key: "H1.1", overwriteEdit: true }),
+      d.mutation(api.research.resume, { jobId: "rj-sample-notes" }),
+      d.mutation(api.research.takeOver, { jobId: "rj-sample-notes" }),
+      d.mutation(api.research.retarget, { jobId: "rj-sample-notes", tracklistText: TRACKLIST }),
+    ]) expect(await errorOf(call)).toEqual(SAMPLE);
+    expect(await entries(t, "rj-sample-notes")).toEqual(before);
+    expect(await job(t, "rj-sample-notes")).toEqual(jobBefore);
+    expect((await runs(t)).length).toBe(runsBefore);
+  });
+
+  test("research.get says sample for the seeded jobs only", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    const d = t.withIdentity(demo());
+    expect((await d.query(api.research.get, { jobId: "rj-sample-notes" }))!.sample).toBe(true);
+    const { jobId } = await startNotes(t, d);
+    expect((await d.query(api.research.get, { jobId }))!.sample).toBe(false);
+  });
+
+  test("visitor B cannot touch visitor A's demo job (NOT_FOUND); A can", async () => {
+    const t = convexTest(schema, modules);
+    const a = t.withIdentity(demo("sA"));
+    const b = t.withIdentity(demo("sB"));
+    const { jobId } = await startNotes(t, a);
+    expect(await errorOf(b.mutation(api.research.editEntry, { jobId, key: "H1.1", text: "theirs" }))).toEqual({ code: "NOT_FOUND" });
+    expect(await errorOf(b.mutation(api.research.takeOver, { jobId }))).toEqual({ code: "NOT_FOUND" });
+    expect((await job(t, jobId))!.status).toBe("queued");
+    await a.mutation(api.research.editEntry, { jobId, key: "H1.1", text: "mine" });
+    expect((await entries(t, jobId)).find((e) => e.key === "H1.1")!.edited!.text).toBe("mine");
+  });
+
+  test("a demo Resume counts against the visitor's own session (sessionKey passed to the run)", async () => {
+    const t = convexTest(schema, modules);
+    const a = t.withIdentity(demo("sA"));
+    const { jobId } = await startNotes(t, a);
+    await a.mutation(api.research.takeOver, { jobId });
+    const { runId } = await a.mutation(api.research.resume, { jobId });
+    const run = (await runs(t)).find((r) => r.runId === runId)!;
+    expect(run.sessionKey).toBe("sA");
+  });
+});

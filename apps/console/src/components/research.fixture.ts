@@ -42,6 +42,7 @@ export function notesView(over: Partial<ResearchView> = {}, jobOver: Partial<Res
       }),
       entry("H1.2", { claims: [claim({ text: "[Artist B] recorded it in one take." })] }),
     ],
+    sample: false,
     progress: { done: 4, total: 8 },
     secondsLeft: 170,
     activeRunId: "run-1",
@@ -64,6 +65,7 @@ export function verifyView(over: Partial<ResearchView> = {}): ResearchView {
       entry("L2", { claims: [claim({ kind: "release-date", text: "Out Oct 16 on [Label A].", value: "2026-10-16", status: "confirmed", sources: [src("a1"), src("a2", "discogs.com")] })], replacement: "Out Oct 16 on [Label A]." }),
       entry("L3", { claims: [claim({ kind: "detail", text: "Recorded in [City].", status: "could-not-verify", sources: [src("b1")], check: "Only one source: example.org" })] }),
     ],
+    sample: false,
     progress: { done: 2, total: 3 },
     ...over,
   } as ResearchView;
@@ -80,6 +82,7 @@ export function deepDiveView(facts: number, over: Partial<ResearchView> = {}): R
     job: job({ kind: "deep-dive", status: "done", subject: { type: "artist", name: "[Artist A]" }, angles: false }),
     tracks: TRACKS,
     entries: [entry("brief", { claims, note: "Two of the interviews are from the same tour." })],
+    sample: false,
     progress: { done: 1, total: 1 },
     ...over,
   } as ResearchView;

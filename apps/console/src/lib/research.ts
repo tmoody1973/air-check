@@ -19,8 +19,8 @@ export const isOpenClaim = (c: JudgedClaim) => c.status === "conflict" || c.stat
 export const isActive = (s: ResearchStatus) => s === "queued" || s === "running";
 /** A block the agent saved or Tarik edited: not researched again (Convex `isDone`). */
 export const isDoneEntry = (e: ResearchEntryRow | undefined) => !!e && (e.savedAt !== undefined || e.edited !== undefined);
-/** Seeded demo jobs never had a run; every real or visitor job has at least one. */
-export const isSample = (v: ResearchView) => v.job.runIds.length === 0;
+/** The seeded demo sample (research.get decides; R11 makes it read-only on the server too). */
+export const isSample = (v: ResearchView) => v.sample;
 
 export const trackName = (t: { artist: string; title: string; feat?: string }) => `${t.artist} – “${t.title}”${t.feat ? ` feat. ${t.feat}` : ""}`;
 

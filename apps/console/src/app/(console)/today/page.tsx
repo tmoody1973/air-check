@@ -44,7 +44,7 @@ export default function TodayPage() {
   const { isSignedIn } = useAuth();
   // Plan 8: the card counts the Bandcamp tab only; co-signs get their own line.
   const bandcampNew = s?.releases.byTab.bandcamp ?? 0;
-  const openCount = s ? s.openClaims.length + s.openClaimsEmbargoed : 0;
+  const openCount = s ? s.openClaims.length + s.openClaimsPrivate : 0;
 
   return (
     <Shell title="Today">
@@ -115,9 +115,9 @@ export default function TodayPage() {
                         ))}
                       </ul>
                     )}
-                    {/* Counted, never named: no artist or title of an embargoed release reaches the digest. */}
-                    {s.openClaimsEmbargoed > 0 && (
-                      <p className="pt-2.5 text-sm text-ink-soft">{s.openClaimsEmbargoed} on embargoed releases (private)</p>
+                    {/* Counted, never named: no artist or title of a private block or an embargoed release reaches the digest. */}
+                    {s.openClaimsPrivate > 0 && (
+                      <p className="pt-2.5 text-sm text-ink-soft">{s.openClaimsPrivate}{s.openClaims.length > 0 ? " more" : ""} on private or embargoed blocks (not named)</p>
                     )}
                   </>
                 )}
