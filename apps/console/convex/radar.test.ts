@@ -538,6 +538,8 @@ describe("pastePlayer (Oct 30: Bandcamp challenges the worker's page reads)", ()
     expect(await errorCode(t.withIdentity(human).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE + " ".repeat(5_001) }))).toBe("BAD_INPUT");
     expect(await errorCode(t.withIdentity(demo).mutation(api.radar.pastePlayer, { releaseId, pasted: CODE }))).toBe("FORBIDDEN");
     expect((await releases(t))[0]).not.toHaveProperty("embed");
+  });
+});
 
 describe("roundups: several releases in one email (decision 024)", () => {
   const A = "https://palesignal.bandcamp.com/album/glass-weather";
