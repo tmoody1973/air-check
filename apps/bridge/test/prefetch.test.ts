@@ -137,7 +137,7 @@ describe("first_search (Oct 29 prefetch)", () => {
     for (const k of ["H1.1", "H1.3"]) expect(textOf(await call(k))).toMatch(/^\[S[0-9a-z]{5}\] Artist \d page/m);
     await settle();
     expect(done).toEqual([{ refund: 1, credits: 4 }]);
-    expect(logs.filter((l) => l.startsWith("prefetch "))).toEqual([expect.stringMatching(/^prefetch tracks=3 ok=2 failed=1 capped=0 timeouts=0 ms=\d+ credits=4$/)]);
+    expect(logs.filter((l) => l.startsWith("prefetch "))).toEqual([expect.stringMatching(/^prefetch searches=3 ok=2 failed=1 capped=0 timeouts=0 ms=\d+ credits=4$/)]);
   });
 
   it("retries only a 429, a 5xx or a timeout, after 1, 2, 4 then 8 seconds, at most 5 attempts", async () => {
@@ -151,7 +151,7 @@ describe("first_search (Oct 29 prefetch)", () => {
     expect(down.sleeps).toEqual([1_000, 2_000, 4_000, 8_000]);
     expect(down.searched).toHaveLength(5);
     await settle();
-    expect(logs.some((l) => /^prefetch tracks=1 ok=0 failed=1 capped=0 timeouts=1 /.test(l))).toBe(true);
+    expect(logs.some((l) => /^prefetch searches=1 ok=0 failed=1 capped=0 timeouts=1 /.test(l))).toBe(true);
   });
 
   it("the cap: what fits is searched, the rest says the limit sentence and is not searched", async () => {
@@ -162,7 +162,7 @@ describe("first_search (Oct 29 prefetch)", () => {
     expect(all.map(textOf)).toContain(SEARCH_CAP_REACHED);
     expect(searched).toHaveLength(2);
     await settle();
-    expect(logs.some((l) => /^prefetch tracks=3 ok=2 failed=0 capped=1 /.test(l))).toBe(true);
+    expect(logs.some((l) => /^prefetch searches=3 ok=2 failed=0 capped=1 /.test(l))).toBe(true);
   });
 
   it("an embargoed track (by key from Convex, or by Convex's check of the query) is never searched", async () => {
@@ -174,9 +174,20 @@ describe("first_search (Oct 29 prefetch)", () => {
     expect(searched).toEqual([query(1)]);
   });
 
-  it("a closing track, an intro or a done track has no first search, and nothing is searched for it", async () => {
+  it("an intro or threads block is told how to write it, not given an error (Oct 30: the model quit on the error)", async () => {
     const { call, searched } = setup({ plan: () => json(200, { tracks: [track(1)], embargoed: [] }) });
-    for (const key of ["H1.15", "H1.intro"]) {
+    for (const [key, block] of [["H1.intro", "intro"], ["H2.threads", "threads"]] as const) {
+      const r = await call(key);
+      expect(r.isError).toBe(false);
+      expect(textOf(r)).toBe(`${key} is the hour's ${block} block: it has no search. Write it from what you already found for this hour's tracks and submit it with research_submit.`);
+    }
+    await settle();
+    expect(searched).toEqual([]);
+  });
+
+  it("a closing track or a done track has no first search, and nothing is searched for it", async () => {
+    const { call, searched } = setup({ plan: () => json(200, { tracks: [track(1)], embargoed: [] }) });
+    for (const key of ["H1.15", "H1.2"]) {
       const r = await call(key);
       expect(r.isError).toBe(true);
       expect(textOf(r)).toBe(`${key} has no first search: it is not a track left to research in this job. Closing tracks, intros and threads have none.`);
@@ -263,7 +274,7 @@ describe("first_search (Oct 29 prefetch)", () => {
     expect(logs).toHaveLength(2);
     expect(logs).toEqual(expect.arrayContaining([
       expect.stringMatching(/^tool=first_search status=ok ms=\d+$/),
-      expect.stringMatching(/^prefetch tracks=3 ok=3 failed=0 capped=0 timeouts=0 ms=\d+ credits=6$/),
+      expect.stringMatching(/^prefetch searches=3 ok=3 failed=0 capped=0 timeouts=0 ms=\d+ credits=6$/),
     ]));
   });
 
@@ -339,6 +350,49 @@ describe("research_submit's gate (Oct 29: the model must read first_search)", ()
   it("is the fallback trigger: a gate on a job the bridge has not seen starts its first searches", async () => {
     const s = setup();
     expect(await s.gate("H1.1")).toBe(READY("H1.1"));
+    await settle();
+    expect(s.searched).toHaveLength(3);
+  });
+});
+
+describe("second search (Oct 30: interviews, reviews, samples)", () => {
+  const query2 = (n: number) => `Artist ${n} - "Title ${n}" interviews, reviews and samples`;
+  const both = (n: number) => ({ ...track(n), query2: query2(n) });
+  const review = (n: number) => page(n, { title: `Artist ${n} review`, url: `https://reviews${n}.example/r` });
+  const tavily: Handler = (b) => {
+    const n = Number(/Artist (\d+)/.exec(String(b.query))![1]);
+    return json(200, { results: [String(b.query).endsWith("samples") ? review(n) : page(n)], usage: { credits: 2 } });
+  };
+
+  it("runs both queries for every track in the same batch and returns both to the agent in one first_search", async () => {
+    const s = setup({ plan: () => json(200, { tracks: [both(1), both(2)], embargoed: [] }), tavily });
+    const out = textOf(await s.call("H1.2"));
+    expect(out.split("\n")[0]).toBe("First search for H1.2, run by Air Check when the job started.");
+    expect(out).toMatch(/^\[S[0-9a-z]{5}\] Artist 2 page · site2\.example$/m);
+    expect(out).toContain("Second search for H1.2 (interviews, reviews, samples):");
+    expect(out).toMatch(/^\[S[0-9a-z]{5}\] Artist 2 review · reviews2\.example$/m);
+    expect(out).not.toContain("Artist 1");
+    await settle();
+    expect(s.searched.sort()).toEqual([query2(1), query2(2), query(1), query(2)].sort());
+    expect(logs).toContainEqual(expect.stringMatching(/^prefetch searches=4 ok=4 failed=0 capped=0 timeouts=0 ms=\d+ credits=8$/));
+  });
+
+  it("a failed second search leaves the first; a failed first search still returns the second", async () => {
+    const half: Handler = (b) => (String(b.query).includes("Artist 1") === String(b.query).endsWith("samples") ? json(400, {}) : tavily(b));
+    const s = setup({ plan: () => json(200, { tracks: [both(1), both(2)], embargoed: [] }), tavily: half });
+    const one = await s.call("H1.1"); // Artist 1: second failed
+    expect(one.isError).toBe(false);
+    expect(textOf(one)).toContain("Artist 1 page");
+    expect(textOf(one)).not.toContain("Second search for");
+    const two = await s.call("H1.2"); // Artist 2: first failed
+    expect(two.isError).toBe(false);
+    expect(textOf(two)).toContain("Web search failed (HTTP 400). Use source_search for this track if you need it.");
+    expect(textOf(two)).toContain("Artist 2 review");
+  });
+
+  it("a plan without a second query (an older Convex) still searches once per track", async () => {
+    const s = setup();
+    await s.call("H1.1");
     await settle();
     expect(s.searched).toHaveLength(3);
   });

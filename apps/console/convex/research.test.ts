@@ -434,6 +434,16 @@ describe("continuations", () => {
     expect((await job(t2, s.jobId))!).toMatchObject({ status: "failed", runIds: [s.runId] });
   });
 
+  test("a follow-up run that saves nothing after earlier runs saved blocks ends the job stopped, not failed (Oct 30)", async () => {
+    const t = convexTest(schema, modules);
+    const { jobId, runId } = await startNotes(t);
+    await submit(t, { job: jobId, key: "H1.1", claims: [detail()], sources: SOURCES });
+    await finishRun(t, runId);
+    const follow = (await job(t, jobId))!.runIds.at(-1)!;
+    await finishRun(t, follow);
+    expect((await job(t, jobId))!).toMatchObject({ status: "stopped", lastProblems: ["The last run saved nothing; Resume to finish."] });
+  });
+
   test("all keys done ends the job done", async () => {
     const t = convexTest(schema, modules);
     const { jobId, runId } = await startNotes(t);
@@ -618,6 +628,7 @@ describe("first searches (Oct 29 prefetch: POST /agent/research-prefetch and /ag
   };
   const plan = (t: T, job: string, token = AGENT) => call(t, "/agent/research-prefetch", { job }, token);
   const q = (artist: string, title: string) => `Tell me about this artist and release ${artist} - "${title}"`;
+  const q2 = (artist: string, title: string) => `${artist} - "${title}" interviews, reviews and samples`;
 
   test("lists each track left to research with its first-search query; closing tracks, done tracks, intros and threads are left out", async () => {
     const t = convexTest(schema, modules);
@@ -626,9 +637,9 @@ describe("first searches (Oct 29 prefetch: POST /agent/research-prefetch and /ag
       status: 200,
       data: {
         tracks: [
-          { key: "H1.1", query: q("Alfa Mist", "Organic Rust") },
-          { key: "H1.2", query: q("Nala Sinephro", "Space 1") },
-          { key: "H2.1", query: q("Yussef Dayes", "Black Classical Music") },
+          { key: "H1.1", query: q("Alfa Mist", "Organic Rust"), query2: q2("Alfa Mist", "Organic Rust") },
+          { key: "H1.2", query: q("Nala Sinephro", "Space 1"), query2: q2("Nala Sinephro", "Space 1") },
+          { key: "H2.1", query: q("Yussef Dayes", "Black Classical Music"), query2: q2("Yussef Dayes", "Black Classical Music") },
         ],
         embargoed: [],
       },

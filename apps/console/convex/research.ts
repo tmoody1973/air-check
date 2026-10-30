@@ -7,6 +7,7 @@ import {
   embargoedSearch,
   embargoMatches,
   firstSearchQuery,
+  secondSearchQuery,
   isShowDate,
   type JudgedClaim,
   judgeClaim,
@@ -768,7 +769,7 @@ export const countSearch = internalMutation({
 
 /**
  * Oct 29 prefetch (POST /agent/research-prefetch): the tracks of a running show-notes job whose first web search the
- * bridge runs in code, each with its query (core firstSearchQuery). Only keys still to research (a Regenerate: its one
+ * bridge runs in code, each with its queries (core firstSearchQuery, and since Oct 30 secondSearchQuery). Only keys still to research (a Regenerate: its one
  * block); never a closing track (Hard Rule 4). An embargoed track is listed by key only, never searched (R2, R8). It
  * reads only: each search is still counted by countSearch before it runs.
  */
@@ -783,13 +784,14 @@ export const prefetchPlan = internalQuery({
     if (!ACTIVE.includes(job.status)) return no("This research job is not running.");
     const keys = new Set(job.scope ?? remainingKeys(job, await liveEntries(ctx, jobId)));
     const active = await activeEmbargoes(ctx, workspace, chicagoDayKey(Date.now()));
-    const tracks: { key: string; query: string }[] = [];
+    const tracks: { key: string; query: string; query2: string }[] = [];
     const embargoed: string[] = [];
     for (const t of job.tracks ?? []) {
       if (t.closing || !keys.has(t.key)) continue;
       const query = firstSearchQuery(t);
-      if (trackEmbargo(t, active) || embargoedSearch(query, active)) embargoed.push(t.key);
-      else tracks.push({ key: t.key, query });
+      const query2 = secondSearchQuery(t);
+      if (trackEmbargo(t, active) || embargoedSearch(query, active) || embargoedSearch(query2, active)) embargoed.push(t.key);
+      else tracks.push({ key: t.key, query, query2 });
     }
     return { ok: true as const, tracks, embargoed };
   },
@@ -813,7 +815,7 @@ export const searchDone = internalMutation({
  * Scheduled by relay.finished (and by a stop that cancels a queued run) for a research run. With keys left, a block
  * saved in this run, no Take over and continuations under MAX_CONTINUATIONS, it queues one more run for the keys left
  * (a demo one only if it can run live, D11c). Otherwise the job ends done (all keys), stopped (cancelled, taken over,
- * a Regenerate's one block, or out of continuations) or failed (nothing saved). Only the job's newest run counts.
+ * a Regenerate's one block, out of continuations, or a run that saved nothing after earlier runs did) or failed (nothing saved). Only the job's newest run counts.
  */
 export const onRunFinished = internalMutation({
   args: { runId: v.string() },
@@ -833,7 +835,10 @@ export const onRunFinished = internalMutation({
       return end("done");
     }
     if (job.status === "taken-over" || run.status === "cancelled") return end("stopped");
-    if (!entries.some((e) => (e.savedAt ?? -1) >= createdAtOf(run))) return end("failed");
+    if (!entries.some((e) => (e.savedAt ?? -1) >= createdAtOf(run))) {
+      // Oct 30: a follow-up that saved nothing after earlier runs did is not a failed job; the saved blocks stand.
+      return entries.some((e) => e.savedAt !== undefined) ? end("stopped", ["The last run saved nothing; Resume to finish."]) : end("failed");
+    }
     if (job.scope) return end("stopped");
     if (job.continuations >= MAX_CONTINUATIONS) return end("stopped", [`Stopped after ${MAX_CONTINUATIONS} continuations; Resume to finish.`]);
     let next: string | null = null;

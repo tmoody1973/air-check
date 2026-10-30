@@ -26,7 +26,9 @@
 
 **How we'll know if this was right.**
 - The same 8-track test list, timed before and after: the after time is clearly shorter. Prediction for 28 tracks: the batch itself takes about 30 seconds (6 rounds of 5 searches at about 5 seconds each) while the agent writes its first track; the whole job drops from about 85 minutes (3 minutes a track on Oct 29) to about 45 to 55, because each track needs 3 or 4 model turns instead of 5 or 6. If it drops much less, the model's turns, not the searches, are the cost, and the next step is to hand the agent several tracks' results per call.
-- The bridge log line `prefetch tracks=… ok=… failed=… ms=…` shows the whole batch finishing in well under a minute, with few failures.
+- The bridge log line `prefetch searches=… ok=… failed=… ms=…` (named `tracks=` until Oct 30) shows the whole batch finishing in well under a minute, with few failures.
 - The notes are no thinner than before: Tarik reads the next show's notes and the per-track facts are as rich as on Oct 29.
+
+**Addendum, Oct 30 (Tarik).** First live run: 6 tracks searched in 10.5 seconds, and track 1 written in 46 seconds (about 3 minutes on Oct 29). The agent then read only Wikipedia, so code now runs a second search per track in the same batch, `<Artist> - "<Title>" interviews, reviews and samples` (Tarik chose the three topics). Cost: 2 more credits and 1 more counted search a track (56 of the 100-a-day cap for a 28-track show), no extra model time; the agent's own budget stays at 3 web searches a track, the two included.
 
 **What actually happened.**

@@ -8,6 +8,8 @@ export const trackKey = (hour: number, position: number) => `H${hour}.${position
 
 /** Oct 29 prefetch: each show-notes track's first web search, which code runs before the agent writes (skill rlr-show-notes). */
 export const firstSearchQuery = (t: { artist: string; title: string }) => `Tell me about this artist and release ${t.artist} - "${t.title}"`;
+/** Oct 30: the second search code runs with the first, for what Tarik asked for: interviews, reviews and samples. */
+export const secondSearchQuery = (t: { artist: string; title: string }) => `${t.artist} - "${t.title}" interviews, reviews and samples`;
 
 export function researchTracks(tracks: Track[]): ResearchTrack[] {
   return tracks.map((t) => ({
