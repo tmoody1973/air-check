@@ -619,14 +619,14 @@ describe("search caps (POST /agent/search-usage)", () => {
     return { status: res.status, data: (await res.json()) as Record<string, unknown> };
   };
 
-  test("100 real and 20 demo per Chicago day, separate per workspace, then allowed: false without counting; the next day starts again", async () => {
+  test("100 real and 100 demo per Chicago day, separate per workspace, then allowed: false without counting; the next day starts again", async () => {
     const t = convexTest(schema, modules);
     for (let i = 1; i <= 100; i++) expect((await usage(t, { query: `q${i}` })).data).toEqual({ allowed: true, used: i, cap: 100 });
     expect((await usage(t, { query: "one more" })).data).toEqual({ allowed: false, used: 100, cap: 100 });
-    for (let i = 1; i <= 20; i++) await usage(t, { query: `d${i}` }, DEMO_AGENT);
-    expect((await usage(t, { query: "one more" }, DEMO_AGENT)).data).toEqual({ allowed: false, used: 20, cap: 20 });
+    for (let i = 1; i <= 100; i++) await usage(t, { query: `d${i}` }, DEMO_AGENT);
+    expect((await usage(t, { query: "one more" }, DEMO_AGENT)).data).toEqual({ allowed: false, used: 100, cap: 100 });
     expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 100, cap: 100 });
-    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 20, cap: 20 });
+    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 100, cap: 100 });
     vi.setSystemTime(Date.UTC(2026, 9, 31, 5, 30)); // 00:30 Oct 31 in Chicago
     expect((await usage(t, { query: "new day" })).data).toEqual({ allowed: true, used: 1, cap: 100 });
   });
@@ -649,8 +649,8 @@ describe("search caps (POST /agent/search-usage)", () => {
 
   test("countSearch is concurrency-safe: parallel calls never pass the cap", async () => {
     const t = convexTest(schema, modules);
-    const all = await Promise.all(Array.from({ length: 22 }, (_, i) => t.mutation(internal.research.countSearch, { workspace: "demo", query: `q${i}` })));
-    expect(all.filter((r) => r.allowed)).toHaveLength(20);
+    const all = await Promise.all(Array.from({ length: 102 }, (_, i) => t.mutation(internal.research.countSearch, { workspace: "demo", query: `q${i}` })));
+    expect(all.filter((r) => r.allowed)).toHaveLength(100);
   });
 });
 
@@ -740,7 +740,7 @@ describe("first searches (Oct 29 prefetch: POST /agent/research-prefetch and /ag
     expect(await t.withIdentity(human).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100, credits: 6 });
     // The demo's own row; credits alone start one.
     await call(t, "/agent/search-done", { credits: 2 }, DEMO_AGENT);
-    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 20, credits: 2 });
+    expect(await t.withIdentity(demo()).query(api.research.searchUsage, {})).toEqual({ used: 0, cap: 100, credits: 2 });
     for (const bad of [{ refund: -1 }, { credits: 1.5 }, { refund: 101 }, { credits: 10_001 }, { refund: "1" }, null]) {
       expect((await call(t, "/agent/search-done", bad)).status, JSON.stringify(bad)).toBe(400);
     }

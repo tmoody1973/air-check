@@ -42,3 +42,4 @@ export * from "./research/judge";
 export * from "./research/text";
 export * from "./research/render";
 export * from "./research/skills";
+export * from "./skills/catalog";

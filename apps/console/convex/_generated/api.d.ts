@@ -23,6 +23,7 @@ import type * as gate from "../gate.js";
 import type * as http from "../http.js";
 import type * as ingest from "../ingest.js";
 import type * as media from "../media.js";
+import type * as memory from "../memory.js";
 import type * as mixcloud from "../mixcloud.js";
 import type * as packageStore from "../packageStore.js";
 import type * as packages from "../packages.js";
@@ -63,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   ingest: typeof ingest;
   media: typeof media;
+  memory: typeof memory;
   mixcloud: typeof mixcloud;
   packageStore: typeof packageStore;
   packages: typeof packages;
