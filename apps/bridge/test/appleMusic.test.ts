@@ -191,10 +191,22 @@ describe("loadAppleMusic", () => {
     expect(logs.join(" ")).not.toContain(dir);
   });
 
-  it("loads a .p8 key into a client", async () => {
+  it("loads a .p8 key into a client, and says it is available", async () => {
     const apple = loadAppleMusic({ teamId: TEAM, keyId: KID, keyFile }, { fetch: (async () => answer([album(1)], [])) as typeof fetch });
     expect(apple).toBeDefined();
     expect(await apple!.search("artist a")).toHaveLength(1);
+    expect(logs).toEqual(["apple_music=available"]);
     expect(logs.join(" ")).not.toContain(readFileSync(keyFile, "utf8").split("\n")[1]!);
+  });
+
+  it("refuses a readable key that is not ES256 (P-256): RSA, or EC on another curve", () => {
+    const rsa = join(dir, "rsa.p8");
+    writeFileSync(rsa, generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }));
+    const p384 = join(dir, "p384.p8");
+    writeFileSync(p384, generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({ type: "pkcs8", format: "pem" }));
+    expect(loadAppleMusic({ teamId: TEAM, keyId: KID, keyFile: rsa })).toBeUndefined();
+    expect(loadAppleMusic({ teamId: TEAM, keyId: KID, keyFile: p384 })).toBeUndefined();
+    expect(logs).toEqual(["apple_music=unavailable reason=key_not_p256", "apple_music=unavailable reason=key_not_p256"]);
+    expect(logs.join(" ")).not.toContain(dir);
   });
 });

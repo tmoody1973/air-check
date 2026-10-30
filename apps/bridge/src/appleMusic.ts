@@ -120,5 +120,11 @@ export function loadAppleMusic(cfg: AppleMusicConfig | undefined, opts: { fetch?
     console.error("apple_music=unavailable reason=key_unreadable"); // never the path or the key
     return undefined;
   }
+  // MusicKit tokens are ES256: a key on any other curve or type would sign tokens Apple refuses on every call.
+  if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+    console.error("apple_music=unavailable reason=key_not_p256");
+    return undefined;
+  }
+  console.log("apple_music=available");
   return createAppleMusic({ teamId: cfg.teamId, keyId: cfg.keyId, key }, opts);
 }

@@ -78,8 +78,14 @@ export function loadConfig(env: Record<string, string | undefined>): BridgeConfi
   };
 }
 
-/** All three set, or none: a half-configured Apple Music is just unavailable, never a failed start. */
+const APPLE_NAMES = ["APPLE_MUSIC_TEAM_ID", "APPLE_MUSIC_KEY_ID", "APPLE_MUSIC_KEY_FILE"] as const;
+
+/** All three set, or none: a half-configured Apple Music is just unavailable (logged by name), never a failed start. */
 function appleMusicConfig(env: Record<string, string | undefined>): AppleMusicConfig | undefined {
-  const [teamId, keyId, keyFile] = ["APPLE_MUSIC_TEAM_ID", "APPLE_MUSIC_KEY_ID", "APPLE_MUSIC_KEY_FILE"].map((k) => env[k]?.trim());
-  return teamId && keyId && keyFile ? { teamId, keyId, keyFile } : undefined;
+  const [teamId, keyId, keyFile] = APPLE_NAMES.map((k) => env[k]?.trim());
+  if (teamId && keyId && keyFile) return { teamId, keyId, keyFile };
+  const missing = APPLE_NAMES.filter((k) => !env[k]?.trim());
+  if (missing.length < APPLE_NAMES.length)
+    console.error(`apple_music=unavailable reason=partial_config missing=${missing.join(",")}`); // names, never values
+  return undefined;
 }
