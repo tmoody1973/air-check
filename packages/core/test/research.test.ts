@@ -49,7 +49,7 @@ describe("normalizeValue", () => {
     expect(normalizeValue("release-date", "10/10/2026")).toBeNull();
     expect(normalizeValue("credit", "Bénédicte, Jr.")).toBe("benedicte jr");
     expect(normalizeValue("track-number", "Track 03")).toBe("3");
-    expect(normalizeValue("length", "4:07")).toBe("4:07");
+    expect(normalizeValue("length", "4:07")).toBe("247"); // seconds, so ms, seconds and m:ss compare
   });
 
   it("reads ISO timestamps at day precision and ordinal days, and refuses impossible dates (R7)", () => {
@@ -68,6 +68,40 @@ describe("sourceSays", () => {
     expect(sourceSays("Released 2026-10-17.", "release-date", "2026-10-10")).toBe(false);
     expect(sourceSays("Released 10/10/2026.", "release-date", "2026-10-10")).toBe(false);
     expect(sourceSays("Out on Brownswood Recordings.", "label", "Brownswood")).toBe(true);
+  });
+});
+
+// Oct 29 live run: "No source shows 4:29 / 2 / Ninja Tune" against MusicBrainz text that held all three.
+describe("sourceSays reads the forms sources write values in (Oct 29 false negatives)", () => {
+  it("a length matches milliseconds, seconds, m:ss and words, within one second", () => {
+    expect(sourceSays('{"position":2,"number":"2","title":"Glue","length":269000}', "length", "4:29")).toBe(true);
+    expect(sourceSays('{"title":"Glue","length":268450}', "length", "4:29")).toBe(true); // 268.45 s
+    expect(sourceSays('{"trackTimeMillis":269999}', "length", "4:29")).toBe(true);
+    expect(sourceSays('{"duration":269}', "length", "4:29")).toBe(true); // a duration field in seconds
+    expect(sourceSays("It runs 4 minutes and 29 seconds.", "length", "4:29")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "4 minutes and 29 seconds")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "269 seconds")).toBe(true);
+    expect(sourceSays("Glue runs 4:29.", "length", "269000")).toBe(true); // a value written in milliseconds
+    expect(sourceSays("Side two closes on a 1:04:29 jam.", "length", "1:04:29")).toBe(true);
+    expect(sourceSays('{"length":271500}', "length", "4:29")).toBe(false); // 2.5 s off
+    expect(sourceSays("Glue runs 4:31.", "length", "4:29")).toBe(false);
+    expect(sourceSays("Glue has 269 plays and 269000 views.", "length", "4:29")).toBe(false); // a bare number is no length
+    expect(normalizeValue("length", "4:29")).toBe("269");
+    expect(normalizeValue("length", "a while")).toBeNull();
+  });
+
+  it("a track number matches MusicBrainz's position and number fields; a label its label-info name", () => {
+    expect(sourceSays('{"position":2,"number":"A2","title":"Glue","length":269000}', "track-number", "2")).toBe(true);
+    expect(sourceSays('{"position":3,"number":"3","title":"Glue"}', "track-number", "2")).toBe(false);
+    const labelInfo = '{"label-info":[{"catalog-number":"ZEN243","label":{"id":"x","name":"Ninja Tune","sort-name":"Ninja Tune","label-code":12666}}]}';
+    expect(sourceSays(labelInfo, "label", "Ninja Tune")).toBe(true);
+    expect(sourceSays(labelInfo, "label", "Warp Records")).toBe(false);
+  });
+
+  it("'2 November 2017', '2017-11-02' and 'November 2, 2017' match each other", () => {
+    const forms = ["2 November 2017", "2017-11-02", "November 2, 2017", "Nov. 2nd, 2017", '"date":"2017-11-02"'];
+    for (const text of forms) for (const value of forms.slice(0, 3)) expect(sourceSays(`Glue: ${text}.`, "release-date", value), `${value} in ${text}`).toBe(true);
+    expect(sourceSays("Glue: 3 August 2017.", "release-date", "2 November 2017")).toBe(false);
   });
 });
 

@@ -82,6 +82,29 @@ function readDate(m: RegExpMatchArray): string | null {
 const datesIn = (text: string) => [...text.matchAll(DATE)].map(readDate).filter((d): d is string => d !== null);
 const LABEL_SUFFIX = /(?: (?:records|recordings|music|ltd|inc))+$/;
 
+// Oct 29: lengths as sources write them. m:ss or h:mm:ss; "4 minutes and 29 seconds"; a length or duration field
+// (MusicBrainz and iTunes in milliseconds, Bandcamp in seconds). A bare number in prose is never a length.
+const CLOCK = /\b(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)\b/g;
+const WORDS = /\b(\d{1,3})\s*(?:minutes?|mins?)\.?,?\s*(?:and\s+)?(\d{1,2})\s*(?:seconds?|secs?)\b/gi;
+const FIELD = /\b(length|duration|duration_?ms|durationinmillis|tracktimemillis)"?\s*[:=]\s*"?(\d+(?:\.\d+)?)/gi;
+/** A field's number is milliseconds when its name says so, or when it is 10,000 or more (no track is 2.7 hours). */
+const fieldSeconds = (key: string, n: number) => (/ms|millis/i.test(key) || n >= 10_000 ? n / 1000 : n);
+function secondsIn(text: string): number[] {
+  return [
+    ...[...text.matchAll(CLOCK)].map((m) => Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3])),
+    ...[...text.matchAll(WORDS)].map((m) => Number(m[1]) * 60 + Number(m[2])),
+    ...[...text.matchAll(FIELD)].map((m) => fieldSeconds(m[1]!, Number(m[2]))),
+  ];
+}
+/** A claimed length in seconds: any form secondsIn reads, or a bare number ("269000" ms, "269" or "269 seconds"). */
+function lengthValue(v: string): number | null {
+  const read = secondsIn(v);
+  if (read.length === 1) return read[0]!;
+  const bare = v.match(/^(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|secs?|seconds)?$/i);
+  return bare ? fieldSeconds(bare[2] ?? "", Number(bare[1])) : null;
+}
+const LENGTH_SLACK_S = 1;
+
 /** A value as claims compare it, or null when it cannot be read (an ambiguous numeric date, a length with no m:ss). */
 export function normalizeValue(kind: ClaimKind, value: string): string | null {
   const v = value.trim();
@@ -97,8 +120,8 @@ export function normalizeValue(kind: ClaimKind, value: string): string | null {
       return n ? String(Number(n[0])) : null;
     }
     case "length": {
-      const m = v.match(/(\d+):(\d{2})/);
-      return m ? `${Number(m[1])}:${m[2]}` : null;
+      const s = lengthValue(v);
+      return s === null ? null : String(s);
     }
     default:
       return fold(v) || null;
@@ -156,6 +179,7 @@ function partsNear(text: string, near: readonly string[]): string[] {
 function saysWhole(text: string, kind: ClaimKind, want: string): boolean {
   // A year-only value is shown by any date in that year; judgeClaim still needs a month before it confirms.
   if (kind === "release-date") return datesIn(text).some((d) => d === want || (want.length === 4 && d.startsWith(`${want}-`)));
+  if (kind === "length") return secondsIn(text).some((s) => Math.abs(s - Number(want)) <= LENGTH_SLACK_S);
   return ` ${fold(text)} `.includes(` ${fold(want)} `);
 }
 

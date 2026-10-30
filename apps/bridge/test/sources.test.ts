@@ -120,6 +120,44 @@ describe("annotateCrateResult", () => {
     expect(all).toContain(`[${ids[0]}] Home · musicbrainz.org`);
   });
 
+  it("Oct 29: a long MusicBrainz release keeps its facts first, so the 8,000-character cap and the 300-character rule never hide them", () => {
+    // Real-shaped: a release lookup with artist credits, labels and recordings, ids everywhere, label-info and
+    // artist-credit after the tracklist. Placeholder names (Sample Honesty).
+    const mbid = (n: number) => `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
+    const credit = [{ name: "Artist A", joinphrase: "", artist: { id: mbid(900), name: "Artist A", "sort-name": "Artist A", disambiguation: "electronic duo", type: "Group", "type-id": mbid(901) } }];
+    const tracks = Array.from({ length: 14 }, (_, i) => {
+      const title = i === 1 ? "Title B" : `Other Track ${i + 1}`;
+      const length = i === 1 ? 269_000 : 200_000 + i * 1_000;
+      return {
+        id: mbid(100 + i), position: i + 1, number: String(i + 1), title, length, "artist-credit": credit,
+        recording: { id: mbid(200 + i), title, length, video: false, disambiguation: "", "first-release-date": "2017-09-01", "artist-credit": credit },
+      };
+    });
+    const release = {
+      id: mbid(1), title: "Album A", status: "Official", "status-id": mbid(2), quality: "normal", barcode: "5021392987124", disambiguation: "",
+      packaging: "None", "packaging-id": mbid(3), "text-representation": { language: "eng", script: "Latn" },
+      "cover-art-archive": { artwork: true, count: 3, front: true, back: false, darkened: false },
+      date: "2017-09-01", country: "XW",
+      "release-events": [{ date: "2017-09-01", area: { id: mbid(4), name: "[Worldwide]", "sort-name": "[Worldwide]", "iso-3166-1-codes": ["XW"], disambiguation: "" } }],
+      media: [{ position: 1, title: "", format: "Digital Media", "format-id": mbid(5), "track-count": 14, "track-offset": 0, tracks }],
+      "label-info": [{ "catalog-number": "ZEN243", label: { id: mbid(6), name: "Label A", "sort-name": "Label A", "label-code": 12666, type: "Original Production", "type-id": mbid(7), disambiguation: "" } }],
+      "artist-credit": credit,
+    };
+    const body = JSON.stringify(release);
+    expect(body.length).toBeGreaterThan(SOURCE_TEXT_MAX);
+    const ledger = createSourceLedger();
+    const [id] = idsIn(sourcesPart(annotateCrateResult(ledger, "musicbrainz_get_release", one(body)), body));
+    const kept = ledger.get(id!)!.text;
+    expect(kept.length).toBeLessThanOrEqual(SOURCE_TEXT_MAX);
+    const near = ["Artist A", "Title B"];
+    expect(sourceSays(kept, "label", "Label A", near)).toBe(true);
+    expect(sourceSays(kept, "track-number", "2", near)).toBe(true);
+    expect(sourceSays(kept, "length", "4:29", near)).toBe(true);
+    expect(sourceSays(kept, "release-date", "1 September 2017", near)).toBe(true);
+    expect(sourceSays(kept, "label", "Label B", near)).toBe(false);
+    expect(kept).toContain(body.slice(0, 200)); // the item's own JSON follows the facts
+  });
+
   it("names the entity a tool lists: artist releases are releases, release groups have their own path", () => {
     const ledger = createSourceLedger();
     const id = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";

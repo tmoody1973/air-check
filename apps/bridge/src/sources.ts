@@ -157,6 +157,43 @@ function pagesOf(family: string, tool: string, item: unknown, text: string): str
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 200);
 const MAX_SOURCES_PER_RESULT = 25; // ponytail: a long link list is noise to the agent; raise it if real results need more
+const MAX_FACT_LINES = 60;
+const str = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+const dateOf = (o: Record<string, unknown>) => (str(o.date) ? o.date : str(o["first-release-date"]) ? o["first-release-date"] : "");
+const lengthOf = (o: Record<string, unknown>) => (typeof o.length === "number" ? `length: ${o.length}` : "");
+
+/**
+ * Oct 29: a MusicBrainz item's checkable facts as short lines, put before its JSON in the ledger. First its title,
+ * credited artists, date and length; then each label-info name and catalog number; then every track or recording with
+ * its number, position, date and length (milliseconds, as MusicBrainz gives them). A long release's JSON passes the
+ * ledger's 8,000-character cap with its labels and tracks cut off, and its label can sit far from the artist's name
+ * (core's 300-character rule), which made the Oct 29 run say "No source shows 4:29 / 2 / Ninja Tune".
+ */
+function musicBrainzFacts(item: Record<string, unknown>): string {
+  const labels = new Set<string>();
+  const tracks = new Set<string>();
+  const walk = (v: unknown, top: boolean): void => {
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, false));
+    if (!isObj(v)) return;
+    for (const li of Array.isArray(v["label-info"]) ? v["label-info"] : []) {
+      if (!isObj(li) || !isObj(li.label) || !str(li.label.name)) continue;
+      labels.add(`label: ${li.label.name}${str(li["catalog-number"]) ? ` · catalog ${li["catalog-number"]}` : ""}`);
+    }
+    if (!top && str(v.title)) {
+      const facts = [v.number !== undefined ? `track ${v.number}` : "", v.position !== undefined ? `position ${v.position}` : "", dateOf(v), lengthOf(v)].filter(Boolean);
+      if (facts.length) tracks.add([v.title, ...facts].join(" · "));
+    }
+    for (const [k, x] of Object.entries(v)) if (k !== "label-info") walk(x, false);
+  };
+  walk(item, true);
+  const credited = (Array.isArray(item["artist-credit"]) ? item["artist-credit"] : []).map((c) => (isObj(c) ? c.name : undefined));
+  const head = [item.title ?? item.name, ...credited, dateOf(item), lengthOf(item)].filter(str).join(" · ");
+  return [head, ...labels, ...tracks].slice(0, MAX_FACT_LINES).join("\n");
+}
+
+/** What the ledger keeps for one item (for code's fact check only; the agent never sees it). */
+const ledgerText = (family: string, item: unknown) =>
+  typeof item === "string" ? item : family === "musicbrainz" && isObj(item) ? `${musicBrainzFacts(item)}\n${JSON.stringify(item)}` : JSON.stringify(item);
 
 /**
  * Crate result hook: each item's own page (or the page built from a MusicBrainz id) is added to the ledger and listed
@@ -171,7 +208,7 @@ export function annotateCrateResult(ledger: SourceLedger, tool: string, result: 
   for (const c of result.content) {
     if (c.type !== "text") continue;
     for (const item of itemsOf(c.text)) {
-      const text = typeof item === "string" ? item : JSON.stringify(item);
+      const text = ledgerText(family, item);
       const name = isObj(item) ? NAME_FIELDS.map((k) => item[k]).find((v): v is string => typeof v === "string" && v.trim() !== "") : undefined;
       for (const url of pagesOf(family, tool, item, text)) {
         if (lines.size >= MAX_SOURCES_PER_RESULT) break;
