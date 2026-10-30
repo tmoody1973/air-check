@@ -233,6 +233,18 @@ describe("unwrapForward", () => {
 });
 
 describe("stripLinks and cleanMail (Review Focus 2)", () => {
+  test("Oct 30: a forward's spaced address (www. co-sign. com) and any leftover www. become [link]", () => {
+    for (const [inp, out] of [
+      ["Follow us\nwww. co-sign. com ( x )", "Follow us\n[link] ( x )"],
+      ["w. www. co-sign. com", "w. [link]"],
+      ["WWW. Example. ORG today", "[link] today"],
+      ["www.\nnext line", "[link]\nnext line"],
+    ] as const) {
+      const got = stripLinks(inp).text;
+      expect(got).toBe(out);
+      expect(got).not.toMatch(/www\./i);
+    }
+  });
   test("seven links across text and hrefs, one public Bandcamp album", () => {
     const m = inbound("cosign-forwarded");
     const r = stripLinks(m.text, m.hrefs);

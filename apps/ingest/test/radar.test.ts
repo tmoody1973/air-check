@@ -124,12 +124,23 @@ describe("radarPass", () => {
   });
 
   test("a stored body that still holds a link or address never reaches the model (defence in depth)", async () => {
-    for (const body of ["see https://evil.example/a", "write x@evil.example", "go to www.evil.example"]) {
+    for (const body of ["see https://evil.example/a", "write x@evil.example"]) {
       const cv = fakeRadar([{ ...pendingFromFixture("cosign-forwarded"), body }]);
       const s = stubHttp(() => tfReply(JSON.stringify(COSIGN)));
       await radarPass(deps(cv, s.http).d);
       expect(s.sent).toEqual([]);
       expect(cv.records[0]!.outcome).toEqual({ kind: "refused", reasons: ["The stored email still holds a link or an address"] });
+    }
+  });
+
+  test("Oct 30: a stored www. (incl. a forward's spaced 'www. co-sign. com') is stripped again before the model reads it", async () => {
+    for (const tail of ["\nwww. co-sign. com ( [link] )", "\ngo to www.evil.example", "\nw. www. co-sign. com ( [link] )"]) {
+      const cv = fakeRadar([{ ...pendingFromFixture("cosign-forwarded"), body: pendingFromFixture("cosign-forwarded").body + tail }]);
+      const s = stubHttp(() => tfReply(JSON.stringify(COSIGN)));
+      await radarPass(deps(cv, s.http).d);
+      expect(s.sent).toHaveLength(1);
+      expect(JSON.stringify(s.sent[0])).not.toMatch(/www\./i);
+      expect(cv.records[0]!.outcome.kind).toBe("saved");
     }
   });
 

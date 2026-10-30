@@ -235,6 +235,8 @@ const URL_IN_TEXT = /https?:\/\/[^\s<>"'`]*/gi; // no \b: "foohttps://…" must 
 // These run on a public webhook before the sender check, so each must stay linear on a hostile run: every repeat
 // before a literal is bounded, "://" and "[.]" are found per word, and addresses are found from each "@" outward.
 const WWW_IN_TEXT = /www\.[^\s<>"'`]+/gi;
+// Oct 30: plain-text forwards space a site's parts ("www. co-sign. com"); one to eight spaced labels, then the ending.
+const SPACED_WWW = /www\.(?:\s{1,3}[\w-]{1,63}\.){1,8}\s{0,3}[a-z]{2,63}\b/gi;
 const HOST_PATH = /\b[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,8}\.[a-z]{2,63}\/\S*/gi; // bit.ly/abc, evil.example/a
 const MAILTO = /\bmailto:[^\s<>"'`]*/gi;
 const TOKEN = /\S+/g; // any word holding "://" (ftp://, hxxps://) or "[.]" (evil[.]com) becomes [link]: radar.received refuses "://"
@@ -287,7 +289,9 @@ export function stripLinks(text: string, hrefs: string[] = []): { text: string; 
     .replace(MAILTO, "[email]")
     .replace(URL_IN_TEXT, toLink)
     .replace(TOKEN, (t) => (t.includes("://") || t.includes("[.]") ? asLink(t) : t))
-    .replace(WWW_IN_TEXT, asLink);
+    .replace(SPACED_WWW, "[link]")
+    .replace(WWW_IN_TEXT, asLink)
+    .replace(/www\./gi, "[link]"); // any www. left (a bare "www." at a line end) is never stored
   const stripped = replaceEmails(linked).replace(HOST_PATH, asLink).replace(/@/g, "(at)");
   // A link whose host radar.received would refuse (localhost, [::1], foo_bar, a trailing dot) is dropped, not kept for Tarik.
   const links = [...new Set([...found, ...hrefs].map(httpLink).filter((l): l is string => l !== null))]

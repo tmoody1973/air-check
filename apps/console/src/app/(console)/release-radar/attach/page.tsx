@@ -1,40 +1,18 @@
 "use client";
 
-import { type AttachPayload, bookmarkletCode, readAttachPayload } from "@aircheck/core";
+import { type AttachPayload, readAttachPayload } from "@aircheck/core";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { BookmarkletSetup } from "@/components/BookmarkletLink";
 import { PRIMARY, errorText } from "@/components/EpisodeControls";
 import { Shell, useWorkspace } from "@/components/Shell";
 
 // Oct 30: Bandcamp challenges the VM's page reads (decision 025), so the "Send to Air Check" bookmarklet reads the player,
 // cover and address in Tarik's own browser and opens this page with them in the URL hash. The hash never reaches a server;
 // every field is checked again here and in radar.pastePlayer.
-
-/** The draggable bookmarklet. React blocks javascript: hrefs, so the href is set on the element after it mounts. */
-function BookmarkletLink() {
-  const ref = useRef<HTMLAnchorElement>(null);
-  useEffect(() => {
-    ref.current?.setAttribute("href", bookmarkletCode(window.location.origin));
-  }, []);
-  return (
-    <a ref={ref} href="#" onClick={(e) => e.preventDefault()} className={`${PRIMARY} self-start`}>
-      Send to Air Check
-    </a>
-  );
-}
-
-function Install() {
-  return (
-    <section className="flex flex-col gap-3 text-sm">
-      <p>Drag this button to your bookmarks bar. On a Bandcamp album or track page, click it: Air Check opens with that release&apos;s player and cover ready to attach.</p>
-      <BookmarkletLink />
-      <p className="text-ink-soft">It reads only the page you have open, in your browser. Air Check never visits Bandcamp itself.</p>
-    </section>
-  );
-}
 
 function Attach({ payload }: { payload: AttachPayload }) {
   const found = useQuery(api.radar.attachCandidates, { title: payload.title ?? "" });
@@ -90,7 +68,7 @@ export default function AttachPage() {
       ) : payload === undefined ? null : payload ? (
         <Attach payload={payload} />
       ) : (
-        <Install />
+        <BookmarkletSetup />
       )}
     </Shell>
   );
