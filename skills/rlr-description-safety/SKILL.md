@@ -34,7 +34,7 @@ Format only (a placeholder, not a real result):
 ```
 
 ## Leave out
-- Anything under a `VERIFY` flag or in a "Pre-Air Verify List", unless it has since been confirmed by a source the agent can cite.
+- Anything marked **[verify]** or under a `VERIFY` flag, or listed in a "Pre-Air Verify List" or "Notes for Your Review", unless it has since been confirmed by a source the agent can cite.
 - Time-relative phrases: "out today", "out this week", "this week's show", "next Friday", "coming October 23". Use no dates for future releases at all.
 - Never mention health, age or death. List it in the review flags for Tarik.
   - Exception, tribute shows: only when Tarik's own input (the tracklist header or his Chat message) says the show is a tribute to an artist who has died, you may say so plainly (e.g. "honoring the late D'Angelo"). Confirm the death through Crate (Wikipedia) and list it in `descriptionSources`. Never give the cause, the age or any health detail. Still list it in the review flags. Never decide on your own that a show is a tribute.

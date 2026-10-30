@@ -339,8 +339,45 @@ describe("publisher.researchReady", () => {
   });
 });
 
+// Oct 29 (Tarik, decision 021): show notes keep facts with no source, marked [verify]. Hard Rules 6 and 12: none of them
+// may reach a Mixcloud description, so the draft's NOTES (what the description is written from) leave them out.
+describe("unsourced facts never reach a description", () => {
+  test("a fact saved with no source stays in the private notes as [verify] and is left out of the draft's notes", async () => {
+    const t = convexTest(schema, modules);
+    const tracks = [
+      { key: "H1.1", hour: 1 as const, position: 1, artist: "Alfa Mist", title: "Organic Rust", closing: false },
+      { key: "H1.2", hour: 1 as const, position: 2, artist: "Kokoroko", title: "Abusey Junction", closing: true },
+    ];
+    await t.run((ctx) => ctx.db.insert("research", {
+      workspace: "real", jobId: "rj-unsrc1", kind: "show-notes", showDate: "2026-10-30", tracks, angles: false, status: "running", runIds: ["r1"], continuations: 0, createdAt: 1, updatedAt: 1,
+    }));
+    const page = { url: "https://label-a.example/organic-rust", host: "label-a.example", title: "Organic Rust", via: "tavily", text: "Organic Rust was recorded in London." };
+    const saved = await t.mutation(internal.research.submitEntry, {
+      workspace: "real",
+      input: {
+        job: "rj-unsrc1", key: "H1.1", sources: [{ id: "S1aaaa", ...page }],
+        claims: [
+          { kind: "detail", text: "It was recorded in London.", sources: [{ id: "S1aaaa" }] },
+          { kind: "bio", text: "Alfa Mist once played a secret show in Lisbon.", sources: [] },
+        ],
+      },
+    });
+    expect(saved).toMatchObject({ ok: true, claims: 2, verify: 1 });
+    await t.run(async (ctx) => {
+      const j = (await ctx.db.query("research").withIndex("by_jobId", (q) => q.eq("jobId", "rj-unsrc1")).unique())!;
+      await ctx.db.patch(j._id, { status: "done" });
+    });
+    const as = t.withIdentity(human);
+    const md = (await as.query(api.research.exportMarkdown, { jobId: "rj-unsrc1" }))!;
+    expect(md.split("\n").find((l) => l.includes("Lisbon"))).toMatch(/\*\*\[verify\]\*\*/);
+    const notes = await as.query(api.research.notesForDraft, { showDate: "2026-10-30" });
+    expect(notes).toMatch(/recorded in London/);
+    expect(notes).not.toMatch(/Lisbon|verify/);
+  });
+});
+
 describe("fail closed", () => {
-  const snapshot = (t: T) => t.run(async (ctx) => [await ctx.db.query("packages").collect(), await ctx.db.query("mixcloudStatus").collect()]);
+  const snapshot =(t: T) => t.run(async (ctx) => [await ctx.db.query("packages").collect(), await ctx.db.query("mixcloudStatus").collect()]);
   const calls = async (t: T, token: string, id: string) => {
     const cover = await t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/jpeg" })));
     return [

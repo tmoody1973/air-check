@@ -4,14 +4,19 @@
  */
 export const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const MAX_RESULTS = 5;
-const TIMEOUT_MS = 15_000;
-const MAX_BODY_BYTES = 262_144; // five basic results are a few KB; more is not an answer we asked for
+const TIMEOUT_MS = 25_000; // advanced depth plus each page's text takes longer than a basic search
+const MAX_BODY_BYTES = 2_097_152; // five pages of raw text fit; more is not an answer we asked for
 const MAX_URL = 2_048;
+/** core's LIMITS.sourceText: the most of a page's text the ledger can keep, so no more is held here. */
+const MAX_PAGE_TEXT = 8_000;
 
 export interface TavilyResult {
   url: string;
   title: string;
+  /** Advanced depth: up to three relevant chunks of the page, joined by Tavily. */
   content: string;
+  /** The page's cleaned plain text, whitespace collapsed, at most 8,000 characters. Untrusted data. */
+  rawContent?: string;
   publishedDate?: string;
 }
 
@@ -45,10 +50,13 @@ export async function tavilySearch(opts: { apiKey: string; fetch?: typeof fetch 
       headers: { authorization: `Bearer ${opts.apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({
         query,
-        search_depth: "basic",
+        // Oct 29 (Tarik, after comparing with his Perplexity notes): advanced depth costs 2 credits a search (basic 1);
+        // chunks_per_source works only with it. "text" adds each page's plain text at no extra credit.
+        search_depth: "advanced",
+        chunks_per_source: 3,
         max_results: MAX_RESULTS,
         include_answer: false,
-        include_raw_content: false,
+        include_raw_content: "text",
         include_images: false,
         // Without this Tavily leaves out published_date (docs.tavily.com, checked via Context7, Oct 29).
         include_published_date: true,
@@ -70,5 +78,14 @@ export async function tavilySearch(opts: { apiKey: string; fetch?: typeof fetch 
   return data.results
     .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object" && isWebUrl(str((r as { url?: unknown }).url)))
     .slice(0, MAX_RESULTS)
-    .map((r) => ({ url: str(r.url), title: str(r.title), content: str(r.content), ...(str(r.published_date) && { publishedDate: str(r.published_date) }) }));
+    .map((r) => {
+      const page = str(r.raw_content).replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TEXT);
+      return {
+        url: str(r.url),
+        title: str(r.title),
+        content: str(r.content),
+        ...(page && { rawContent: page }),
+        ...(str(r.published_date) && { publishedDate: str(r.published_date) }),
+      };
+    });
 }

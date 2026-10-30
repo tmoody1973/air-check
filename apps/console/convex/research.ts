@@ -118,6 +118,14 @@ function slotsOf(job: Pick<Job, "kind" | "tracks" | "lines">): Slot[] {
     ]);
 }
 
+/** Oct 29: the names a long source must mention near a value (core sourceSays): the block's track, or the deep dive's subject. */
+function namesFor(job: Pick<Job, "kind" | "subject" | "tracks" | "lines">, key: string): string[] {
+  if (job.kind === "deep-dive") return job.subject ? [job.subject.name] : [];
+  const trackKey = job.kind === "verify" ? job.lines?.find((l) => l.id === key)?.trackKey : key;
+  const track = job.tracks?.find((t) => t.key === trackKey);
+  return track ? [track.artist, track.title] : [];
+}
+
 /** Saved by the agent, or edited by Tarik: either way not researched again by a Resume or a continuation. */
 const isDone = (e: Entry | undefined) => !!e && (e.savedAt !== undefined || e.edited !== undefined);
 function remainingKeys(job: Job, entries: Entry[]): string[] {
@@ -684,8 +692,9 @@ type SubmitResult =
 /**
  * The agent's one write (POST /agent/research). Rules in order: the job is the token's workspace's and running (a
  * queued job moves to running on its first save); the key is one the job issued, not a closing track and not a block
- * Tarik edited; the fields pass rule 3; each claim is judged by code against the posted sources, and a claim with no
- * source is dropped and named. The block replaces the agent's earlier version, keeping Tarik's own fields.
+ * Tarik edited; the fields pass rule 3; each claim is judged by code against the posted sources (a claim with no source
+ * is could-not-verify, or in a pre-air check dropped and named). The block replaces the agent's earlier version, keeping
+ * Tarik's own fields.
  */
 export const submitEntry = internalMutation({
   args: { workspace: workspaceV, input: submitV },
@@ -708,11 +717,14 @@ export const submitEntry = internalMutation({
     if (problems.length) return no(400, problems);
 
     const sources = Object.fromEntries(input.sources.map(({ id, ...s }) => [id, s]));
+    const names = namesFor(job, slot.key);
     const dropped: string[] = [];
+    // Decision 021: show notes and deep dives keep a sourceless fact (judged could-not-verify, "No source found.") for
+    // Tarik to confirm; a pre-air check exists to source a line, so there it is still dropped and named.
     const judged = (list: ClaimIn[] | undefined, label: string) =>
       (list ?? []).flatMap((c, i) => {
-        if (c.sources.length) return [judgeClaim(c, sources)];
-        dropped.push(`${label} ${i + 1} has no source. No source, no sentence.`);
+        if (c.sources.length || job.kind !== "verify") return [judgeClaim(c, sources, names)];
+        dropped.push(`${label} ${i + 1} has no source. A pre-air check needs one.`);
         return [];
       });
     const claims = [...judged(input.claims, "Claim"), ...judged(input.threads, "Thread")];

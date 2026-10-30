@@ -11,8 +11,9 @@ const HOUR_WORD: Record<string, Hour> = { "1": 1, one: 1, "2": 2, two: 2 };
 const HOUR_HEADING = /^#{1,6}\s.*?\bhour\s*(1|2|one|two)\b/i;
 const HOUR_MARKER = /^[#*\s]*hour\s*(1|2|one|two)\b[\s:–—*-]*$/i;
 const SYNTH = /^H([12])\s*\|\s*(.+?)\s*\|\s*(.+?)\s*$/;
-// "## 1. Artist – "Title"" (real show notes) or a plain "1. Artist - "Title"". The title must be quoted.
-const NUMBERED = /^(?:#{1,6}\s+)?\d+\.\s+(.+?)\s+[–—-]\s+["“](.+)["”]/;
+// "## 1. Artist – "Title"" (older show notes), "### 1. Artist, "Title"" (his Oct 23 notes and Air Check's export since
+// Oct 29) or a plain "1. Artist - "Title"". The title must be quoted.
+const NUMBERED = /^(?:#{1,6}\s+)?\d+\.\s+(.+?)(?:\s+[–—-]|,)\s+["“](.+)["”]/;
 
 const clean = (s: string) => s.replace(/\*\*/g, "").trim();
 

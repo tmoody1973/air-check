@@ -1,35 +1,39 @@
 # Target show-notes format (structure only)
 
-Taken from the Oct 16, 2026 Paper notes. Structure only; no show content is copied here.
+Taken from the shape of Tarik's Oct 23, 2026 Paper notes (Oct 29 ruling). Structure only; no show content is copied here.
+`fixtures/show-notes-sample.md` is the golden render of this shape.
 
 ```
 # Rhythm Lab Radio <date>
 # Rhythm Lab Radio, Hour One: Show Notes
-<2-3 sentence intro: what the hour is built around>
-<one line: items marked **[verify]** had thin or conflicting sources>
-## Show Thread
-- **<thread name>:** <connection between tracks> [source links]
-- **Release dates:** <anything only days old>
-----------
-## 1. Artist – "Title"
-**Release:** or **Album:** <album/single, label, date, track number, length> [sources]
-### Details:
-- <fact> [source]
-- **[verify]** <what is thin or conflicting, and what to check>
-### Artist: (or **Artist:** one line)
-- <sourced bio fact> [source]
-**On-air angle:** <one line prompt, optional>
-## 2. ...
-----------
-# Rhythm Lab Radio, Hour Two: Full Show Notes
-## Show Threads
+<1-3 sentence intro: what the hour is built around>
+**Hour thread:** <connections across the hour, as prose>[[site](url)]
+**Release dates:** <anything only days old, counted by code>
+### 1. Artist, "Title"
+- **Album and label:** <album or single, label, date, credits, length>[[site](url)] <next sentence>[[site](url)]
+- **Chart:** <chart runs and awards>
+- **Artist bio:** <born, where, formed, labels>
+- **Story:** <the story behind the song>
+- **Song:** <what the song is about, how it was made>
+- **Samples and connections:** <samples, covers, links to other tracks>
+- **Video:** <the video and who made it>
+- **Fun fact:** <one odd, true detail>
+- **On-air angle:** <one line, optional>
+### 2. Artist, "Title"
+- **What I could verify:** <the little that holds>
+- **What I couldn't verify:** <what is missing, and the facts to check> **[verify]**
+### 3. Artist, "Title"   (the hour's last track)
+closing-track, no notes
+# Rhythm Lab Radio, Hour Two: Show Notes
 ...
+## Notes for Your Review
+- **Artist, "Title":** <fact> (<reason>); <fact> (<reason>).
 ```
 
 Observed conventions:
-- Sources are inline links after each claim, written `[[site](url)]`.
-- Conflicts show both versions, then **[verify]** (for example two release dates).
-- When nothing is found: "I found no verified bio" plus **[verify]**.
+- Links follow each sentence, written `[[short host](url)]`: the host without `www.` and without its last label (`en.wikipedia`, `pitchfork`, `music.apple`).
+- Bullets appear only when there is something to say, in the order above. Facts of one kind share one bullet of one to four sentences.
+- A fact that holds has no marker. A fact to check ends **[verify]**; a conflict also gives both versions ("Sources disagree: en.wikipedia says X, instagram says Y."). The reason ("no source found", "only one source", "sources disagree") is only in Notes for Your Review.
+- A fact with no source is kept and marked **[verify]** (decision 021). Never "I found no verified bio": a track with little found uses "What I could verify / What I couldn't verify".
 - Hand-supplied notes are labeled "from your supplied notes, which I did not independently check".
-- Hour One closes with a final track that has an entry in the 10-16 doc; the closing-track rule needs Tarik's decision (PRD open question 6a).
-- Items to avoid carrying over: a pasted blurb with no source and no label (hour one, track 6 in the 10-16 doc). The tool must label or source these.
+- Closing tracks (the last track of each hour) get one line and no research (Hard Rule 4).
