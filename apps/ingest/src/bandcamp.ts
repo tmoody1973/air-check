@@ -11,6 +11,7 @@ export type EmbedFailure =
   | "not_html"
   | "too_large"
   | "no_player"
+  | "challenged"
   | "timeout"
   | "network"
   | `http_${number}`;
@@ -74,6 +75,8 @@ async function fetchPage(http: Http, pageUrl: string): Promise<{ html: string } 
 export async function bandcampEmbed(http: Http, pageUrl: string): Promise<(BandcampEmbed & BandcampDetails) | { failed: EmbedFailure }> {
   const page = await fetchPage(http, pageUrl);
   if ("failed" in page) return page;
+  // Oct 30: Bandcamp's bot check (a few KB, no player). Recorded as such; Tarik pastes the player instead. Never worked around.
+  if (/<title>\s*Client Challenge\s*<\/title>/i.test(page.html.slice(0, 5_000))) return { failed: "challenged" };
   const embed = readBandcampEmbed(page.html);
   return embed ? { ...embed, ...readBandcampDetails(page.html) } : { failed: "no_player" };
 }

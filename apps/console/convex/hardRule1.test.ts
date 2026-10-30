@@ -60,7 +60,7 @@ test("the public writes are exactly the allowlist", async () => {
       // Plan 8: the console's inbound route (INBOX_TOKEN) stores a cleaned email; the ingest worker (INGEST_TOKEN) records
       // what it read and a Bandcamp player id; a signed-in human moves records. None can reach a package (Hard Rule 1).
       "radar.received", "radar.record", "radar.embedResult",
-      "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed",
+      "radar.setStatus", "radar.edit", "radar.setEmbargo", "radar.retry", "radar.retryEmbed", "radar.pastePlayer",
       // Plan 8 Task 6b: a signed-in human (the demo actor on demo rows) stars a release; it changes nothing else.
       "radar.setFavorite",
       // Plan 7: a signed-in human (the demo actor in the demo workspace) starts and steers research. Research writes only

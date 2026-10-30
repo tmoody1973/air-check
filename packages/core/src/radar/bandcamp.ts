@@ -68,12 +68,29 @@ export function metaTags(html: string): { key: string; content: string }[] {
 export function readBandcampEmbed(html: string): BandcampEmbed | null {
   for (const { key, content } of metaTags(html)) {
     if (!PLAYER_META.has(key) || !content.startsWith(PLAYER_PREFIX)) continue;
-    const path = content.slice(PLAYER_PREFIX.length);
     // A track page's player may also name its album; the track is the one the page is about.
-    const m = path.match(/(?:^|\/)(track)=(\d{1,12})(?=\/|$)/) ?? path.match(/(?:^|\/)(album)=(\d{1,12})(?=\/|$)/);
-    if (m) return { kind: m[1] as BandcampEmbed["kind"], id: m[2]! };
+    const found = idInPath(content.slice(PLAYER_PREFIX.length));
+    if (found) return found;
   }
   return null;
+}
+
+/** The kind and id in a player path: a track's id wins over the album a track player also names. */
+const idInPath = (path: string): BandcampEmbed | null => {
+  const m = path.match(/(?:^|\/)(track)=(\d{1,12})(?=\/|$)/) ?? path.match(/(?:^|\/)(album)=(\d{1,12})(?=\/|$)/);
+  return m ? { kind: m[1] as BandcampEmbed["kind"], id: m[2]! } : null;
+};
+
+/**
+ * Oct 30: the player id from what Tarik pastes from Bandcamp's Share → Embed (the iframe code, its player URL, or the
+ * WordPress shortcode). Read in code, nothing is fetched: Bandcamp answers the ingest worker's page reads with a bot check.
+ */
+export function embedFromPaste(text: string): BandcampEmbed | null {
+  const t = text.slice(0, 5_000);
+  const player = /https:\/\/bandcamp\.com\/EmbeddedPlayer\/([^"'\s<>]{1,500})/.exec(t)?.[1];
+  const shortcode = /^\s*\[bandcamp\s([^\]]{1,1000})\]\s*$/.exec(t)?.[1]?.trim().replace(/\s+/g, "/");
+  const path = player ?? shortcode;
+  return path ? idInPath(path) : null;
 }
 
 /** Bandcamp's player iframe src, built from kind and id only, never from fetched text. */

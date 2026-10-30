@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { bandcampEmbedSrc } from "@aircheck/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BandcampPlayer, embedErrorText } from "./BandcampPlayer";
@@ -79,5 +79,37 @@ describe("BandcampPlayer", () => {
   it("no Bandcamp page at all: nothing", () => {
     const { container } = render(<BandcampPlayer {...base} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("Paste player (Oct 30: Bandcamp challenges the worker)", () => {
+  const CODE = '<iframe src="https://bandcamp.com/EmbeddedPlayer/album=3847473100/size=large/"></iframe>';
+  it("challenged: says Bandcamp asked for a human check, and the pasted code is saved", async () => {
+    const onPaste = vi.fn(async () => undefined);
+    render(<BandcampPlayer {...base} onPaste={onPaste} embedState="failed" embedError="challenged" />);
+    expect(screen.getByText(/Bandcamp asked for a human check/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Paste player" }));
+    fireEvent.change(screen.getByLabelText("Bandcamp embed code"), { target: { value: CODE } });
+    fireEvent.click(screen.getByRole("button", { name: "Save player" }));
+    await waitFor(() => expect(onPaste).toHaveBeenCalledWith(CODE));
+  });
+  it("no Bandcamp link in the email: a plain line and the paste box, nothing else", () => {
+    render(<BandcampPlayer {...base} onPaste={vi.fn(async () => undefined)} />);
+    expect(screen.getByText("No Bandcamp link in the email.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Paste player" })).toBeTruthy();
+  });
+  it("a refused paste shows the reason; Cancel closes the box", async () => {
+    const onPaste = vi.fn(async () => { throw new Error("That isn't Bandcamp's embed code."); });
+    render(<BandcampPlayer {...base} onPaste={onPaste} embedState="failed" embedError="no_player" />);
+    fireEvent.click(screen.getByRole("button", { name: "Paste player" }));
+    fireEvent.change(screen.getByLabelText("Bandcamp embed code"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save player" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Bandcamp embed code")).toBeNull();
+  });
+  it("the demo never shows the paste box", () => {
+    render(<BandcampPlayer {...base} demo onPaste={vi.fn(async () => undefined)} />);
+    expect(screen.queryByRole("button", { name: "Paste player" })).toBeNull();
   });
 });

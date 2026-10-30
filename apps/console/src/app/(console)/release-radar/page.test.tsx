@@ -18,7 +18,7 @@ vi.mock("convex/react", () => ({
   useMutation: () => vi.fn(),
 }));
 vi.mock("../../../../convex/_generated/api", () => ({
-  api: { radar: { list: "radar.list", notAdded: "radar.notAdded", setStatus: "s", edit: "e", setEmbargo: "m", retry: "r", retryEmbed: "re", setFavorite: "f" } },
+  api: { radar: { list: "radar.list", notAdded: "radar.notAdded", setStatus: "s", edit: "e", setEmbargo: "m", retry: "r", retryEmbed: "re", pastePlayer: "pp", setFavorite: "f" } },
 }));
 vi.mock("@/components/Shell", () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

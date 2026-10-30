@@ -29,7 +29,7 @@ const COSIGN = [
 ];
 const lists: RadarLists = { bandcamp: list(BANDCAMP), cosign: list(COSIGN) };
 const noop = async () => undefined;
-const acts = (): RadarActions => ({ setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), setFavorite: vi.fn(noop) });
+const acts = (): RadarActions => ({ setStatus: vi.fn(noop), edit: vi.fn(noop), setEmbargo: vi.fn(noop), retry: vi.fn(noop), retryEmbed: vi.fn(noop), pastePlayer: vi.fn(noop), setFavorite: vi.fn(noop) });
 
 function setup({ tab = "bandcamp" as "bandcamp" | "cosign", workspace = "real" as "real" | "demo", data = lists, notAdded = [] as never[], search = "" } = {}) {
   const onTabChange = vi.fn();
