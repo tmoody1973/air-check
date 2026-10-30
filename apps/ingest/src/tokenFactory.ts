@@ -12,6 +12,8 @@ const MAX_REPLY_BYTES = 1024 ** 2;
 // (FRICTION_LOG 2026-10-26). Thinking is switched off in the chat template; 4000 covers a model that ignores the switch.
 const MAX_TOKENS = 4000;
 const NO_THINKING = { enable_thinking: false };
+/** Oct 30: strict JSON mode (Token Factory accepts it); a roundup reply had failed to parse (bad_json). */
+const JSON_MODE = { type: "json_object" };
 
 /** Why there is no answer: a short code for the log (Hard Rule 8), never the reply's text. */
 export type ChatFailure = `http_${number}` | "timeout" | "network" | "empty" | "length" | "bad_json";
@@ -21,12 +23,12 @@ const isTimeout = (e: unknown) => ["TimeoutError", "AbortError"].includes((e as 
 
 /**
  * The first JSON object in the model's reply, or null with a code. An HTTP 400 (a host that refuses
- * chat_template_kwargs) is tried once more without it, with the same timeout.
+ * chat_template_kwargs or JSON mode) is tried once more without either, with the same timeout.
  */
 export async function chatJson(http: Http, key: string, { system, user }: { system: string; user: string }): Promise<ChatResult> {
   const base = { model: EXTRACTOR_MODEL, temperature: 0, max_tokens: MAX_TOKENS, messages: [{ role: "system", content: system }, { role: "user", content: user }] };
   try {
-    let res = await post(http, key, { ...base, chat_template_kwargs: NO_THINKING });
+    let res = await post(http, key, { ...base, chat_template_kwargs: NO_THINKING, response_format: JSON_MODE });
     if (res.status === 400) {
       await res.body?.cancel();
       res = await post(http, key, base);

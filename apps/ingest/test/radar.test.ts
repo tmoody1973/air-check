@@ -51,8 +51,9 @@ describe("radarPass", () => {
     expect(body).not.toHaveProperty("tools");
     expect(body).not.toHaveProperty("tool_choice");
     // R7: reasoning off through the chat template, a budget big enough if it is ignored; no reasoning_effort.
-    expect(Object.keys(body).sort()).toEqual(["chat_template_kwargs", "max_tokens", "messages", "model", "temperature"]);
-    expect(body).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b", temperature: 0, max_tokens: 4000, chat_template_kwargs: { enable_thinking: false } });
+    // Oct 30: strict JSON mode (Token Factory accepts it), after a roundup's reply failed to parse (bad_json).
+    expect(Object.keys(body).sort()).toEqual(["chat_template_kwargs", "max_tokens", "messages", "model", "response_format", "temperature"]);
+    expect(body).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b", temperature: 0, max_tokens: 4000, chat_template_kwargs: { enable_thinking: false }, response_format: { type: "json_object" } });
     expect(body.messages.map((m) => m.role)).toEqual(["system", "user"]);
     expect(body.messages[0]!.content).toBe(EXTRACTION_SKILL_TEXT);
     const user = body.messages[1]!.content;
@@ -192,15 +193,16 @@ describe("chatJson (the one Token Factory client)", () => {
     expect(await ask(() => reply('{"artist": "A', "length"))).toEqual({ json: null, code: "length" });
   });
 
-  test("an HTTP 400 is retried once without chat_template_kwargs; a second 400 is http_400", async () => {
+  test("an HTTP 400 is retried once without chat_template_kwargs or JSON mode; a second 400 is http_400", async () => {
     const s = stubHttp((_u, _i, n) => (n === 1 ? new Response("{}", { status: 400 }) : tfReply('{"notRelease": true}')));
     expect(await chatJson(s.http, KEY, { system: "s", user: "u" })).toEqual({ json: { notRelease: true } });
     expect(s.sent).toHaveLength(2);
     const [first, second] = s.sent.map((x) => bodyOf(x.init));
     expect(first).toHaveProperty("chat_template_kwargs", { enable_thinking: false });
     expect(second).not.toHaveProperty("chat_template_kwargs");
+    expect(second).not.toHaveProperty("response_format");
     expect(second).not.toHaveProperty("reasoning_effort");
-    expect({ ...second, chat_template_kwargs: { enable_thinking: false } }).toEqual(first);
+    expect({ ...second, chat_template_kwargs: { enable_thinking: false }, response_format: { type: "json_object" } }).toEqual(first);
     const twice = stubHttp(() => new Response("{}", { status: 400 }));
     expect(await chatJson(twice.http, KEY, { system: "s", user: "u" })).toEqual({ json: null, code: "http_400" });
     expect(twice.sent).toHaveLength(2);
