@@ -1,9 +1,9 @@
 {
-  "_note": "SYNTHETIC fixture in the AgentMail message shape (Plan 8 Task 1). Not a real email. Confirm against a live sample in Task 7.",
+  "_note": "SYNTHETIC fixture in the AgentMail message shape (Plan 8 Task 1). Not a real email. Confirm against a live sample in Task 7. The template line follows real Bandcamp mail seen 2026-10-29 (listening-queue brief A).",
   "message_id": "<bc-artist-0002@bandcamp.example.invalid>",
   "from_": "Bandcamp <noreply@bandcamp.com>",
   "subject": "New release from Ferro Lane",
-  "html": "<html><head><title>Bandcamp</title><style>p{margin:0}</style></head><body><p>Hi Tarik,</p><br><p>Ferro Lane just released Night Rooms.</p><br><p>Check it out: <a href=\"https://ferrolane.bandcamp.com/track/night-rooms\">https://ferrolane.bandcamp.com/track/night-rooms</a></p><br><p>Digital track, released October 27, 2026</p><br><p>You are getting this because you follow Ferro Lane on Bandcamp.</p><p>Unsubscribe: <a href=\"https://example.invalid/unsubscribe/artist\">https://example.invalid/unsubscribe/artist</a></p></body></html>",
+  "html": "<html><head><title>Bandcamp</title><style>p{margin:0}</style></head><body><p>Hi Tarik,</p><br><p>Ferro Lane just released “Night Rooms”, check it out at:</p><p><a href=\"https://ferrolane.bandcamp.com/track/night-rooms\">https://ferrolane.bandcamp.com/track/night-rooms</a></p><br><p>Digital track, released October 27, 2026</p><br><p>You are getting this because you follow Ferro Lane on Bandcamp.</p><p>Unsubscribe: <a href=\"https://example.invalid/unsubscribe/artist\">https://example.invalid/unsubscribe/artist</a></p></body></html>",
   "authentication_results": {
     "dkim": "none",
     "dmarc": "pass",

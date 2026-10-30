@@ -1,15 +1,15 @@
 "use client";
 
 import { useRef, useState, type KeyboardEvent } from "react";
-import { showDateLabel } from "../lib/date";
-import { useWide } from "../lib/wide";
 import { RadarNotAdded, type NotAddedRow } from "./RadarNotAdded";
 import { ReleaseItem, type RadarActions, type RadarTab, type Release, type ReleaseCtx, type ReleaseStatus } from "./ReleaseItem";
 import { SampleTag } from "./SampleTag";
 import type { Workspace } from "./Shell";
 
-// Plan 8 Task 6: the Release radar. Two real tabs (Bandcamp, Co-signs), status chips, grouping (PRD job 6), each record
-// as a table row on a wide screen or a card on a phone, and the "Not added" list below both tabs (real workspace only).
+// Plan 8 Task 6: the Release radar. Two real tabs (Bandcamp, Co-signs), status chips, and the "Not added" list below both
+// tabs (real workspace only). Listening-queue brief D: one list of compact blocks on every screen, no table or group
+// headers, a Sort control (Considering, the crate for the next show, starts sorted by release date), and one player open
+// at a time.
 // This is a private, signed-in view (Hard Rule 10): embargoed releases and their players show here and nowhere public.
 // Task 6b: one search box (the page runs it in Convex across artist, title, label, tags and about), a Favorites filter
 // and a tag filter (set by a tag chip). Filters hold across both tabs.
@@ -17,7 +17,7 @@ import type { Workspace } from "./Shell";
 export type RadarList = { rows: Release[]; counts: Record<ReleaseStatus, number> } | null | undefined;
 export type RadarLists = Record<RadarTab, RadarList>;
 type Filter = ReleaseStatus | "all";
-type GroupBy = "label" | "genre" | "date";
+type Sort = "received" | "date" | "label";
 
 const TABS: { tab: RadarTab; label: string }[] = [
   { tab: "bandcamp", label: "Bandcamp" },
@@ -30,27 +30,25 @@ const FILTERS: { f: Filter; label: string; empty: string }[] = [
   { f: "passed", label: "Passed", empty: "Nothing passed on this tab." },
   { f: "all", label: "All", empty: "" },
 ];
-const GROUPS: Record<RadarTab, { by: GroupBy; label: string }[]> = {
-  bandcamp: [{ by: "label", label: "Label" }, { by: "genre", label: "Genre" }, { by: "date", label: "Release date" }],
-  cosign: [{ by: "label", label: "Label" }, { by: "date", label: "Release date" }],
-};
+const SORTS: { by: Sort; label: string }[] = [
+  { by: "received", label: "Newest received" },
+  { by: "date", label: "Release date" },
+  { by: "label", label: "Label" },
+];
 const EMPTY_TAB: Record<RadarTab, string> = {
   bandcamp: "Nothing yet. Bandcamp's new-release emails land here once your Gmail filter forwards them to the Air Check inbox.",
   cosign: "Nothing yet. Forward a label or PR email to the Air Check inbox and it lands here as one record.",
 };
-const NOT_KNOWN: Record<GroupBy, string> = { label: "[No label]", genre: "[No genre]", date: "[Date not known]" };
-const th = "px-3 py-2.5 text-left align-top font-mono text-[10.5px] font-normal uppercase tracking-[0.1em] text-muted";
-
-type Group = { key: string; label: string; rows: Release[] };
-
-/** Groups in reading order: names A to Z, dates soonest first, and the bracketed "not known" group last. */
-function groupsOf(rows: Release[], by: GroupBy): Group[] {
-  const keyOf = (r: Release) => (by === "date" ? r.releasedOn : by === "label" ? r.label?.trim() : r.genre?.trim()) || "";
-  const groups = new Map<string, Release[]>();
-  for (const r of rows) groups.set(keyOf(r), [...(groups.get(keyOf(r)) ?? []), r]);
-  return [...groups.entries()]
-    .sort(([a], [b]) => (!a ? 1 : !b ? -1 : by === "date" ? a.localeCompare(b) : a.localeCompare(b, "en", { sensitivity: "base" })))
-    .map(([key, rows]) => ({ key, rows, label: !key ? NOT_KNOWN[by] : by === "date" ? showDateLabel(key) : key }));
+const received = (r: Release) => r.receivedAt ?? 0;
+/** Sorted copy. Release date: soonest first, unknown last. Label: A to Z, none last. Ties: the newest email first. */
+function sorted(rows: Release[], by: Sort): Release[] {
+  const last = (a: string | undefined, b: string | undefined, cmp: (x: string, y: string) => number) => (a && b ? cmp(a, b) : a ? -1 : b ? 1 : 0);
+  const order = {
+    received: () => 0,
+    date: (a: Release, b: Release) => last(a.releasedOn, b.releasedOn, (x, y) => x.localeCompare(y)),
+    label: (a: Release, b: Release) => last(a.label?.trim(), b.label?.trim(), (x, y) => x.localeCompare(y, "en", { sensitivity: "base" })),
+  }[by];
+  return [...rows].sort((a, b) => order(a, b) || received(b) - received(a));
 }
 
 function Tabs({ tab, lists, onTabChange }: { tab: RadarTab; lists: RadarLists; onTabChange: (t: RadarTab) => void }) {
@@ -106,7 +104,6 @@ export function RadarView({
   today,
   actions,
   notAdded,
-  layout,
   search,
   onSearchChange,
 }: {
@@ -117,28 +114,37 @@ export function RadarView({
   today: string;
   actions: RadarActions;
   notAdded: NotAddedRow[] | undefined;
-  /** Tests pick one; the page follows the screen width. */
-  layout?: "table" | "cards";
   search: string;
   onSearchChange: (s: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("new");
   const [favorites, setFavorites] = useState(false);
   const [tag, setTag] = useState<string | undefined>();
-  const [group, setGroup] = useState<GroupBy>("label");
+  // null: the default (Considering: release date; the rest: newest received).
+  const [sort, setSort] = useState<Sort | null>(null);
+  const [playing, setPlaying] = useState<string | undefined>();
   // A save message with a counter: the same words twice still change the live region, so both are announced.
   const [said, setSaid] = useState({ text: "", n: 0 });
   const announce = (text: string) => setSaid((s) => ({ text, n: s.n + 1 }));
-  const wide = useWide();
 
   if (lists.bandcamp === null || lists.cosign === null)
     return <p className="text-ink-soft">{"This account can't use Air Check. Sign in with your Radio Milwaukee account."}</p>;
 
   const demo = workspace === "demo";
-  const cards = (layout ?? (wide ? "table" : "cards")) === "cards";
   const data = lists[tab];
-  const by = GROUPS[tab].some((g) => g.by === group) ? group : "label";
-  const ctx: ReleaseCtx = { actions, announce, today, demo, tab, tag, onTag: (t) => setTag((cur) => (cur === t ? undefined : t)) };
+  const by: Sort = sort ?? (filter === "considering" ? "date" : "received");
+  const ctx: ReleaseCtx = {
+    actions,
+    announce,
+    today,
+    demo,
+    tab,
+    tag,
+    onTag: (t) => setTag((cur) => (cur === t ? undefined : t)),
+    playing,
+    onPlay: setPlaying,
+    showStatus: filter === "all",
+  };
   const chipClass = (on: boolean) =>
     `inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal ${
       on ? "border-ink bg-ink text-paper" : "border-line bg-surface hover:bg-surface-quiet"
@@ -149,15 +155,13 @@ export function RadarView({
     const total = data.rows.length;
     // Favorites and the tag narrow the tab; the status chips then count within what is left.
     const narrowed = data.rows.filter((r) => (!favorites || r.favorite) && (!tag || r.tags?.includes(tag)));
-    const shown = filter === "all" ? narrowed : narrowed.filter((r) => r.status === filter);
-    const groups = groupsOf(shown, by);
+    const shown = sorted(filter === "all" ? narrowed : narrowed.filter((r) => r.status === filter), by);
     const count = (f: Filter) => (f === "all" ? narrowed.length : narrowed.filter((r) => r.status === f).length);
     const favoriteCount = data.rows.filter((r) => r.favorite && (!tag || r.tags?.includes(tag))).length;
     const searching = search.trim() !== "";
     return (
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div role="group" aria-label="Filters" className="flex flex-wrap gap-2">
+        <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
           <div role="group" aria-label="Status" className="flex flex-wrap gap-2">
             {FILTERS.map(({ f, label }) => {
               const on = f === filter;
@@ -166,7 +170,11 @@ export function RadarView({
                   key={f}
                   type="button"
                   aria-pressed={on}
-                  onClick={() => setFilter(f)}
+                  onClick={() => {
+                    // Tarik's sort holds across chips; entering or leaving Considering starts from that chip's default.
+                    if ((f === "considering") !== (filter === "considering")) setSort(null);
+                    setFilter(f);
+                  }}
                   className={chipClass(on)}
                 >
                   {label} <b className="font-semibold tabular-nums">{count(f)}</b>
@@ -174,19 +182,21 @@ export function RadarView({
               );
             })}
           </div>
+          {/* Favorites and Sort share a row: on a phone it is its own line, so the status chips take two rows, not three. */}
+          <div data-favorites-sort className="flex min-w-0 flex-1 items-center justify-between gap-2 max-md:basis-full">
             <button type="button" aria-pressed={favorites} onClick={() => setFavorites(!favorites)} className={chipClass(favorites)}>
               <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M10 2.2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L10 14.6l-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z" fill={favorites ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
               </svg>
               Favorites <b className="font-semibold tabular-nums">{favoriteCount}</b>
             </button>
+            <span className="flex items-center gap-2">
+              <label htmlFor="radar-sort" className="text-sm text-ink-soft">Sort</label>
+              <select id="radar-sort" value={by} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal">
+                {SORTS.map((o) => <option key={o.by} value={o.by}>{o.label}</option>)}
+              </select>
+            </span>
           </div>
-          <span className="flex items-center gap-2">
-            <label htmlFor="radar-group" className="text-sm text-ink-soft">Group by</label>
-            <select id="radar-group" value={by} onChange={(e) => setGroup(e.target.value as GroupBy)} className="min-h-11 rounded-control border border-line-strong bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal">
-              {GROUPS[tab].map((g) => <option key={g.by} value={g.by}>{g.label}</option>)}
-            </select>
-          </span>
         </div>
         {tag && (
           <p className="flex flex-wrap items-center gap-2 text-sm">
@@ -202,44 +212,10 @@ export function RadarView({
           <p className="text-sm text-muted">Nothing matches these filters.</p>
         ) : shown.length === 0 ? (
           <p className="text-sm text-muted">{FILTERS.find((x) => x.f === filter)!.empty}</p>
-        ) : cards ? (
-          <div className="flex flex-col gap-5">
-            {groups.map((g) => (
-              <section key={g.key} aria-label={g.label} className="flex flex-col gap-2">
-                <h3 className="flex items-baseline gap-2 text-sm font-semibold [overflow-wrap:anywhere]">
-                  {g.label}
-                  <span className="font-mono text-[11px] font-normal text-muted">{g.rows.length}</span>
-                </h3>
-                <ol className="flex flex-col gap-3">{g.rows.map((r) => <ReleaseItem key={r._id} r={r} layout="card" ctx={ctx} />)}</ol>
-              </section>
-            ))}
-          </div>
         ) : (
-          <section aria-label="Releases" className="overflow-x-auto rounded-card border border-line bg-surface p-2">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
-              <caption className="sr-only">Releases, grouped by {GROUPS[tab].find((g) => g.by === by)!.label.toLowerCase()}, newest email first in each group.</caption>
-              <thead>
-                <tr>
-                  <th scope="col" className={`${th} w-[34%]`}>Release</th>
-                  <th scope="col" className={th}>{tab === "cosign" ? "From" : "Label"}</th>
-                  <th scope="col" className={th}>{tab === "cosign" ? "Label · type" : "Genre · type"}</th>
-                  <th scope="col" className={th}>Released</th>
-                  <th scope="col" className={th}>Status</th>
-                </tr>
-              </thead>
-              {groups.map((g) => (
-                <tbody key={g.key}>
-                  <tr>
-                    <th scope="rowgroup" colSpan={5} className="border-t border-line-strong px-3 pb-1 pt-4 text-left text-sm font-semibold">
-                      {g.label}
-                      <span className="ml-2 font-mono text-[11px] font-normal text-muted">{g.rows.length}</span>
-                    </th>
-                  </tr>
-                  {g.rows.map((r) => <ReleaseItem key={r._id} r={r} layout="row" ctx={ctx} />)}
-                </tbody>
-              ))}
-            </table>
-          </section>
+          <ol aria-label="Releases" className="min-w-0 rounded-card border border-line bg-surface">
+            {shown.map((r) => <ReleaseItem key={r._id} r={r} ctx={ctx} />)}
+          </ol>
         )}
       </div>
     );

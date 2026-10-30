@@ -1,0 +1,24 @@
+# Keeps the host forward 127.0.0.1:8642 -> the airc sandbox's Hermes API alive.
+# NemoClaw's `recover` starts this forward as a detached process that nothing supervises, and it exits
+# during OpenShell gateway stalls (Oct 29, twice: ~03:04 and 12:08 UTC). Here systemd restarts it in 1 s.
+# The ExecStart is NemoClaw's exact argv, so `nemohermes airc recover` sees the listener as its own and
+# leaves it alone. ExecStartPre stops an unsupervised copy of that same forward (matched by full argv,
+# nothing else) so this unit can bind the port.
+# Install: bash deploy/hermes/install-forward.sh (docs/DEPLOY.md, "The Hermes sandbox").
+[Unit]
+Description=Air Check: supervised host forward 127.0.0.1:8642 -> airc Hermes API
+After=aircheck-hermes.service user@1001.service
+Wants=aircheck-hermes.service
+StartLimitIntervalSec=0
+
+[Service]
+User=user
+Environment=PATH=/home/user/.local/bin:/home/user/.nvm/versions/node/v22.23.4/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+ExecStartPre=/home/user/.aircheck/forward-adopt.sh /etc/systemd/system/aircheck-hermes-forward.service
+ExecStart=/home/user/.local/bin/openshell --gateway nemoclaw --gateway-endpoint https://127.0.0.1:8080 --workspace default forward service airc --target-port 8642 --target-host 127.0.0.1 --local 127.0.0.1:8642
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

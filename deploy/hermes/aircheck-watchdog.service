@@ -6,3 +6,9 @@ After=network-online.target
 Type=oneshot
 User=user
 ExecStart=/home/user/.aircheck/watchdog.sh
+# A forward that the watchdog's fallback `recover` starts lands in this unit's cgroup. With the default
+# KillMode=control-group systemd killed it when the oneshot exited, 11 s after the "reconnected" line
+# (Oct 29, 12:54). `process` kills only watchdog.sh itself, so the healed forward stays up.
+KillMode=process
+# A oneshot has no start timeout by default; a run that still hangs is ended so the next timer tick can start.
+TimeoutStartSec=10min

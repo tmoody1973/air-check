@@ -170,6 +170,7 @@ dc down
    - The bridge bundle, before its unit: `mkdir -p ~/aircheck-bridge`, then steps 1–4 of "Updating the bridge" below.
    - The relay bundle and settings: `mkdir -p ~/aircheck-relay/dist`, then steps 1–3 of "Updating the relay" below, and `~/.aircheck/relay.env` (mode 600) from `deploy/relay/relay.env.example`.
    - The four units: `aircheck-hermes.service`, `aircheck-bridge.service`, `aircheck-relay.service` and `aircheck-watchdog.service` plus its `.timer` (copies in `deploy/`).
+   - The two forward units, the watchdog's sudo rule and the agent config: `bash deploy/hermes/install-forward.sh` (see "The supervised forwards").
    - The private CA and leaf certificate: `deploy/bridge/make-ca.sh`, then `make-leaf.sh <private ip>`.
    - `crate-cli` cloned to `~/crate-cli` at commit `37f4ec2`, built with `npm ci && npm run build`.
    - `~/.aircheck/bridge.env` (mode 600) from `deploy/bridge/bridge.env.example`.
@@ -187,6 +188,7 @@ Hermes is the AI agent that drafts show material. It runs inside a NemoClaw sand
 - **Linger is on.** The gateway is a systemd *user* service (systemd is Ubuntu's service manager), `nemoclaw-openshell-gateway.service`. Ubuntu only runs user services while someone is logged in over SSH, unless "linger" is on. It was off, so after a VM stop and start nothing launched the gateway and the sandbox went to phase `Error`. The fix, already applied: `sudo loginctl enable-linger user`. Do not undo it (`disable-linger` would bring the outage back).
 - **A boot unit.** `/etc/systemd/system/aircheck-hermes.service` (a copy lives in the repo at `deploy/hermes/aircheck-hermes.service`) runs `nemohermes airc start` at boot. Then it retries `nemohermes airc recover` every 15 seconds for up to 5 minutes. Both are needed: `start` does not bring back the forwarded port 8642 that the console talks to, and `recover` does, but only once the sandbox is up.
 - **Re-wiring the agent's tools.** After `recover`, the unit runs `nemohermes airc mcp restart`, wrapped in `timeout 120` so a hung re-wire cannot use up the unit's start time. Why: on Oct 28, after the Oct 27 restarts, `airc`'s two registered tool servers (`aircheck` and `crate`) showed "mismatch" (registered but not wired to the agent), so a live draft failed with "package_submit not available" until `mcp restart` was run by hand. It is harmless when the tools are already wired. `aircheck-hermes-demo.service` does the same for `aircdemo`. The reboot test on Oct 28 (20:58 UTC) showed "Reloaded MCP server" in the boot log and both sandboxes back with all three tools, with no hand repair.
+- **A supervised forward.** The console reaches Hermes through a host "forward" on `127.0.0.1:8642` (a small `openshell forward service` process that carries each connection into the sandbox). `recover` starts it detached, so nothing restarts it if it exits, and it did exit during two gateway stalls on Oct 29. `aircheck-hermes-forward.service` now runs that same forward under systemd and restarts it 1 second after any exit. See "The supervised forwards" below.
 - **A clean shutdown.** When the VM stops, the unit runs `openshell sandbox stop airc` before Docker and the gateway stop. It is an `ExecStopPost` step, so it also runs when a shutdown interrupts the boot retries or the start times out (systemd skips a plain `ExecStop` in both cases). Without it, Docker kills the container first, the gateway records an unexpected exit, and the sandbox lands in `Error` instead of `Stopped`.
 
 Check it:
@@ -204,11 +206,52 @@ systemctl status aircheck-hermes            # expect active (exited)
 `Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. The script is `~/.aircheck/reonboard.sh`. It loads `~/.airc/secrets.env`, uses the same settings as the original install, and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about 45 seconds.
 
 1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`.
-2. Run `~/.aircheck/reonboard.sh`.
+2. Stop the forward units first, so they do not fight the onboard over the ports: `sudo systemctl stop aircheck-hermes-forward aircheck-hermes-demo-forward`. Then run `~/.aircheck/reonboard.sh`. Start the units again only after step 4: `sudo systemctl start aircheck-hermes-forward aircheck-hermes-demo-forward`.
 3. Register the two bridge tools again with the `mcp add` commands under "Registering the bridge with Hermes". Unverified: whether onboarding keeps the earlier registration. Re-running is safe either way.
-4. Install the station skills again: `~/air-check/deploy/hermes/install-skills.sh` (see "Agent skills"). A destroy removes them.
+4. Re-apply the agent config and install the station skills again: `bash ~/air-check/deploy/hermes/apply-agent-config.sh --with-skills`. A destroy loses both. It sets `skills.creation_nudge_interval: 0` and `skills.write_approval: true` in `/sandbox/.hermes/config.yaml` in `airc` and `aircdemo`, reads them back with `hermes config get`, and with `--with-skills` then runs `install-skills.sh` (see "Agent skills"). Run it the same way after `onboard-demo.sh`. Then start the forward units (step 2).
 
 **Hermes loses its memory when this runs.** A copy of the Hermes home from before the outage is at `~/.aircheck/hermes-backup-2026-10-27/` on the VM. It holds keys tied to that machine, so never copy it off the VM.
+
+### The supervised forwards
+
+Each Hermes API port has its own unit (repo copies in `deploy/hermes/`):
+
+| Unit | Port | Sandbox |
+|---|---|---|
+| `aircheck-hermes-forward.service` | `127.0.0.1:8642` | `airc` |
+| `aircheck-hermes-demo-forward.service` | `127.0.0.1:8643` | `aircdemo` |
+
+- **What it runs.** Exactly the command NemoClaw's `recover` runs (`openshell --gateway nemoclaw ... forward service airc --target-port 8642 --target-host 127.0.0.1 --local 127.0.0.1:8642`). It has to be exact: `recover` checks the listener's full command line, and a match means it leaves the port alone instead of calling it foreign.
+- **Restarts.** `Restart=always`, `RestartSec=1`, and `StartLimitIntervalSec=0` so systemd never gives up.
+- **Taking over from a stray forward.** At boot, `aircheck-hermes.service` still runs `recover`, which starts its own unsupervised forward first. The unit's `ExecStartPre` (`~/.aircheck/forward-adopt.sh`) stops a listener on its port only when that listener's full command line equals the unit's `ExecStart` and it is at least 30 seconds old, then the unit binds the port. A younger one may have just been started by NemoClaw (an onboard or a `recover`), so it is left alone and the unit retries every second until it is old enough. Anything else on the port is left alone and the unit keeps retrying. Expect a gap of about a second.
+- **The demo command line** is the airc command with `aircdemo` and `8643`. It was checked byte for byte against the live 8643 forward (pid 8937, Oct 29). The installer compares it again before it changes anything, and stops if they differ.
+
+**Install or update** (on the VM, as `user`, after `git pull` in `~/air-check`), when no draft is in progress. Handing a port to its unit drops open connections for about a second. Check first that this prints nothing: `ss -tn state established '( sport = :8642 )'`. The installer also warns and waits 10 seconds if it sees an open connection.
+
+```sh
+bash deploy/hermes/install-forward.sh
+```
+
+It is safe to re-run. In order, it:
+
+1. Checks that whatever holds 8642 and 8643 is NemoClaw's forward with exactly the unit's command. If not, it stops before changing anything.
+2. Installs `forward-adopt.sh`, both forward units, the watchdog unit (now `KillMode=process`) and `/etc/sudoers.d/aircheck-forward`. This sudo rule allows `user` to restart the two forward units and nothing else, and it is checked with `visudo` first.
+3. Stops the unsupervised forwards and starts both units. A unit that already owns its port is left running (not restarted).
+4. Reinstalls the watchdog script (`install-watchdog.sh`, with its dry run).
+5. Re-applies the agent config (`apply-agent-config.sh`, without `--with-skills`; it does not touch the installed skills). For `airc` this re-confirms values already set. **For the demo agent it is a real change:** on Oct 29 `aircdemo` had `creation_nudge_interval: 15` and `write_approval: false`. After this, the demo agent's skill writing is turned off too, and the installer prints "aircdemo (demo agent): skill writing turned off".
+6. Prints the checks: `/health` 200 on each port, `ActiveState`, `NRestarts` and `MainPID` for each unit, and the `ss -ltnp` line for each port. The listener's PID must be the unit's `MainPID`. It ends with "All checks passed." or a `FAIL:` line.
+
+**Prove it restarts:** `bash deploy/hermes/install-forward.sh --test` does everything above, then kills each forward's main process once. Each port must answer `/health` 200 within 10 seconds, and `NRestarts` must go up by exactly 1.
+
+Check by hand later:
+
+```sh
+systemctl show aircheck-hermes-forward -p ActiveState -p NRestarts -p MainPID
+ss -ltnp 'sport = :8642'                     # the pid must be the MainPID above
+nemohermes airc recover                      # should report the forward as fine, and leave the PID unchanged
+```
+
+After installing, watch `journalctl -u aircheck-hermes-forward -f` for a minute while the watchdog or a draft uses the link, and check that it does not log a line per connection. If it does, that noise is the forward's own output, not a fault. A rising `NRestarts` means the forward keeps dropping. Each restart costs about a second, not hours, but it is worth a look in the same journal.
 
 ## aircdemo (the judges' sandbox)
 
@@ -258,10 +301,12 @@ A timer checks every five minutes that the agent side is up, and texts Tarik on 
   - `Crate bridge`: `https://10.104.0.41:8443/healthz`.
   - `Relay`, `Media` and `Publisher`: `systemctl is-active` on each service.
   - `Agent tools` and `Demo agent tools`: `nemohermes <sandbox> mcp status` for `aircheck` and `crate` must say registered. This catches the "mismatch" problem described under "The Hermes sandbox".
-  - `Agent skills`: `nemohermes <sandbox> skill list` must include `rlr-description-safety` in both sandboxes.
+  - `Agent skills`: `COLUMNS=200 hermes skills list --source local` (one `openshell sandbox exec` per sandbox) must include `rlr-description-safety` in both sandboxes. The listing is saved as `~/.aircheck/skills-list.<sandbox>` for the next check, so each run asks the gateway only once per sandbox. `COLUMNS=200` matters: at the default width the table cuts names short (`rlr-mixcloud-title-and…`).
+  - `Hermes forward` and `Demo Hermes forward`: `systemctl is-active` on `aircheck-hermes-forward` and `aircheck-hermes-demo-forward`. A stopped unit alerts once, like any other probe.
+- **New agent-made skills.** It also reads the skill listing that the `Agent skills` probe saved. Any `local` skill that `install-skills.sh` did not install gets one Telegram line: "Air Check: the agent made itself a new skill, <name>, in <sandbox>. Check it before the next draft." Each sandbox-and-name pair alerts once. They are remembered in `~/.aircheck/watchdog.skills-seen` (delete a line to be told again). The allowed list in `watchdog.sh` must match `SKILLS` in `install-skills.sh`, and a test checks this.
 - Earlier copies of the script are kept on the VM as `~/.aircheck/watchdog.sh.pre-4b`, `watchdog.sh.pre-plan5` and `watchdog.sh.pre-5c`.
 - When something goes down it sends one message: "Air Check: <name> is down since HH:MM. Console unaffected." When everything is back it sends one more. Otherwise it says nothing. During the Oct 28 reboot test it reported Demo Hermes and both tool probes down while the sandboxes booted, then "everything is back up at 21:02" (UTC on the VM clock), which is expected.
-- Auto-heal: when `Hermes` or `Demo Hermes` fails, the watchdog first runs `nemohermes airc recover` (or `aircdemo`) once, waits about 10 seconds and probes again; only a second failure counts as down. A successful heal sends one Telegram line, "Air Check: agent link dropped and was reconnected at HH:MM.", and writes `watchdog: <probe> link dropped, reconnected at HH:MM` to the journal (`journalctl -u aircheck-watchdog`). `--dry-run` prints what it would run and runs nothing. To deploy a new copy: `git pull` in `~/air-check`, then `bash ~/air-check/deploy/hermes/install-watchdog.sh` (keeps `watchdog.sh.bak`).
+- Auto-heal: when `Hermes` or `Demo Hermes` fails, the watchdog first restarts that port's forward unit (`sudo -n systemctl restart --no-block aircheck-hermes-forward.service`, or the demo one, allowed by the sudo rule `install-forward.sh` installs). It waits about 10 seconds and probes again. If the probe still fails, it runs `nemohermes airc recover` (or `aircdemo`) once, waits about 10 seconds and probes again. Only a failure after that counts as down. The unit has `KillMode=process`, so a forward that `recover` starts survives the end of the run. Before Oct 29 systemd killed it about 11 seconds after the "reconnected" message. A successful heal sends one Telegram line, "Air Check: agent link dropped and was reconnected at HH:MM.", and writes `watchdog: <probe> link dropped, reconnected at HH:MM` to the journal (`journalctl -u aircheck-watchdog`). `--dry-run` prints what it would run and runs nothing. To deploy a new copy: `git pull` in `~/air-check`, then `bash ~/air-check/deploy/hermes/install-watchdog.sh` (keeps `watchdog.sh.bak`).
 - It remembers what it last saw in `~/.aircheck/watchdog.state`. Messages that could not be sent wait in `~/.aircheck/watchdog.pending` and go out with the next successful send.
 - To test without sending a message: `~/.aircheck/watchdog.sh --dry-run` prints what it would send. Run it after every change to the script: the first version of the `Agent tools` probe crashed the script on the VM for a few minutes (see `docs/FRICTION_LOG.md`, Oct 28).
 
@@ -520,9 +565,9 @@ The outcomes on the package page:
 The station skills in `skills/` are instruction files the agent (Hermes) can load. Two are installed in both sandboxes: `rlr-description-safety` (how to write the public description, in Tarik's voice) and `rlr-mixcloud-title-and-tags`.
 
 - **Install or refresh:** `~/air-check/deploy/hermes/install-skills.sh` on the VM (an optional first argument is the repo folder; default `~/air-check`). For each sandbox and each skill it removes the old copy and installs the repo copy, because `nemohermes <sandbox> skill install` refuses to replace a skill with the same name. It ends with `skill list` and fails if the skills are missing.
-- **When to run it:** after any destroy and re-onboard of `airc` or `aircdemo`, and after changing a skill. Skills live in `/sandbox/.hermes/skills/<name>` inside the sandbox. They survive stop and start and `rebuild`, but not a destroy (checked in the NemoHermes v0.0.137 docs on the VM, Oct 28).
+- **When to run it:** after changing a skill. After any destroy and re-onboard of `airc` or `aircdemo`, run `apply-agent-config.sh --with-skills` instead. It re-applies the skill-writing lock and then runs this script. Skills live in `/sandbox/.hermes/skills/<name>` inside the sandbox. They survive stop and start and `rebuild`, but not a destroy (checked in the NemoHermes v0.0.137 docs on the VM, Oct 28).
 - **Installed is not the same as used.** On Oct 28 the agent had the skill installed and never opened it (`docs/LEARNING-LOG.md`). So the description skill's text is also compiled into the code and sent with every draft request and every `package_get` result. A test fails if that copy drifts from `skills/rlr-description-safety/SKILL.md`, so after editing the skill, run `pnpm test`, then deploy Convex and the bridge (the two places that carry the copy) as well as running `install-skills.sh`.
-- **The agent's own skill was removed.** On Oct 27 the agent wrote itself a skill, `mixcloud-package-submission`, that taught it wrong limits (`docs/FRICTION_LOG.md`, Oct 28). It was removed from `airc` on Oct 28; a backup is on the VM at `~/.aircheck/agent-skill-backup`. After a live draft, check that `nemohermes airc skill list` shows no new agent-made description skill.
+- **The agent's own skill was removed.** On Oct 27 the agent wrote itself a skill, `mixcloud-package-submission`, that taught it wrong limits (`docs/FRICTION_LOG.md`, Oct 28). It was removed from `airc` on Oct 28; a backup is on the VM at `~/.aircheck/agent-skill-backup`. The sandbox config now has `skills.creation_nudge_interval: 0` and `skills.write_approval: true` (re-applied by `apply-agent-config.sh`), and the watchdog sends a Telegram alert when a new agent-made skill appears.
 - The watchdog's `Agent skills` probe alerts if `rlr-description-safety` disappears from either sandbox.
 
 ## Deploy order (changes that touch Convex, the bridge and the publisher)
@@ -695,6 +740,22 @@ unset RADAR_SENDERS CONVEX_URL
 ```
 
 Each line is `#n kept`, `#n ignored <reason>`, or `#n failed (AgentMail)` / `#n failed (Convex <code>)` (for example `UNAUTHORIZED`: the `INBOX_TOKEN` does not match Convex); the last line is the counts. Exit code 1 means something failed: run it again. Kept emails then appear in the radar within a minute (the ingest worker reads them).
+
+### 7. Repair Bandcamp releases stored by the old parser (one-off, listening-queue brief B)
+
+Why: the first Bandcamp parser was written against made-up mail. On real mail it stored, for example, the artist as `Roots Records, check it out at:`. `--reparse` re-reads each kept Bandcamp email since the date with the fixed parser and asks `radar.reparse` (INBOX_TOKEN) to patch artist, title and label on the release that email made, never a field you edited. If the corrected name matches another release, both are left alone and the line says `collision`. A Bandcamp release whose player is ready but has no release date is also queued again, so the ingest worker re-reads its page for the date (3 per pass); if that read fails, the working player stays.
+
+Deploy order, in full: **Convex → ingest worker → console → `--reparse --dry-run` → `--reparse`.** Convex goes first because the new ingest worker sends `releasedOn` **and** `pageArtist` to `radar.embedResult`; an older Convex refuses the unknown field, and the page stays queued and is fetched again every pass. Convex also adds `radar.reparse`. A release whose date you set or cleared is never re-queued. Same environment as section 6; the dry run also needs `CONVEX_URL` and `INBOX_TOKEN`, because it asks Convex what it would change (and writes nothing).
+
+```sh
+export RADAR_SENDERS="$(ssh user@<the VM's static IP> "grep '^RADAR_SENDERS=' ~/.aircheck/console.env | cut -d= -f2-")"
+export CONVEX_URL=https://clever-deer-759.convex.cloud
+pnpm --filter console exec tsx scripts/radar-backfill.ts --reparse --since 2026-10-27 --dry-run   # look first
+pnpm --filter console exec tsx scripts/radar-backfill.ts --reparse --since 2026-10-27             # then repair
+unset RADAR_SENDERS CONVEX_URL
+```
+
+Each line is `#n repaired`, `#n unchanged`, `#n collision` or `#n not-found`, with ` requeued` when the page was queued again; `#n skipped (...)` for mail that is not a kept Bandcamp email or does not match the template; or a `failed` line as in section 6. It never prints a title or sender. Running it twice is safe: the second run says `unchanged`.
 
 ## Certificates and renewal dates
 

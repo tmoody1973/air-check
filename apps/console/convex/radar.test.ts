@@ -195,6 +195,21 @@ describe("received", () => {
     expect((await activity(t))[0]).toMatchObject({ destination: "label.example" });
   });
 
+  test("brief C: tidyMail drops unsubscribe and bare-root links and collapses tracking copies, so they can't re-enter", async () => {
+    const t = convexTest(schema, modules);
+    const page = "https://acidjazz.bandcamp.com/album/peace-love";
+    const links = [page, `${page}?from=fanpub_fnb`, `${page}?utm_source=x&utm_medium=email#top`, "https://bandcamp.com/", "https://bandcamp.com/fan_unsubscribe?email=tarik%40radiomilwaukee.org&sig=abc"];
+    await received(t, "m1", mail({ tab: "bandcamp", links, bandcampPages: [page] }));
+    expect(await inboxRow(t, "m1")).toMatchObject({ links: [page], linkCount: 1 });
+  });
+
+  test("brief C: list shows a stored release's links tidied too (rows stored before the fix)", async () => {
+    const t = convexTest(schema, modules);
+    await insertRelease(t, { source: "cosign", links: ["https://label.example/press?utm_source=x", "https://label.example/press", "https://label.example/unsubscribe?u=1", "https://label.example/"] });
+    const r = await t.withIdentity({ subject: "u1", email: "dj@radiomilwaukee.org", emailVerified: true }).query(api.radar.list, { tab: "cosign" });
+    expect(r!.rows[0]!.links).toEqual(["https://label.example/press"]);
+  });
+
   test("extra keys in mail are refused by the validator", async () => {
     const t = convexTest(schema, modules);
     await expect(received(t, "m1", { ...mail(), status: "played" } as never)).rejects.toThrow();

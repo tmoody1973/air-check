@@ -49,10 +49,12 @@ export type PlayerProps = {
   embedQueuedAt?: number;
   demo: boolean;
   onRetry: () => Promise<unknown>;
+  /** The listening queue's Play button already asked: show the player straight away, no second tap. */
+  autoPlay?: boolean;
 };
 
-export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry }: PlayerProps) {
-  const [playing, setPlaying] = useState(false);
+export function BandcampPlayer({ artist, title, embed, embedState, embedError, embedQueuedAt, demo, onRetry, autoPlay = false }: PlayerProps) {
+  const [playing, setPlaying] = useState(autoPlay);
   const [retry, setRetry] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
   if (demo)
@@ -62,7 +64,8 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
         <SampleTag />
       </div>
     );
-  if (embedState === "queued") {
+  // Queued with a stored id is a page re-read for its date: the player that already worked stays usable meanwhile.
+  if (embedState === "queued" && !embed) {
     // ponytail: read at render; a Convex update or a page visit re-renders it, no ticking clock.
     const stale = embedQueuedAt !== undefined && Date.now() - embedQueuedAt > STALE_MS;
     return (
@@ -92,7 +95,7 @@ export function BandcampPlayer({ artist, title, embed, embedState, embedError, e
       </div>
     );
   }
-  if (!embed || embedState !== "ready") return null;
+  if (!embed || embedState === undefined) return null; // ready, or queued for a re-read with the id it already had
   const src = playerSrc(embed);
   if (!src) return <p className="text-sm text-ink-soft">No player: {embedErrorText("bad_id")}</p>;
   if (!playing)

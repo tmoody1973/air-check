@@ -93,6 +93,82 @@ describe("embedResult keeps art, tags and about from the same page", () => {
   });
 });
 
+describe("embedResult fills the release date from the page only when it is empty and not Tarik's", () => {
+  const releasedOn = async (t: T, id: Id<"releases">) => (await t.run((ctx) => ctx.db.get(id)))!.releasedOn;
+  const requeue = (t: T, id: Id<"releases">) => t.run((ctx) => ctx.db.patch(id, { embedState: "queued" }));
+
+  test("empty: the page's date is stored; searchText does not change", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await embed(t, id, { releasedOn: "2026-10-29" });
+    const r = await one(t);
+    expect(r).toMatchObject({ embedState: "ready", releasedOn: "2026-10-29" });
+    expect(r.searchText).toBe("ferro lane glass weather");
+  });
+
+  test("the email's date stays; a bad date is dropped, never thrown, and the player still lands", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1", { releasedOn: "2026-11-06" });
+    await embed(t, id, { releasedOn: "2026-10-29" });
+    expect(await releasedOn(t, id)).toBe("2026-11-06");
+    const id2 = await saved(t, "m2", { artist: "B", title: "C" });
+    await t.run((ctx) => ctx.db.patch(id2, { bandcampPage: PAGE, embedState: "queued" }));
+    await embed(t, id2, { releasedOn: "2026-02-30" });
+    const r2 = (await t.run((ctx) => ctx.db.get(id2)))!;
+    expect(r2.embedState).toBe("ready");
+    expect(r2).not.toHaveProperty("releasedOn");
+  });
+
+  test("Tarik's edit wins: a date he set or cleared is never filled from the page", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await t.withIdentity(human).mutation(api.radar.edit, { releaseId: id, fields: { releasedOn: "2026-12-01" } });
+    await embed(t, id, { releasedOn: "2026-10-29" });
+    expect(await releasedOn(t, id)).toBe("2026-12-01");
+    await t.withIdentity(human).mutation(api.radar.edit, { releaseId: id, fields: { releasedOn: "" } });
+    await requeue(t, id);
+    await embed(t, id, { releasedOn: "2026-10-29" });
+    expect(await releasedOn(t, id)).toBeUndefined();
+  });
+});
+
+// Listening-queue brief A: the page's artist fills an EMPTY artist only, never overwrites one.
+describe("embedResult: pageArtist fills an empty artist only", () => {
+  const get = async (t: T, id: Id<"releases">) => (await t.run((ctx) => ctx.db.get(id)))!;
+  const blank = (t: T, id: Id<"releases">) => t.run((ctx) => ctx.db.patch(id, { artist: "", key: "|glass weather", searchText: "glass weather" }));
+
+  test("a set artist is never overwritten", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await embed(t, id, { pageArtist: "Somebody Else" });
+    expect(await get(t, id)).toMatchObject({ artist: "Ferro Lane", key: "ferro lane|glass weather", embedState: "ready" });
+  });
+
+  test("an empty artist is filled; key and searchText follow", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await blank(t, id);
+    await embed(t, id, { pageArtist: "Ferro Lane" });
+    expect(await get(t, id)).toMatchObject({ artist: "Ferro Lane", key: "ferro lane|glass weather", searchText: "ferro lane glass weather" });
+  });
+
+  test("a link-shaped or too-long name, or one whose key another release holds, is dropped; the player still lands", async () => {
+    const t = convexTest(schema, modules);
+    const id = await saved(t, "m1");
+    await blank(t, id);
+    await embed(t, id, { pageArtist: "https://evil.example" });
+    expect(await get(t, id)).toMatchObject({ artist: "", embedState: "ready" });
+    await t.run((ctx) => ctx.db.patch(id, { embedState: "queued" }));
+    await embed(t, id, { pageArtist: "x".repeat(201) });
+    expect((await get(t, id)).artist).toBe("");
+    const other = await saved(t, "m2", { artist: "Kofi", title: "Glass Weather" });
+    await t.run((ctx) => ctx.db.patch(id, { embedState: "queued" }));
+    await embed(t, id, { pageArtist: "Kofi" });
+    expect(await get(t, id)).toMatchObject({ artist: "", key: "|glass weather", embedState: "ready" });
+    expect((await get(t, other)).artist).toBe("Kofi");
+  });
+});
+
 describe("searchText stays current on every write that changes its fields", () => {
   test("record (new and merge), edit", async () => {
     const t = convexTest(schema, modules);

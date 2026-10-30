@@ -17,6 +17,7 @@ import {
   MAX_TAGS,
   type ReleaseFields,
   releaseKey,
+  tidyLinks,
 } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -30,7 +31,7 @@ import { embargoV, radarTabV, releaseStatusV, releaseTypeV, workspaceV } from ".
 // Plan 8: the release radar. Forwarded email is untrusted data (Hard Rule 5). The one write an email may cause is its
 // own inbox row, at most one releases record (new or merged) with its queued player fetch, and the "links not followed"
 // activity row. Nothing here reaches a package, a run or Mixcloud (Hard Rule 1), and nothing here fetches anything.
-// - The console's inbound route has one mutation, `received` (INBOX_TOKEN).
+// - The console's inbound route has one mutation, `received` (INBOX_TOKEN); the catch-up script also has `reparse`.
 // - The ingest worker has four: `pending`, `record`, `embedsWanted`, `embedResult` (INGEST_TOKEN).
 // - A signed-in human moves records; the demo actor only on demo rows (Hard Rule 9).
 // - The agent reads `agentList` through POST /agent/radar: no links, player, senders, email text or page about, and no
@@ -152,7 +153,9 @@ function tidyMail(m: CleanMailArg): CleanMailArg {
   return {
     ...mail,
     ...(sender.name || sender.address ? { sender } : {}),
-    links: m.links.filter((l) => !HTTP_LINK.test(l) || linkHostOk(l)), // a non-http link stays, so mailProblem refuses it
+    // A non-http link stays, so mailProblem refuses it. Brief C: core's tidyLinks again, so a stored row never holds an
+    // unsubscribe link, a bare site root or a tracking copy of a link it already has.
+    links: tidyLinks(m.links.filter((l) => !HTTP_LINK.test(l) || linkHostOk(l))),
     hosts: m.hosts.filter(isHostName),
   };
 }
@@ -367,6 +370,8 @@ export const embedResult = mutation({
         art: v.optional(v.string()),
         tags: v.optional(v.array(v.string())),
         about: v.optional(v.string()),
+        releasedOn: v.optional(v.string()),
+        pageArtist: v.optional(v.string()),
       }),
       v.object({ failed: v.string() }),
     ),
@@ -380,15 +385,93 @@ export const embedResult = mutation({
     const destination = new URL(pageUrl).hostname;
     const row = { workspace: "real" as const, at: Date.now(), kind: "network" as const, destination };
     if ("failed" in result) {
-      await ctx.db.patch(releaseId, { embedState: "failed", embedError: result.failed, embed: undefined });
+      // B2: a page re-read for its date (radar.reparse) that fails keeps the player that already worked.
+      await ctx.db.patch(releaseId, rel.embed ? { embedState: "ready", embedError: undefined } : { embedState: "failed", embedError: result.failed, embed: undefined });
       const blocked = NOT_READ.has(result.failed);
       await ctx.db.insert("activity", { ...row, title: blocked ? "Bandcamp page not read" : "Read a Bandcamp page for its player", result: blocked ? "blocked" : "allowed", reason: result.failed });
     } else {
-      const details = pageDetails(result);
-      await ctx.db.patch(releaseId, { embedState: "ready", embed: { kind: result.kind, id: result.id }, embedError: undefined, ...details, searchText: searchTextOf({ ...rel, ...details }) });
+      // A re-read (radar.reparse, B2: the release already has a player) only adds what the page gave; a detail it did not
+      // find this time is kept, never erased.
+      const read = pageDetails(result);
+      const details = rel.embed ? Object.fromEntries(Object.entries(read).filter(([, val]) => val !== undefined)) : read;
+      // The page's release date fills an empty one only, never one Tarik set or cleared (as a merge fill). A bad date is
+      // dropped, not thrown. Not part of searchText.
+      const fillDate = result.releasedOn !== undefined && isShowDate(result.releasedOn) && rel.releasedOn === undefined && !(rel.editedFields ?? []).includes("releasedOn");
+      const artist = await pageArtistFill(ctx, rel, result.pageArtist);
+      await ctx.db.patch(releaseId, {
+        embedState: "ready",
+        embed: { kind: result.kind, id: result.id },
+        embedError: undefined,
+        ...details,
+        ...(fillDate && { releasedOn: result.releasedOn }),
+        ...artist,
+        searchText: searchTextOf({ ...rel, ...details, ...artist }),
+      });
       await ctx.db.insert("activity", { ...row, title: "Read a Bandcamp page for its player", result: "allowed" });
     }
     return null;
+  },
+});
+
+/** True when no other real release holds this key (a key change must never make two records one). */
+async function keyFree(ctx: QueryCtx, key: string, self: Id<"releases">): Promise<boolean> {
+  const other = await ctx.db.query("releases").withIndex("by_workspace_key", (q) => q.eq("workspace", "real").eq("key", key)).first();
+  return !other || other._id === self;
+}
+
+/**
+ * Listening-queue brief A: the page's JSON-LD artist fills an EMPTY artist only (never one already set, never one Tarik
+ * edited), with its key, and only when that key is free. Anything else is dropped, never thrown.
+ */
+async function pageArtistFill(ctx: MutationCtx, rel: Doc<"releases">, name: string | undefined): Promise<{ artist: string; key: string } | Record<string, never>> {
+  const artist = name?.trim();
+  if (!artist || rel.artist.trim() || (rel.editedFields ?? []).includes("artist") || tooLong(artist, MAX_FIELD) || LINKISH.test(artist)) return {};
+  const key = releaseKey(artist, rel.title);
+  return (await keyFree(ctx, key, rel._id)) ? { artist, key } : {};
+}
+
+const reparseFieldsV = v.object({ artist: v.string(), title: v.string(), label: v.optional(v.string()) });
+type ReparseResult = { result: "repaired" | "unchanged" | "collision" | "not-found"; requeued: boolean };
+
+/**
+ * Listening-queue brief B: the one-off repair of releases the old Bandcamp parser stored wrong (INBOX_TOKEN, the
+ * catch-up script; never a human or the agent). The fields are the fixed parser's reading of the same kept email. It finds
+ * the real release that email made, patches artist, title and label where Tarik has not edited them, and recomputes key
+ * and searchText; if the new key is another release's, both are left alone. B2: a ready Bandcamp-tab page with no
+ * release date is queued again so the date reader runs (embedResult keeps the old player if that read fails).
+ * `dryRun` answers the same and writes nothing.
+ */
+export const reparse = mutation({
+  args: { token: v.string(), messageId: v.string(), fields: reparseFieldsV, dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, { token, messageId, fields, dryRun }): Promise<ReparseResult> => {
+    requireInbox(token);
+    const f = { artist: fields.artist.trim(), title: fields.title.trim(), label: fields.label?.trim() || undefined };
+    const problem = releaseProblem(f);
+    if (problem) throw badInput(problem);
+    // ponytail: scans the real releases (hundreds at radio scale) for the sender's message id; a one-off repair.
+    const rel = (await ctx.db.query("releases").withIndex("by_workspace", (q) => q.eq("workspace", "real")).collect()).find((r) =>
+      (r.senders ?? []).some((s) => s.messageId === messageId),
+    );
+    if (!rel) return { result: "not-found", requeued: false };
+
+    const edited = new Set(rel.editedFields ?? []);
+    const next = { artist: edited.has("artist") ? rel.artist : f.artist, title: edited.has("title") ? rel.title : f.title };
+    // No label in the parse clears only the old parser's mistake (the sender stored as the label); any other label stays.
+    const label = edited.has("label") ? rel.label : (f.label ?? (rel.label === next.artist ? undefined : rel.label));
+    const key = releaseKey(next.artist, next.title);
+    const changed = next.artist !== rel.artist || next.title !== rel.title || label !== rel.label || key !== rel.key;
+    if (changed && !(await keyFree(ctx, key, rel._id))) return { result: "collision", requeued: false };
+
+    // Never for a date Tarik set or cleared: embedResult would not fill it anyway.
+    const requeue = tabOf(rel) === "bandcamp" && rel.bandcampPage !== undefined && rel.releasedOn === undefined && rel.embedState === "ready" && !edited.has("releasedOn");
+    if (!dryRun) {
+      const fix = { ...next, label, key };
+      await ctx.db.patch(rel._id, {
+        ...(changed && { ...fix, searchText: searchTextOf({ ...rel, ...fix }) }),
+        ...(requeue && { embedState: "queued" as const, embedQueuedAt: Date.now() }),
+      });
+    }
+    return { result: changed ? "repaired" : "unchanged", requeued: requeue };
   },
 });
 
@@ -514,7 +597,8 @@ export const list = query({
           .withIndex("by_workspace_source_receivedAt", (q) => q.eq("workspace", ws).eq("source", tab))
           .order("desc")
           .take(MAX_LIST);
-    const rows = found.map(({ searchText: _searchText, ...r }) => ({ ...r, status: statusOf(r) }));
+    // Brief C: rows stored before the link rule show tidy links too.
+    const rows = found.map(({ searchText: _searchText, ...r }) => ({ ...r, status: statusOf(r), ...(r.links && { links: tidyLinks(r.links) }) }));
     const counts = { new: 0, considering: 0, played: 0, passed: 0 };
     for (const r of rows) counts[r.status] += 1;
     return { rows: status ? rows.filter((r) => r.status === status) : rows, counts };
