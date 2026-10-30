@@ -27,7 +27,8 @@ export const LIMITS = {
 export const MAX_CONTINUATIONS = 3;
 /**
  * Daily web source_search caps per America/Chicago day. Tavily pay-as-you-go since Oct 29; an advanced search is 2
- * credits, so a full real day is 200 credits and a full demo day 40.
+ * credits, so a full day is 200 credits in each workspace. Oct 30 (Tarik): the demo went from 20 to 100, because one
+ * judge's 25-track show-notes run asks for 50 searches at once and used the whole demo day.
  */
-export const SEARCH_CAP = { real: 100, demo: 20 } as const;
+export const SEARCH_CAP = { real: 100, demo: 100 } as const;
 export const SEARCH_CAP_REACHED = "Daily research limit reached; finish with what you have, mark the rest could-not-verify.";

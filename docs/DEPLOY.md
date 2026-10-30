@@ -637,7 +637,7 @@ If the Tavily provider rule comes back after the re-onboard (from NemoClaw's sav
 
 The script's STOP message prints a one-line `sed -i.pre-plan7 -E ...` that applies all three when the secrets path is written as `"$HOME/.airc/secrets.env"` (a test applies it to a copy of that file). If it names Tavily anywhere else (a preset list, say), take `tavily` out of that line by hand.
 
-For `aircdemo` (after a destroy and `~/.aircheck/onboard-demo.sh`, which never passes a Tavily key): add both tools with the commands under "aircdemo (the judges' sandbox)", `nemohermes aircdemo mcp restart`, then `bash deploy/hermes/apply-agent-config.sh --with-skills`. Check by hand: `nemohermes aircdemo status` lists `pypi` only, `policy get` has no `api.tavily.com`, `mcp status aircheck --json --tools` lists `source_search` and `research_submit`, the skills are the five station skills, and `/health` on 8643 is 200. Its search still works: it goes through the bridge, capped at 20 a day.
+For `aircdemo` (after a destroy and `~/.aircheck/onboard-demo.sh`, which never passes a Tavily key): add both tools with the commands under "aircdemo (the judges' sandbox)", `nemohermes aircdemo mcp restart`, then `bash deploy/hermes/apply-agent-config.sh --with-skills`. Check by hand: `nemohermes aircdemo status` lists `pypi` only, `policy get` has no `api.tavily.com`, `mcp status aircheck --json --tools` lists `source_search` and `research_submit`, the skills are the five station skills, and `/health` on 8643 is 200. Its search still works: it goes through the bridge, capped at 100 a day (20 until Oct 30).
 
 ### First searches in code (Oct 29 prefetch, branch `feat/research-prefetch`)
 
