@@ -92,13 +92,13 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
   - Telegram: needs `TELEGRAM_BOT_TOKEN`, and the docs advise configuring messaging **before the first sandbox build** so the image includes it.
   - Ports: dashboard 18789 and API 8642 bind to loopback by default. Reach them by SSH forwarding, or put a reverse proxy in front (set `CHAT_UI_URL` to its HTTPS origin before onboarding) and protect that ingress. The Air Check console would sit in front as the authenticated reverse proxy. **(verify the 8642 API supports the chat/task calls the console needs.)**
   - Not documented on the pages read: how the agent gets shell/bash access inside the sandbox, and the format of the activity log (a "Monitor Sandbox Activity" page exists). **(verify; the audit-log view depends on it.)**
-- Sandbox: OpenShell with a default-deny network policy. Egress allow-list only: the Nebius inference endpoint, the Convex query endpoint, `api.mixcloud.com`, Tavily, and Telegram. Nothing else.
+- Sandbox: OpenShell with a default-deny network policy. Egress allow-list only: the Nebius inference endpoint, the Convex query endpoint, `api.mixcloud.com`, Telegram, and the bridge on the VM's private address (decision 006). Nothing else. Tavily is not on the list: since Plan 7 web search goes only through the bridge's `source_search`, which holds the key, so code sees every result (decision 019). The sandbox is rebuilt without its own Tavily key (`deploy/hermes/reonboard-without-tavily.sh`), which also closes the `/extract` page-reading gap in decision 006's addendum.
 - The agent has **no** Box, Drive, Dropbox, or Mixcloud-write credentials. It sees files the ingest worker puts in its corpus folder and the read-only tools above.
 - Audit log: every network request and tool call is shown on the dashboard. This is the privacy evidence for judges.
 
 ### 3.2 Models (Nebius Token Factory, NVIDIA open models)
-- **Nemotron Nano** for the routine loop: parsing notes, matching titles, drafting metadata.
-- **Nemotron Ultra or Super** for weekly reasoning: pre-air verify synthesis, adds brief. (verify which sizes are currently on Token Factory and their limits.)
+- **Nemotron 3 Super** (`nvidia/nemotron-3-super-120b-a12b` on Token Factory) for everything a model does: drafting, the radar's email extraction, and research (show notes, pre-air verify, deep dives).
+- **Nemotron Nano is not used** (Tarik, Oct 29). Spike V3 measured it less exact: 9/10 valid and 7/10 exact, against Super's 10/10 and 10/10. Research is only worth having if it is exact, so there is no Nano step.
 - **Speech-to-text and track timing: not needed.** Tarik decided on Oct 19 that sections carry no start times, so no ASR model is required.
 - Hackathon rule: must run on Token Factory or AI Cloud, with at least one NVIDIA open model. Both are satisfied by the first two bullets.
 
@@ -150,7 +150,7 @@ Deployment is Docker Compose, so moving to Hetzner later is a copy-and-configure
 - **Built in Plan 8 (decision 020):** the page is read in code, not by a model. It keeps the player id and, from the same request (Task 6b), the cover art's address on `*.bcbits.com`, up to 12 checked tags and the album description as plain text with links removed. It also reads the release date (JSON-LD `datePublished`, else the visible "released ..." line), which fills `releasedOn` only when the release has none and Tarik has not edited it. The description is display-only and never reaches the agent; the tags may (`radar_get`).
 
 ### 3.7a Morning digest
-- A Hermes cron task runs about 6:30 am. It reads state only (Convex `packages`, `verifications`, `releases`, and the OpenShell audit log) and writes one digest record plus one Telegram message. It makes no network calls beyond Telegram and the store.
+- A Hermes cron task runs about 6:30 am. It reads state only (Convex `packages`, the research jobs and their entries (`research`, `researchEntries`), `releases`, and the OpenShell audit log) and writes one digest record plus one Telegram message. It makes no network calls beyond Telegram and the store.
 - Contents: packages ready to approve, new Bandcamp releases (count, labels, 88Nine / HYFIN play history), verification claims with status `conflict` or `could-not-verify`, and blocked requests since 6:00 pm the day before.
 - The console's default screen is the same digest ("While you were away"), so Telegram and the web show one source.
 - Skipped when nothing changed. Items link to the package, verify report, radar entry or audit row.
@@ -203,6 +203,8 @@ Crate (crate-cli and crate-web) is Tarik's existing music research agent. Air Ch
 - Neither Crate repo has a LICENSE file. Calling over MCP does not need one. Copying any Crate code into the Air Check repo needs an MIT license added to Crate first, plus attribution.
 - **(verify)** Crate's tools use the Claude Agent SDK `tool` helper but are served through the standard MCP SDK, so any MCP client should work. Test with the Hermes MCP client on day one.
 
+**As built (Plan 7, ruling D7).** The bridge gives the agent only the keyless Crate families: MusicBrainz, Wikipedia, Bandcamp search (no tool that takes a page URL) and iTunes. Discogs, Genius and Last.fm never reach the agent as tools; their pages can arrive only as web results from `source_search`. The table above lists the clients Crate has, not what the agent gets. `verify_release` and `enrich_release` were not built as separate tools: the research engine in 3.10 and 3.11 does that checking.
+
 **README disclosure (draft):** "Air Check is new work built for this hackathon. It calls Tarik Moody's existing Crate research service (MusicBrainz, Discogs, Genius, Last.fm, Wikipedia and Bandcamp lookups) over MCP, and borrows the OpenUI integration pattern from Crate Web. Everything else, including the agent skills, verification tools, ingest and publish pipeline, approval flow and console, was written during the hackathon."
 
 ### 3.10 Show planning: theme ideas and deep dives (Oct 19 decision, P1)
@@ -224,6 +226,8 @@ The agent writes 3 to 5 theme cards (working title, pitch, evidence links, 8 to 
 
 **New tools** (deterministic code unless noted): `get_show_history` and `theme_stats` (plain queries and counts), `get_radar`, `draft_from_theme` (creates a draft tracklist), `deep_dive` (orchestrates Crate and Tavily; the model writes the brief). **New OpenUI components:** `ThemeCard`, `DeepDiveCard`.
 
+**As built (Plan 7, decision 019).** Deep dives are built on the engine described under 3.11, with the `rlr-deep-dive` skill. A brief with fewer than five sourced facts says "Only N facts could be sourced". Theme ideas are not part of Plan 7.
+
 ### 3.11 Show notes (Oct 19 decision, P1)
 Today Tarik runs a Perplexity prompt per show and pastes the result into a Dropbox Paper doc. Air Check replaces both steps for new shows.
 
@@ -236,6 +240,13 @@ Today Tarik runs a Perplexity prompt per show and pastes the result into a Dropb
 **Rules.** Same as 3.10: sources or `could-not-verify`, two sources for dates, labels and credits, closing tracks skipped, embargo private, no scripts. Notes Tarik supplies by hand are labeled unchecked and kept apart from sourced facts. Show notes are private and never copied into a Mixcloud description.
 
 **Tools.** `generate_show_notes` (orchestrates Crate and Tavily; model writes), `regenerate_track`, `export_show_notes` (code). **Component:** `ShowNotes`. **Skill:** `rlr-show-notes`.
+
+**As built (Plan 7, decision 019): one engine for show notes, pre-air verify and deep dives.** The agent searches and judges; code checks, counts and writes the document.
+- **Two agent tools on the bridge.** `source_search` searches the web through Tavily, or Apple's catalog with `source: "apple_music"` (release date, label, the ℗ line, UPC or ISRC; never audio or artwork). Convex checks the day's cap and the embargo list before any search leaves the bridge. `research_submit` saves one block (a track, an hour's intro or threads, a verify line, or the deep-dive brief) through one narrow Convex route that can write nothing else.
+- **The source ledger.** The bridge gives every result, from Crate or `source_search`, a short id (`S7k2q`) and keeps its address, site, title and text for 24 hours, in memory only (a bridge restart forgets them, and a run in progress searches again). The agent cites ids, never URLs, artists or titles; code fills those in. A source counts for a date, label or credit only if its own text shows that value. Two independent publishers, or one primary source (label, artist, press release), make a fact confirmed; anything less is **[verify]**.
+- **Tables.** `research` (one row per job: kind, show date or subject, its tracks or note lines, status, runs) and `researchEntries` (one row per block: the agent's text, its cited sources and each fact's status, plus Tarik's edits, private marks and supplied notes, which survive every agent save). `searchUsage` counts searches per workspace per Chicago day: 30 web searches real and 10 demo, 60 and 20 Apple Music lookups, shown in Settings.
+- **Pre-air verify** runs by itself at 9 am Chicago time on Thursdays and Fridays for the next show and sends one Telegram line with counts and a link. Play-history context comes only from 88Nine and HYFIN.
+- **Closing tracks** are refused by key ("Closing tracks are never researched."); the document shows `closing-track, no notes`.
 
 **Risk.** Perplexity is a search-and-synthesis product; Nemotron over Crate and Tavily results must match its quality on sourcing. Mitigation: source-grounded generation, code-enforced citations, and a side-by-side check against one of his published notes docs on Day 9. Good fit for the Best Use of Tavily bonus.
 

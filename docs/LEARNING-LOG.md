@@ -51,3 +51,13 @@ In my words:
 **What do we now believe?** A repair needs checking after the repair tool has exited, not only inside its own run. The watchdog checked its fix within its own 10 seconds, so it reported success just before systemd removed it. More generally, every long-running process needs an owner that restarts it. A process started from a script or an SSH session has no owner, however stable it looks. The dashboard forwards on 18789 and 18790 are still in that state.
 
 In my words:
+
+## 2026-10-29: Building a research engine the model cannot fake
+
+**What did we expect?** That show notes could work like Tarik's Perplexity prompt: give the agent the tracklist and search tools, ask for notes with a link on every fact, and check the result afterwards. Most of the work would be the prompt and a nice page to read the notes on.
+
+**What happened?** Two things on Oct 29 changed the plan before any code was written. Every package draft that day was refused because the model retyped a 31-track tracklist and changed curly quotes and accents. The same night the agent wrote itself skills that contradicted the station's. So the model could not be trusted to copy exact data or to follow rules it only reads. We built it the other way round (decision 019): the agent searches and cites short ids that code issued, and code fills in every link, track name, count and date, decides whether a fact has two sources or one primary source, and writes the document. Web search moved out of the sandbox into the bridge so code sees every result. Reviews kept finding the same kind of gap: a rule held in the screen but not on the server. The demo's sample report could be changed by calling the server directly, and the Thursday report's Telegram line went out again after a Regenerate. Each fix moved the rule into server code with a test. It has not run on a real show yet.
+
+**What do we now believe?** "Every fact has a source" is a claim only code can keep. If the model types the link, the link can be wrong while looking right, which is how the January notes went wrong. The cost is honesty: stricter checks mean more facts marked [verify], and the first real show will tell us whether that rate is livable. A rule that matters belongs where it cannot be skipped: on the server, not the page, and in the request the agent receives, not a skill it may not open.
+
+In my words:

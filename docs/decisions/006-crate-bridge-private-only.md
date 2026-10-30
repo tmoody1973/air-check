@@ -24,3 +24,9 @@ Hermes's `web_extract` tool asks Tavily (`api.tavily.com`, which is allowed) to 
 We tried a custom search-only preset that drops `POST /extract`. It did not close the gap. NemoClaw's Tavily credential provider (profile `tavily-hermes-v1`) carries its own gateway-level rule, `_provider_airc_tavily_search`, which allows both `/search` and `/extract`, and `policy exclude` does not reach it ("Unknown baseline entry"). We went back to the stock `tavily` preset.
 
 Options for Plan 5: remove the Tavily credential (which also loses search), find a provider-level rule change, or use a newer NemoClaw. Decision: revisit at the start of Plan 5 (Tarik's call).
+
+## Outcome of the Tavily removal (Oct 30)
+
+Plan 7 took the first option above: the `airc` sandbox is rebuilt without its own Tavily key (`deploy/hermes/reonboard-without-tavily.sh`), and web search moves to the bridge's `source_search`, which holds the key (decision 019). The script stops and prints the provider rule if `_provider_airc_tavily_search` comes back after the rebuild.
+
+[to fill after the live re-onboard: did `nemohermes airc status` and `policy get` come back with no `tavily` policy, no `_provider_airc_tavily_search` and no `api.tavily.com`? Paste the script's last lines here.]

@@ -203,7 +203,7 @@ systemctl status aircheck-hermes            # expect active (exited)
 
 **If the sandbox is in `Error` anyway**
 
-`Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. The script is `~/.aircheck/reonboard.sh`. It loads `~/.airc/secrets.env`, uses the same settings as the original install, and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about 45 seconds.
+`Error` is a dead end. `openshell sandbox stop` needs `Ready`, `start` needs `Stopped`, `recover` only reports, and `rebuild` fails its preflight check ("Sandbox 'airc' is unreachable"). Only destroying the sandbox and onboarding it again clears it. Since Plan 7, rebuild `airc` with `deploy/hermes/reonboard-without-tavily.sh`, which does the steps below and keeps Tavily out of the sandbox (see "Plan 7: sourced research"). It calls `~/.aircheck/reonboard.sh`. It loads `~/.airc/secrets.env`, uses the same settings as the original install, and adds `NEMOCLAW_CORPORATE_CA_BUNDLE=~/.aircheck/ca/ca.crt` (see Certificates below). It takes about 45 seconds.
 
 1. Destroy needs the old container running, so start it first: `docker ps -a` to find its name, then `docker start <container>`.
 2. Stop the forward units first, so they do not fight the onboard over the ports: `sudo systemctl stop aircheck-hermes-forward aircheck-hermes-demo-forward`. Then run `~/.aircheck/reonboard.sh`. Start the units again only after step 4: `sudo systemctl start aircheck-hermes-forward aircheck-hermes-demo-forward`.
@@ -384,17 +384,9 @@ Re-run both `mcp add` commands after any re-onboard (see the Hermes section for 
 
 ### Apple Music catalog (Plan 7, ruling R6)
 
-`source_search` with `source: "apple_music"` looks a release up in Apple's catalog (release date, label, the ℗ line, UPC or ISRC, and the `music.apple.com` page). Never audio, previews or artwork. The bridge signs its own short-lived token from the MusicKit key; the agent never sees the key or the token. The same Convex check as web search runs first, so an embargoed release is never sent to Apple either (R2). Without the three settings, or with a key file the bridge cannot read, the bridge still starts and that option says Apple Music is not configured (`journalctl` shows `apple_music=unavailable reason=key_unreadable`).
+`source_search` with `source: "apple_music"` looks a release up in Apple's catalog (release date, label, the ℗ line, UPC or ISRC, and the `music.apple.com` page). Never audio, previews or artwork. The bridge signs its own short-lived token from the MusicKit key; the agent never sees the key or the token. The same Convex check as web search runs first, so an embargoed release is never sent to Apple either (R2). Without the three settings, with only one or two of them, or with a key file the bridge cannot use, the bridge still starts and that option says Apple Music is not configured. The log says which: `apple_music=available` when the key loaded; otherwise `apple_music=unavailable` with `reason=partial_config missing=<names>`, `reason=key_unreadable`, or `reason=key_not_p256` (a readable key that is not the P-256 kind MusicKit signs with).
 
-Copy the values without printing them (from the Mac; `<vm>` is the VM's static IP; `<path to AuthKey_XXXX.p8>` is wherever you keep the MusicKit key):
-
-```sh
-grep -E '^APPLE_MUSIC_(TEAM|KEY)_ID=' ~/.aircheck-local/applemusic.env | ssh user@<vm> 'cat >> ~/.aircheck/bridge.env'
-ssh user@<vm> 'umask 077; cat > ~/.aircheck/bridge/AuthKey.p8' < '<path to AuthKey_XXXX.p8>'
-ssh user@<vm> 'chmod 600 ~/.aircheck/bridge/AuthKey.p8 && echo APPLE_MUSIC_KEY_FILE=$HOME/.aircheck/bridge/AuthKey.p8 >> ~/.aircheck/bridge.env && sudo systemctl restart aircheck-bridge'
-```
-
-Check: `ssh user@<vm> 'grep -c ^APPLE_MUSIC_ ~/.aircheck/bridge.env'` should print 3 (it counts the lines; it does not show them). Run the `grep … >>` lines once; a second run adds duplicate lines.
+The keys go in with `deploy/bridge/add-research-keys.sh` (see "Plan 7: sourced research" below). It also copies `TAVILY_API_KEY`, never shows a value, and never adds a second line for a name.
 
 ### Where the agent's submit goes
 
@@ -562,7 +554,7 @@ The outcomes on the package page:
 
 ## Agent skills
 
-The station skills in `skills/` are instruction files the agent (Hermes) can load. Two are installed in both sandboxes: `rlr-description-safety` (how to write the public description, in Tarik's voice) and `rlr-mixcloud-title-and-tags`.
+The station skills in `skills/` are instruction files the agent (Hermes) can load. Five are installed in both sandboxes: `rlr-description-safety` (how to write the public description, in Tarik's voice), `rlr-mixcloud-title-and-tags`, and since Plan 7 the research skills `rlr-show-notes`, `rlr-pre-air-verify` and `rlr-deep-dive`. Like the description skill, the research skills' text is also sent with each research run, so the agent cannot skip it.
 
 - **Install or refresh:** `~/air-check/deploy/hermes/install-skills.sh` on the VM (an optional first argument is the repo folder; default `~/air-check`). For each sandbox and each skill it removes the old copy and installs the repo copy, because `nemohermes <sandbox> skill install` refuses to replace a skill with the same name. It ends with `skill list` and fails if the skills are missing.
 - **When to run it:** after changing a skill. After any destroy and re-onboard of `airc` or `aircdemo`, run `apply-agent-config.sh --with-skills` instead. It re-applies the skill-writing lock and then runs this script. Skills live in `/sandbox/.hermes/skills/<name>` inside the sandbox. They survive stop and start and `rebuild`, but not a destroy (checked in the NemoHermes v0.0.137 docs on the VM, Oct 28).
@@ -581,6 +573,52 @@ Some changes span several parts, and each part expects the newer version of the 
 5. **The publisher last, and only when nothing is publishing** (see "Updating the publisher").
 
 Deploy from `main`, after the pull request is merged; a production deploy from an unmerged branch was blocked on Oct 28, and the PR route that followed is the normal path now. For multi-step changes on the VM, put the commands in a short script file, copy it over with ssh and `cat`, read it, and run it, rather than pasting a long one-line ssh command: long pasted one-liners broke on Oct 28 (`docs/FRICTION_LOG.md`).
+
+## Plan 7: sourced research
+
+Plan 7 adds show notes, pre-air verify and deep dives (decision 019). The agent searches through two bridge tools, `source_search` and `research_submit`; Convex checks every fact and writes the document. Web search (Tavily) moves out of the `airc` sandbox and into the bridge, so `TAVILY_API_KEY` lives in `~/.aircheck/bridge.env` only. Never put it back in a sandbox.
+
+**Limits, counted in Convex per Chicago day and shown in Settings:** 30 web searches for the real workspace and 10 for the demo. Apple Music catalog lookups: 60 real, 20 demo. Past a cap the tool tells the agent to finish with what it has and mark the rest could-not-verify.
+
+**The Thursday and Friday check.** A Convex cron, `pre-air verify` in `apps/console/convex/crons.ts`, fires every hour and acts only at 9 am Chicago time on Thursdays and Fridays. It queues a pre-air verify for the next show (Air Check's own notes first, else the Paper notes), at most once per show date per Chicago day, and never for the demo. When a verify finishes, the publisher sends one Telegram line within a minute: "Pre-air verify · <show date> / <n> changes · <n> open / Open report: <link>". It carries counts and a link only, no buttons; nothing can be approved there. A Regenerate sends no second line.
+
+### Deploy, in this order (after the PR is merged)
+
+1. **Convex** (Mac, `apps/console`): `npx convex deploy -y`. It must go before the publisher: until then the publisher's research-card pass fails every minute (`step=research-cards ok=false`), though ready cards still go out.
+2. **The bridge** (as in "Updating the bridge"), then its keys from the Mac:
+
+   ```sh
+   AIRCHECK_VM=user@<the VM's static IP> bash deploy/bridge/add-research-keys.sh '<path to AuthKey_XXXX.p8>'
+   ```
+
+   It copies `TAVILY_API_KEY` from `~/.airc/secrets.env` into `bridge.env` on the VM itself (the key never passes through the Mac), pipes `APPLE_MUSIC_TEAM_ID` and `APPLE_MUSIC_KEY_ID` from `~/.aircheck-local/applemusic.env`, writes the key to `~/.aircheck/bridge/AuthKey.p8` (mode 600) and sets `APPLE_MUSIC_KEY_FILE`. A name that already has a value is left alone. It restarts the bridge and prints only: one line count per name (expect 1 each), `bridge /healthz: ok`, and `apple_music=available`. Then on the VM: `nemohermes airc mcp restart` and `nemohermes aircdemo mcp restart`, and check that `nemohermes airc mcp status aircheck --json --tools` lists `source_search` and `research_submit` (the same for `aircdemo`).
+3. **The relay** (as in "Updating the relay").
+4. **The console**: `dc up -d --build`, then `dc ps` says healthy.
+5. **The publisher**, when nothing is publishing (as in "Updating the publisher").
+6. **The watchdog, then the skills** (VM, `~/air-check` after `git pull`): `bash deploy/hermes/install-watchdog.sh`, then `bash deploy/hermes/install-skills.sh`. The watchdog goes first because its list of station skills now includes `rlr-show-notes`, `rlr-pre-air-verify` and `rlr-deep-dive`; an older copy would report them as skills the agent made itself.
+7. **Re-onboard `airc` without Tavily** (VM, as `user`, when no draft or research run is going): `bash deploy/hermes/reonboard-without-tavily.sh`. See the checklist below.
+
+### Re-onboard checklist (`airc` and `aircdemo`)
+
+From now on, rebuild `airc` only with `deploy/hermes/reonboard-without-tavily.sh`, never `~/.aircheck/reonboard.sh` by itself: `~/.airc/secrets.env` still holds `TAVILY_API_KEY` (the bridge's copy came from there), and a plain re-onboard would give the sandbox its own Tavily door back.
+
+For `airc`, the script does all of this and stops with a plain message at the first problem:
+
+1. **Preflight, changing nothing.** No open connection on 8642. The repo has the research skills. The installed watchdog equals the repo copy. `airc` is Ready (the destroy needs it running). `reonboard.sh` reads `secrets.env` through a setting the script can point at a copy, and names Tavily nowhere. Then it asks you to type `rebuild`.
+2. **Pause** the watchdog timer (and any watchdog run in progress), the relay and `aircheck-hermes-forward`. A `trap` starts them again if anything fails later. The demo forward and `aircdemo` are not touched.
+3. **Back up** the sandbox's skills and Hermes config to `~/.aircheck/agent-skill-backup/airc-<date>-<time>.tgz`.
+4. **Re-onboard** through `~/.aircheck/reonboard.sh` with a temporary copy of `secrets.env` that has no `TAVILY_API_KEY` line (mode 600, deleted on exit; the original is not changed), and with `TAVILY_API_KEY` unset in the shell. Telegram and the model key are passed as before. Hermes in `airc` loses its memory, as with any re-onboard.
+5. **Relay token.** If the new sandbox has a new gateway token, it updates `AIRC_GATEWAY_TOKEN` in `~/.aircheck/relay.env` (old file kept as `relay.env.pre-reonboard`). The value is never printed.
+6. **MCP tools.** Removes and re-adds `crate` (the exact command under "Registering the bridge with Hermes", with all nine `--deny-tool` flags) and `aircheck`, then `nemohermes airc mcp restart`.
+7. **Skills and the skill-writing lock:** `apply-agent-config.sh --with-skills` (sets and reads back `skills.creation_nudge_interval: 0` and `skills.write_approval: true` in both sandboxes, then reinstalls the five station skills).
+8. **Restore:** starts `aircheck-hermes-forward` (it adopts or replaces the forward the onboard started; a forward under 30 seconds old is left until it is older, so this can take about half a minute), then the relay and the watchdog timer.
+9. **Checks:** `nemohermes airc status` lists no `tavily` policy; `policy get` has no `_provider_airc_tavily_search` and no `api.tavily.com`; `mcp status crate` is registered with no mismatch; `mcp status aircheck --tools` lists `source_search` and `research_submit`; the skill list holds exactly the five station skills and no agent-made one; the two config values read back; `/health` on 8642 is 200. It ends with "All checks passed." Then send the Telegram bot a message and check it replies (by hand).
+
+If the Tavily provider rule comes back after the re-onboard (from NemoClaw's saved registry), the script stops and prints it. Do not delete it by hand: send the output, and it goes in `docs/FRICTION_LOG.md` and decision 006's addendum first.
+
+**One-time manual step, only if the script asks for it.** `~/.aircheck/reonboard.sh` is not in the repo, so the script reads it to find how it loads `secrets.env`. If it uses a fixed path, the script stops before changing anything and prints the line. Then: `cp ~/.aircheck/reonboard.sh ~/.aircheck/reonboard.sh.pre-plan7`, and in `~/.aircheck/reonboard.sh` replace that path with `"${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"`. Plain runs behave as before; the script then passes the copy through `AIRC_SECRETS_FILE`. If it stops because `reonboard.sh` names Tavily (a preset list, say), take `tavily` out of that line the same way.
+
+For `aircdemo` (after a destroy and `~/.aircheck/onboard-demo.sh`, which never passes a Tavily key): add both tools with the commands under "aircdemo (the judges' sandbox)", `nemohermes aircdemo mcp restart`, then `bash deploy/hermes/apply-agent-config.sh --with-skills`. Check by hand: `nemohermes aircdemo status` lists `pypi` only, `policy get` has no `api.tavily.com`, `mcp status aircheck --json --tools` lists `source_search` and `research_submit`, the skills are the five station skills, and `/health` on 8643 is 200. Its search still works: it goes through the bridge, capped at 10 a day.
 
 ## Plan 8: release radar
 
@@ -607,12 +645,13 @@ Convex (production env): `INBOX_TOKEN`, the same value as the console's.
 
 ### 1. Make the secrets on the Mac, without showing them
 
-Why: each secret goes straight into a file and into Convex, so it never appears on screen or in shell history.
+Why: each secret goes straight into a file and into Convex, so it never appears on screen or in shell history. Every append in this runbook first adds a newline if the file does not end with one (`[ -z "$(tail -c1 "$f")" ] || echo >> "$f"`). Without it, a file saved without a final newline would glue the new line onto its last one, and both settings would break.
 
 ```sh
 cd apps/console
 export CONVEX_DEPLOY_KEY=$(grep '^CONVEX_DEPLOY_KEY=' .env.production.local | cut -d= -f2-)
-t=$(openssl rand -hex 32); printf 'INBOX_TOKEN=%s\n' "$t" >> .env.production.local; npx convex env set INBOX_TOKEN "$t"; unset t
+f=.env.production.local; [ -z "$(tail -c1 "$f" 2>/dev/null)" ] || echo >> "$f"   # newline guard, see above
+t=$(openssl rand -hex 32); printf 'INBOX_TOKEN=%s\n' "$t" >> "$f"; npx convex env set INBOX_TOKEN "$t"; unset t
 unset CONVEX_DEPLOY_KEY
 ```
 
@@ -643,7 +682,7 @@ Why the order matters: the new console calls Convex functions that only the new 
 3. **The console.** Why: it holds the inbound webhook route and the Release radar page. First pipe the two secrets that exist so far (Mac, from `apps/console`):
 
    ```sh
-   grep -hE '^(AGENTMAIL_API_KEY|INBOX_TOKEN)=' .env.local .env.production.local | ssh user@<the VM's static IP> 'cat >> ~/.aircheck/console.env'
+   grep -hE '^(AGENTMAIL_API_KEY|INBOX_TOKEN)=' .env.local .env.production.local | ssh user@<the VM's static IP> 'f=~/.aircheck/console.env; [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; cat >> "$f"'
    ```
 
    Then on the VM:
@@ -660,7 +699,7 @@ Why the order matters: the new console calls Convex functions that only the new 
 4. **The ingest worker last.** Why: it reads what the console stores, and it needs the Token Factory key. On the Mac:
 
    ```sh
-   ssh user@<the VM's static IP> 'cat >> ~/.aircheck/ingest.env' < ~/.aircheck-local/ingest-radar.env
+   ssh user@<the VM's static IP> 'f=~/.aircheck/ingest.env; [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; cat >> "$f"' < ~/.aircheck-local/ingest-radar.env
    pnpm --filter @aircheck/ingest build
    wc -c apps/ingest/dist/main.js                         # note the size
    ssh user@<the VM's static IP> 'cp ~/aircheck-ingest/dist/main.js ~/aircheck-ingest/dist/main.js.pre-radar'
@@ -688,9 +727,10 @@ curl -s -X POST https://api.agentmail.to/v0/inboxes/rhythmlab%40agentmail.to/web
   -H 'Content-Type: application/json' \
   -d '{"url":"https://aircheck.rhythmlabradio.com/api/agentmail/inbound","event_types":["message.received"]}' > "$tmp"
 jq -r .webhook_id "$tmp"                                  # the only thing printed; write it below
-jq -r '"AGENTMAIL_WEBHOOK_SECRET=" + .secret' "$tmp" >> .env.production.local
+f=.env.production.local; [ -z "$(tail -c1 "$f" 2>/dev/null)" ] || echo >> "$f"
+jq -r '"AGENTMAIL_WEBHOOK_SECRET=" + .secret' "$tmp" >> "$f"
 rm "$tmp"
-grep -h '^AGENTMAIL_WEBHOOK_SECRET=' .env.production.local | ssh user@<the VM's static IP> 'cat >> ~/.aircheck/console.env'
+grep -h '^AGENTMAIL_WEBHOOK_SECRET=' .env.production.local | ssh user@<the VM's static IP> 'f=~/.aircheck/console.env; [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; cat >> "$f"'
 ```
 
 Then on the VM: `dc up -d --force-recreate console`. Why `--force-recreate`: the container reads `console.env` only when it is created, so a plain restart would not see the new value.
