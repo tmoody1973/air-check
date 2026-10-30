@@ -595,6 +595,13 @@ esac`);
       expect(n.code).toBe(1);
       expect(n.err).toContain("3:export NEMOCLAW_POLICY_PRESETS=<hidden>");
       expect(named.file("sudo.log")).toBe("");
+      const extra = setup();
+      writeFileSync(join(extra.home, ".airc/secrets.env"), "TELEGRAM_BOT_TOKEN=t\nTAVILY_API_KEY=fake-tavily-value\nTAVILY_PROJECT=fake-tavily-value\n");
+      const e = extra.go();
+      expect(e.code).toBe(1);
+      expect(e.err).toContain("secrets.env names Tavily in more than TAVILY_API_KEY (names only):\nTAVILY_PROJECT\n");
+      expect(extra.file("sudo.log")).toBe("");
+      noSecrets(e.out + e.err);
     });
 
     it("a failure mid-way still restores the forward, relay and watchdog, and deletes the secrets copy", () => {

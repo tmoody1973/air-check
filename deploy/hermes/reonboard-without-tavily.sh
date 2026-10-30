@@ -81,6 +81,12 @@ if grep -qi 'tavily' <<<"$rb_code"; then
   stop "remove the Tavily key or the tavily preset from those lines of $REONBOARD (keep a copy first), then run this again. Nothing was changed."
 fi
 echo "reonboard.sh reads secrets.env through \${$override}: it will get a copy without TAVILY_API_KEY"
+others="$(grep -vE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" | grep -i 'tavily' | cut -d= -f1 || true)"
+if [[ -n "$others" ]]; then
+  echo "secrets.env names Tavily in more than TAVILY_API_KEY (names only):" >&2
+  echo "$others" >&2
+  stop "remove or rename those lines in $SECRETS by hand (keep a copy first), then run this again. Nothing was changed."
+fi
 
 echo
 echo "This destroys and re-onboards airc (about a minute). Hermes in airc loses its memory. aircdemo is not touched."
@@ -103,11 +109,6 @@ echo "== 4. Re-onboard airc without TAVILY_API_KEY (tavily preset left out)"
 TMP_SECRETS="$(umask 077; mktemp "$HOME/.aircheck/secrets.reonboard.XXXXXX")"
 chmod 600 "$TMP_SECRETS"
 grep -vE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" > "$TMP_SECRETS" || true
-if grep -qi 'tavily' "$TMP_SECRETS"; then
-  echo "secrets.env still names Tavily after dropping TAVILY_API_KEY (names only):" >&2
-  grep -i 'tavily' "$TMP_SECRETS" | cut -d= -f1 >&2
-  stop "remove or rename those lines in $SECRETS by hand, then run this again. airc was not rebuilt."
-fi
 echo "secrets copy: $(grep -c '=' "$TMP_SECRETS" || true) settings, $(grep -cE '^[[:space:]]*(export[[:space:]]+)?TAVILY_API_KEY=' "$SECRETS" || true) TAVILY_API_KEY line(s) left out"
 if [[ "$override" == 1 ]]; then
   env -u TAVILY_API_KEY bash "$REONBOARD" "$TMP_SECRETS"
