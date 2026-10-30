@@ -105,9 +105,9 @@ function verifyLines(job: ResearchPromptJob, active: ActiveEmbargo[]): string[] 
 
 const CLAIM_RULES = [
   "Each claim is { kind, text, value?, sources: [{ id, says?, primary? }] }.",
-  "- kind: release, release-date, label, credit, track-number, length, bio, detail, thread or connection.",
+  "- kind: release, release-date, label, credit, track-number, length, bio, detail, thread, connection, chart, story, song, samples, video, fun-fact.",
   "- value: for release, release-date, label, credit, track-number and length, the exact value (dates as YYYY-MM-DD, YYYY-MM or YYYY). Air Check checks that each source's own text shows it.",
-  `- sources: up to ${LIMITS.sourcesPerClaim} [S…] ids from your tool results. says: what that source shows, when it differs from value. primary: true only for the label's or the artist's own page, or a press release.`,
+  `- sources: up to ${LIMITS.sourcesPerClaim} [S…] ids from your tool results. says: what that source shows, when it differs from value. primary: true only for the label's or the artist's own page, or a press release. A fact you know but found no source for: send sources: [] and Air Check marks it [verify].`,
   `- text: one plain sentence of at most ${LIMITS.claim} characters, with no links. Release dates, labels and credits need two sources or a primary source; Air Check judges every claim, and anything thin becomes [verify].`,
   `At most ${LIMITS.claimsPerBlock} claims per block.`,
 ];
@@ -118,8 +118,12 @@ export function researchInput(job: ResearchPromptJob): string {
   const tracks = job.tracks ?? [];
   const closing = tracks.filter((t) => t.closing).map((t) => `${t.key} · closing track, skipped`);
   const n = job.searchesLeft;
+  // Oct 29: show notes search the web first (story, charts, awards, press); verify and deep dives keep Crate first.
+  const plan = job.kind === "show-notes"
+    ? `Use at most 3 web searches per track, the first exactly 'Tell me about this artist and release <Artist> - "<Title>"', then Crate for what is still missing.`
+    : "Use Crate first and keep source_search for what Crate cannot confirm.";
   const searches = n > 0
-    ? `You have ${n} web search${n === 1 ? "" : "es"} left today. Use Crate first and keep source_search for what Crate cannot confirm.`
+    ? `You have ${n} web search${n === 1 ? "" : "es"} left today. ${plan}`
     : "No web searches left today: use Crate only, and let Air Check mark what Crate cannot confirm could-not-verify.";
   const date = job.showDate ? ` for the show dated ${job.showDate}` : "";
 
