@@ -6,6 +6,7 @@ import {
   EMBARGOED_SEARCH_REFUSAL,
   embargoedSearch,
   firstSearchQuery,
+  secondSearchQuery,
   judgeClaim,
   LIMITS,
   normalize,
@@ -384,5 +385,11 @@ describe("embargoes in research (R2, R8)", () => {
 describe("firstSearchQuery (Oct 29 prefetch)", () => {
   it("is Tarik's query, exactly as the skill writes it", () => {
     expect(firstSearchQuery({ artist: "Bicep", title: "Glue" })).toBe('Tell me about this artist and release Bicep - "Glue"');
+  });
+});
+
+describe("secondSearchQuery (Oct 30: Tarik asked for interviews, reviews, samples)", () => {
+  it("names the artist and title, then what to look for", () => {
+    expect(secondSearchQuery({ artist: "Bicep", title: "Glue" })).toBe('Bicep - "Glue" interviews, reviews and samples');
   });
 });

@@ -18,9 +18,9 @@ His Paper notes tell the story of each track, not just its metadata. For every t
 Per hour, the intro (one to three sentences) says what the hour is built around, and the threads say what connects its tracks.
 
 ## Research plan, per track
-At most 3 web searches a track, counting the first. Web results come first: they carry the story, charts, awards, video and press.
+At most 3 web searches a track, counting the two Air Check ran. Web results come first: they carry the story, charts, awards, video and press.
 Your first search for each track is already done; read it before searching.
-1. First, \`first_search\` with the job and the track key. Air Check ran exactly \`Tell me about this artist and release <Artist> - "<Title>"\` for you when the job started. Write from it; search again only for gaps.
+1. First, \`first_search\` with the job and the track key. Air Check ran exactly \`Tell me about this artist and release <Artist> - "<Title>"\` for you when the job started, and a second search, \`<Artist> - "<Title>" interviews, reviews and samples\`; \`first_search\` returns both. Write from both (the second is for Story, Song and Samples and connections); search again only for gaps.
 2. No bio yet: \`source_search\` for \`<Artist> biography\`, or Crate's \`wikipedia_get_summary\`.
 3. Release date or label still missing: \`source_search\` with \`source: "apple_music"\`.
 
