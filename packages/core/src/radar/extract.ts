@@ -10,6 +10,10 @@ export interface ReleaseFields {
   releasedOn?: string;
   genre?: string;
   embargo?: { until: string | null };
+  /** Decision 027: the number N of this release's [image N] marker in the stored email. A number, never an address. */
+  image?: number;
+  /** Decision 027: the numbers of this release's [link N] markers in the stored email. Numbers, never addresses. */
+  links?: number[];
 }
 
 /** Text sent to the model is cut to this. */
@@ -160,9 +164,37 @@ export function parseBandcampEmail(_subject: string, text: string): ReleaseField
 
 export type Extraction = { ok: true; release: ReleaseFields; notes: string[] } | { ok: false; notRelease: true } | { ok: false; reasons: string[] };
 
-const LINKISH = /https?:|hxxp|:\/\/|www\.|@|\(at\)|\[\.\]|\[link\]|\[email\]|[a-z0-9-]\.[a-z]{2,}\//i;
+const LINKISH = /https?:|hxxp|:\/\/|www\.|@|\(at\)|\[\.\]|\[(?:link|image|email)(?: \d{1,6})?\]|[a-z0-9-]\.[a-z]{2,}\//i;
 const TYPES = new Set(["album", "single", "ep"]);
 const field = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+const MAX_RELEASE_LINKS = 20;
+/** A marker number: an integer, or a string of digits only. An address or anything else is NaN. */
+const markerNo = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^\d{1,3}$/.test(v.trim()) ? Number(v) : NaN);
+
+/** The [image N] and [link N] numbers the email text holds. */
+function markerNumbers(text: string): { image: Set<number>; link: Set<number> } {
+  const found = { image: new Set<number>(), link: new Set<number>() };
+  for (const m of text.matchAll(/\[(image|link) (\d{1,3})\]/g)) found[m[1] as "image" | "link"].add(Number(m[2]));
+  return found;
+}
+
+/** Decision 027: the reader's cover and link numbers for one release, kept only when each is a marker in the email. */
+function mediaOf(c: Record<string, unknown>, emailText: string, notes: string[]): Pick<ReleaseFields, "image" | "links"> {
+  const markers = markerNumbers(emailText);
+  let image: number | undefined;
+  if (c.image !== undefined && c.image !== null) {
+    const n = markerNo(c.image);
+    if (markers.image.has(n)) image = n;
+    else notes.push("The cover was left out: it is not an image number in the email.");
+  }
+  let links: number[] = [];
+  if (c.links !== undefined && c.links !== null) {
+    const given = Array.isArray(c.links) ? c.links : [c.links];
+    links = [...new Set(given.map(markerNo).filter((n) => markers.link.has(n)))].slice(0, MAX_RELEASE_LINKS);
+    if (links.length < given.length) notes.push("Some links were left out: they are not link numbers in the email.");
+  }
+  return { ...(image !== undefined ? { image } : {}), ...(links.length ? { links } : {}) };
+}
 
 /**
  * The model's reading of a co-sign, checked in code. Artist and title must be in the email; a label or genre not in
@@ -223,6 +255,7 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
   }
 
   const embargo = embargoOf(c.embargo, findEmbargo(emailText, receivedAt), dates, notes);
+  const media = mediaOf(c, emailText, notes);
 
   if (reasons.length) return { ok: false, reasons };
   return {
@@ -235,6 +268,7 @@ export function checkExtraction(candidate: unknown, emailText: string, receivedA
       ...(releasedOn ? { releasedOn } : {}),
       ...(genre ? { genre } : {}),
       ...(embargo ? { embargo } : {}),
+      ...media,
     },
     notes,
   };

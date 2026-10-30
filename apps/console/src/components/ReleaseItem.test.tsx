@@ -313,6 +313,24 @@ describe("art, tags, about and favorite", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
+  // Decision 027: a cover from a co-sign email, on Mailchimp's image host. Tarik's browser loads it; no referrer.
+  it("an email cover on Mailchimp's image host is drawn, lazy, with no referrer", () => {
+    const cover = "https://mcusercontent.com/0a1b2c3d4e5f60718293a4b5c/images/11111111-aaaa-4bbb-8ccc-000000000001.jpg";
+    setup(rel({ art: cover, source: "cosign" }));
+    const img = screen.getByRole("img", { name: "Cover art for Low Tide by Nova Reyes" });
+    expect(img).toHaveAttribute("src", cover);
+    expect(img).toHaveAttribute("loading", "lazy");
+    expect(img).toHaveAttribute("referrerpolicy", "no-referrer");
+  });
+
+  it("an email cover off the allowlist, or with a query, is never drawn", () => {
+    for (const art of ["https://cdn.sponsor.example/cover.jpg", "https://mcusercontent.com/0a1b2c3d4e5f60718293a4b5c/images/a.jpg?u=tarik"]) {
+      setup(rel({ art, source: "cosign" }));
+      expect(screen.queryByRole("img")).toBeNull();
+      cleanup();
+    }
+  });
+
   it("demo: a bracketed sample (no real cover) gets the placeholder; none on a co-sign", () => {
     setup(rel({ ...page, art: undefined }), { demo: true });
     expect(screen.queryByRole("img")).toBeNull();

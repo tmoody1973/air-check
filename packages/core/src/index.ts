@@ -31,6 +31,7 @@ export * from "./episode/rerun";
 export * from "./radar/email";
 export * from "./radar/bandcamp";
 export * from "./radar/bandcampPage";
+export * from "./radar/art";
 export * from "./radar/bookmarklet";
 export * from "./radar/extract";
 export * from "./radar/embargo";
