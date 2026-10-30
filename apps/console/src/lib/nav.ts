@@ -11,7 +11,7 @@ const item = (slug: string, label: string, built = false): NavItem => ({
 export const NAV: readonly NavItem[] = [
   item("today", "Today", true),
   item("chat", "Chat", true),
-  item("plan", "Plan"),
+  item("plan", "Plan", true),
   item("tracklist", "Tracklist", true),
   item("episodes", "Episodes", true),
   item("release-radar", "Release radar", true),

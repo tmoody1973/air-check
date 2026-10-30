@@ -1,6 +1,7 @@
 "use client";
 
 import { useConvex, useMutation, useQuery } from "convex/react";
+import { useRouter } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import type { Posted } from "@/components/AddShowDate";
 import { EpisodesView } from "@/components/EpisodesView";
@@ -38,6 +39,15 @@ export default function EpisodesPage() {
   // Read once when the editor opens, not subscribed: a rescan must not replace what Tarik is typing.
   const tracklistText = async (showDate: string) => (await convex.query(api.corrections.tracklistText, { showDate }))?.text ?? "";
   const today = useChicagoDayKey();
+  // Plan 7: research from a show's own tracklist or Paper notes, then its page.
+  const router = useRouter();
+  const startShowNotes = useMutation(api.research.startShowNotes);
+  const startVerify = useMutation(api.research.startVerify);
+  const research = {
+    startShowNotes: ({ showDate }: { showDate: string }) => startShowNotes({ showDate, angles: true }),
+    startVerify: ({ showDate }: { showDate: string }) => startVerify({ showDate, notes: { from: "paper" as const } }),
+    openResearch: (jobId: string) => router.push(`/research/${jobId}`),
+  };
   return (
     <Shell title="Episodes">
       <EpisodesView
@@ -46,7 +56,7 @@ export default function EpisodesPage() {
         sources={sources}
         workspace={workspace}
         today={today}
-        actions={{ answer, markRerun, unmarkRerun, retryDraft, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText }}
+        actions={{ answer, markRerun, unmarkRerun, retryDraft, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText, ...research }}
         added={added}
         addActions={{ addShowDate, removeShowDate, postedShows }}
       />

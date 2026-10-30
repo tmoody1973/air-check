@@ -204,4 +204,54 @@ describe("seedDemo", () => {
     expect(run!.state.steps[1].sources).toContain("[verify] release date: sources disagree");
     expect(run!.upcoming!.map((u) => [u.label, u.status])).toEqual([["H1.7", "next"], ["H1.15", "skipped"]]);
   });
+
+  test("P12: sample research jobs (Sample: no run, placeholders, example.org only), refreshed on every seed", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.seed.seedDemo, {});
+    await t.mutation(internal.seed.seedDemo, {});
+    const jobs = await t.run((ctx) => ctx.db.query("research").collect());
+    expect(jobs.map((j) => j.kind).sort()).toEqual(["deep-dive", "show-notes", "verify"]);
+    for (const j of jobs) {
+      expect(j.workspace).toBe("demo");
+      expect(j.status).toBe("done");
+      expect(j.runIds).toEqual([]);
+    }
+    const rows = await t.run((ctx) => ctx.db.query("researchEntries").collect());
+    expect(rows.length).toBeGreaterThan(5);
+    for (const r of rows) {
+      expect(r.workspace).toBe("demo");
+      for (const c of r.claims) for (const s of c.sources) expect(s.host).toBe("example.org");
+    }
+    // Every artist and title is a bracketed placeholder; closing tracks have no entry.
+    const notes = jobs.find((j) => j.kind === "show-notes")!;
+    for (const tr of notes.tracks!) for (const v of [tr.artist, tr.title]) expect(v).toMatch(/^\[.+\]$/);
+    const closing = new Set(notes.tracks!.filter((tr) => tr.closing).map((tr) => tr.key));
+    expect(rows.filter((r) => r.jobId === notes.jobId && closing.has(r.key))).toEqual([]);
+    // The sample shows up on the demo's Today (open claims) and its research page.
+    const demoUserToday = await t.withIdentity(demoUser).query(api.today.summary, {});
+    expect(demoUserToday!.openClaims.length).toBeGreaterThan(0);
+    expect(await t.withIdentity(demoUser).query(api.research.get, { jobId: notes.jobId })).not.toBeNull();
+  });
+
+  test("P12: visitors' demo research older than 24 h is pruned; active jobs, fresh jobs and real rows stay", async () => {
+    const t = convexTest(schema, modules);
+    const now = Date.now();
+    const job = (workspace: "demo" | "real", jobId: string, createdAt: number, status = "done") =>
+      ({ workspace, jobId, kind: "deep-dive", subject: { type: "artist", name: "[A]" }, angles: false, status, runIds: ["r"], continuations: 0, createdAt, updatedAt: createdAt }) as never;
+    await t.run(async (ctx) => {
+      await ctx.db.insert("research", job("demo", "rj-old001", now - 25 * HOUR));
+      await ctx.db.insert("researchEntries", { workspace: "demo", jobId: "rj-old001", key: "brief", block: "brief", claims: [], updatedAt: 1 });
+      await ctx.db.insert("research", job("demo", "rj-busy01", now - 25 * HOUR, "running"));
+      await ctx.db.insert("research", job("demo", "rj-new001", now - HOUR));
+      await ctx.db.insert("research", job("real", "rj-real01", now - 99 * HOUR));
+      await ctx.db.insert("researchEntries", { workspace: "real", jobId: "rj-real01", key: "brief", block: "brief", claims: [], updatedAt: 1 });
+    });
+    await t.mutation(internal.seed.seedDemo, {});
+    const ids = await t.run(async (ctx) => (await ctx.db.query("research").collect()).map((j) => j.jobId));
+    expect(ids).toEqual(expect.arrayContaining(["rj-busy01", "rj-new001", "rj-real01"]));
+    expect(ids).not.toContain("rj-old001");
+    const entries = await t.run(async (ctx) => (await ctx.db.query("researchEntries").collect()).map((e) => e.jobId));
+    expect(entries).not.toContain("rj-old001");
+    expect(entries).toContain("rj-real01");
+  });
 });

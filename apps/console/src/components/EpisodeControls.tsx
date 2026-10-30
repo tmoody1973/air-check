@@ -58,6 +58,10 @@ export type EpisodeActions = {
   unplace: (a: { source: FixSource; id: string }) => Promise<unknown>;
   /** The tracklist editor's starting text: the saved fix, else the Drive doc, else the stored tracks. */
   tracklistText: (showDate: string) => Promise<string>;
+  // Plan 7: research from this show's tracklist (show notes) or its Paper notes (pre-air verify), then its page.
+  startShowNotes?: (a: { showDate: string }) => Promise<{ jobId: string }>;
+  startVerify?: (a: { showDate: string }) => Promise<{ jobId: string }>;
+  openResearch?: (jobId: string) => void;
 };
 
 const SOURCE_SAID = { chat: "(you said, in Chat)", episodes: "(marked here)", detected: "(confirmed)" } as const;
@@ -222,5 +226,25 @@ export function AudioAsk({ showDate }: { showDate: string }) {
         </p>
       </details>
     </div>
+  );
+}
+
+/** Plan 7: "Show notes" on a row with a tracklist, "Pre-air verify" on a row with Paper notes. Each opens the job's page. */
+export function ResearchButtons({ e, ctx, className }: { e: EpisodeRow; ctx: RowCtx; className: string }) {
+  const { busy, error, save } = useSave(ctx.announce);
+  const { startShowNotes, startVerify, openResearch } = ctx.actions;
+  if (!openResearch || e.status === "rerun") return null;
+  const start = (fn: (a: { showDate: string }) => Promise<{ jobId: string }>, what: string) =>
+    save(async () => openResearch((await fn({ showDate: e.showDate })).jobId), `${what} started for ${showDateLabel(e.showDate)}`);
+  return (
+    <>
+      {startShowNotes && e.tracklist.status === "found" && (
+        <button type="button" className={className} disabled={busy} onClick={() => start(startShowNotes, "Show notes")}>Show notes</button>
+      )}
+      {startVerify && e.notes.status === "found" && (
+        <button type="button" className={className} disabled={busy} onClick={() => start(startVerify, "Pre-air verify")}>Pre-air verify</button>
+      )}
+      {error && <p role="alert" className="basis-full text-sm text-problem-text">{error}</p>}
+    </>
   );
 }

@@ -37,6 +37,7 @@ import type * as scripted from "../scripted.js";
 import type * as scriptedEvents from "../scriptedEvents.js";
 import type * as seed from "../seed.js";
 import type * as seedData from "../seedData.js";
+import type * as seedResearch from "../seedResearch.js";
 import type * as today from "../today.js";
 import type * as tracklist from "../tracklist.js";
 
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   scriptedEvents: typeof scriptedEvents;
   seed: typeof seed;
   seedData: typeof seedData;
+  seedResearch: typeof seedResearch;
   today: typeof today;
   tracklist: typeof tracklist;
 }>;

@@ -4,6 +4,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { stripUndefined } from "./packageStore";
 import { searchTextOf } from "./radar";
 import { createdAtOf, statusOf } from "./runDefaults";
+import { clearDemoResearch, seedSampleResearch } from "./seedResearch";
 import {
   DEMO_MP3_SHA256,
   GOLDEN_ALTERNATES,
@@ -119,6 +120,7 @@ async function clearDemo(ctx: MutationCtx, now: number) {
   }
   // Every message has a run created with it, so a message younger than 24 h keeps its conversation.
   for (const m of await ctx.db.query("messages").filter((q) => q.eq(q.field("workspace"), WS)).collect()) if (dropped.has(m.conversationId)) await ctx.db.delete(m._id);
+  await clearDemoResearch(ctx, now);
 }
 
 /** Refreshes the demo workspace (see clearDemo). Never reads, changes or deletes a "real" row. */
@@ -154,6 +156,8 @@ export const seedDemo = internalMutation({
       const fields = { artist: "[Artist]", title: "[Release title]", label: "[Label]", ...row, ...("tags" in row && { tags: [...row.tags] }) };
       await ctx.db.insert("releases", { workspace: WS, receivedAt: at, ...sender, ...fields, searchText: searchTextOf(fields) });
     }
+
+    await seedSampleResearch(ctx, now);
 
     await ctx.db.insert("runs", {
       workspace: WS,

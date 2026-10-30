@@ -2,9 +2,12 @@
 
 import { parseDriveTracklist, parseTracklist, type Track } from "@aircheck/core";
 import { useMemo, useRef, useState } from "react";
+import { refusalText } from "@/lib/research";
 
 export type DraftForm = { showDate: string; tracklistText: string; notes: string };
 export type DraftFn = (form: DraftForm) => Promise<{ runId: string }>;
+/** Plan 7: research.startShowNotes with the editor's text. */
+export type WriteNotesFn = (form: { showDate: string; tracklistText: string }) => Promise<{ jobId: string }>;
 
 // Mirror the server limits in convex/tracklist.ts; the server stays the authority.
 const MAX_TRACKLIST = 50_000;
@@ -106,6 +109,9 @@ export function TracklistEditor({
   initial,
   loadFailed = false,
   authReady = true,
+  writeNotes,
+  onNotes,
+  loadNotes,
 }: {
   draft: DraftFn;
   onDone: (runId: string) => void;
@@ -113,6 +119,11 @@ export function TracklistEditor({
   loadFailed?: boolean;
   /** False until Convex has the Clerk token; drafting before then fails with UNAUTHENTICATED. */
   authReady?: boolean;
+  /** Plan 7: start Air Check show notes from this tracklist, then open the research page. */
+  writeNotes?: WriteNotesFn;
+  onNotes?: (jobId: string) => void;
+  /** Plan 7: research.notesForDraft for the date (sourced facts only; "" when there are no finished notes). */
+  loadNotes?: (showDate: string) => Promise<string>;
 }) {
   const [showDate, setShowDate] = useState(initial?.showDate ?? "");
   const [text, setText] = useState(initial?.tracklistText ?? "");
@@ -120,6 +131,7 @@ export function TracklistEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false); // state updates lag a fast double click; a ref does not
+  const [notesNote, setNotesNote] = useState<string | null>(null);
 
   const { tracks, bad } = useMemo(() => parseTracklist(text), [text]);
   const count = (h: 1 | 2) => tracks.filter((t) => t.hour === h).length;
@@ -147,6 +159,34 @@ export function TracklistEditor({
       setError(plainError(e));
       sending.current = false;
       setBusy(false);
+    }
+  }
+
+  async function writeShowNotes() {
+    if (!ready || sending.current || !writeNotes) return;
+    sending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const { jobId } = await writeNotes({ showDate, tracklistText: text });
+      onNotes?.(jobId);
+    } catch (e) {
+      console.error("research.startShowNotes failed", e);
+      setError(refusalText(e));
+      sending.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function fillFromAirCheck() {
+    if (!loadNotes || !showDate) return;
+    setNotesNote(null);
+    try {
+      const found = await loadNotes(showDate);
+      if (found.trim()) setNotes(found);
+      else setNotesNote("No finished Air Check show notes for this date yet.");
+    } catch (e) {
+      setNotesNote(refusalText(e));
     }
   }
 
@@ -178,6 +218,18 @@ export function TracklistEditor({
             <label htmlFor="tl-notes" className={LABEL}>Private notes · never published</label>
             <textarea id="tl-notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={`${FIELD} min-h-28 resize-y text-sm leading-relaxed`} />
             <Count n={notes.length} max={MAX_NOTES} />
+            {loadNotes && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <button
+                  type="button" onClick={fillFromAirCheck} disabled={!showDate || !authReady}
+                  className="min-h-11 text-sm text-ink-soft underline underline-offset-2 hover:text-ink disabled:text-muted disabled:no-underline"
+                >
+                  Use Air Check show notes
+                </button>
+                <span className="text-[12.5px] text-muted">Sourced facts only. Private and embargoed blocks stay out.</span>
+                {notesNote && <p role="status" className="basis-full text-[12.5px] text-ink-soft">{notesNote}</p>}
+              </div>
+            )}
           </div>
         </div>
 
@@ -192,6 +244,14 @@ export function TracklistEditor({
           >
             {busy ? "Drafting…" : "Draft package"}
           </button>
+          {writeNotes && (
+            <button
+              type="button" disabled={!ready || busy || !authReady} onClick={writeShowNotes}
+              className="grid min-h-12 w-full place-items-center rounded-control border border-line-strong bg-surface px-5 text-[15px] font-semibold hover:bg-surface-quiet disabled:text-muted sm:w-auto sm:self-start"
+            >
+              Write show notes
+            </button>
+          )}
           {!authReady && <p role="status" className="text-[12.5px] text-muted">Signing you in…</p>}
           {!ready && hint && <p className="text-[12.5px] text-muted">{hint}</p>}
         </div>
