@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Fragment, useState, type ReactNode } from "react";
 import { showDateLabel } from "../lib/date";
 import { fetchErrorText } from "../lib/episodes";
-import { AnswerBox, AudioAsk, DraftFailedLine, LINK, MarkForm, RerunLine, ResearchButtons, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
+import { AnswerBox, AudioAsk, DraftFailedLine, DraftNowButton, LINK, MarkForm, RerunLine, ResearchButtons, type EpisodeRow, type Question, type RowCtx } from "./EpisodeControls";
 import { CorrectedLine, FixControl, hasAudioFix, TracklistFixButton, withoutHandCopy } from "./FixControl";
 import { Pill, type PillTone } from "./Pill";
 import { isMixcloudUrl } from "./PublishStatus";
@@ -158,6 +158,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
   const date = showDateLabel(showDate);
   const id = `ep-${showDate}`;
   const research = e && ctx.actions.openResearch ? <ResearchButtons e={e} ctx={ctx} className={ROW_ACTION} /> : null;
+  const draftNow = e ? <DraftNowButton e={e} ctx={ctx} className={ROW_ACTION} /> : null;
 
   if (layout === "card")
     return (
@@ -182,6 +183,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
           <div className="mt-1 flex flex-wrap items-center gap-x-4">
             {link}
             {watch}
+            {draftNow}
             {research}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}
@@ -205,6 +207,7 @@ export function EpisodeItem({ e, showDate, sources, ctx, layout }: { e: EpisodeR
             <Pill tone={tone}>{word}</Pill>
             {link}
             {watch}
+            {draftNow}
             {research}
             {onEdit && <RowAction onClick={onEdit}>Edit tracklist</RowAction>}
             {onMark && <RowAction onClick={onMark}>Mark as rerun of…</RowAction>}

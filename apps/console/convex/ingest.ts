@@ -1,12 +1,11 @@
-import { episodeStatus, formatTracklist } from "@aircheck/core";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { requireIngest } from "./agentSubmit";
-import { attemptsSince, awaitingReviewCount, correctedFields, correctionFor, draftRunsFor, episodeByDate, episodeRows, extraDateList, factsOf, inScope, isOpenRun, isShowDate, linkedPackage, rescanPending, writeSource } from "./episodes";
-import { draftNotesFromResearch } from "./research";
+import { awaitingReviewCount, correctedFields, correctionFor, episodeByDate, episodeRows, extraDateList, isShowDate, linkedPackage, writeSource } from "./episodes";
+import { draftIfReady } from "./draftNow";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
-import { MAX_NOTES, MAX_NOTES_BYTES, queueDraft } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
 // INGEST_TOKEN first (requireIngest, in agentSubmit.ts beside sameToken), in constant time, and fails closed.
@@ -16,7 +15,6 @@ const MAX_TRACKS = 100;
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
 const MAX_ERROR_CHARS = 200;
-const PACE = 3;
 /** I3: more than this many rows to remove in one pass looks like a bad read, not renamed docs: remove none. */
 const MAX_PRUNE = 3;
 /** The scanner reports at most this many undated names per scan. */
@@ -137,20 +135,6 @@ export const setFetch = mutation({
 });
 
 /**
- * The draft's notes: the Paper text, then Tarik's answers (R4). Both land in the instruction's untrusted-notes section.
- * Plan 7 Task 5 (design spec 5.7): with no Paper notes, Air Check's newest done show notes for the date stand in, as
- * notesForDraft renders them (sourced facts only; nothing private, edited or embargoed; R9).
- * M3: held to the Tracklist page's cap; the notes are cut first so the answers survive.
- */
-async function draftNotes(ctx: QueryCtx, e: Doc<"episodes">): Promise<string> {
-  const answered = e.questions.filter((q) => q.answer);
-  const answers = answered.length ? ["Tarik's answers", ...answered.map((q) => `Q: ${q.text}\nA: ${q.answer}`)].join("\n") : "";
-  const room = Math.max(0, MAX_NOTES - (answers ? answers.length + 2 : 0));
-  const notes = e.notes.text?.trim() ? e.notes.text : await draftNotesFromResearch(ctx, "real", e.showDate);
-  return [notes.slice(0, room), answers].filter(Boolean).join("\n\n").slice(0, MAX_NOTES);
-}
-
-/**
  * Asks for the show's draft: the same draft-package run the Tracklist page queues. Idempotent per show date (Review
  * Focus 4). Whether a show may be drafted is decided here from the stored facts, never by the caller: a package in any
  * status, a rerun, an open question, unclear or missing audio, or a missing tracklist means no run; so do an open draft
@@ -162,26 +146,7 @@ export const requestDraft = mutation({
   handler: async (ctx, { token, showDate }) => {
     requireIngest(token);
     if (!isShowDate(showDate)) throw new ConvexError({ code: "BAD_INPUT", message: "showDate must be a real date, yyyy-mm-dd" });
-    const row = await episodeByDate(ctx, showDate);
-    if (!row) throw new ConvexError({ code: "NOT_FOUND" });
-    // A 2025 date Tarik removed can keep its row (a correction, or prune's cap); it is never drafted.
-    if (!(await inScope(ctx, showDate))) return { queued: false, reason: "not-in-backlog" } as const;
-    const runs = await draftRunsFor(ctx, showDate);
-    if (runs.some((r) => isOpenRun(r))) {
-      // An open run means "drafting" whatever else the facts say, so a second scan never queues a second run.
-      const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus));
-      return { queued: false, reason: status === "ready-to-draft" ? "drafting" : status } as const;
-    }
-    if (await rescanPending(ctx, row)) return { queued: false, reason: "rescan-pending" } as const;
-    // R5: a stale fix fell back to the doc or folder Tarik rejected; drafting it would freeze the wrong facts.
-    if (row.correctionStale) return { queued: false, reason: "fix-stale" } as const;
-    const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
-    if (status !== "ready-to-draft") return { queued: false, reason: status } as const;
-    if ((await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" } as const;
-    const tracks = row.tracklist.tracks ?? [];
-    if (!tracks.length) return { queued: false, reason: "missing-tracklist" } as const;
-    const runId = await queueDraft(ctx, "real", { showDate, tracklistText: formatTracklist(tracks), notes: await draftNotes(ctx, row) });
-    return { queued: true, runId } as const;
+    return draftIfReady(ctx, showDate, { pace: true });
   },
 });
 

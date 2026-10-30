@@ -48,6 +48,12 @@ export default function EpisodesPage() {
     startVerify: ({ showDate }: { showDate: string }) => startVerify({ showDate, notes: { from: "paper" as const } }),
     openResearch: (jobId: string) => router.push(`/research/${jobId}`),
   };
+  // Oct 30: Draft now skips the queue for one show; its live run page opens (Watch it work, Take over).
+  const draftNowMutation = useMutation(api.draftNow.draftNow);
+  const drafting = {
+    draftNow: ({ showDate }: { showDate: string }) => draftNowMutation({ showDate }),
+    openRun: (runId: string) => router.push(`/runs/${runId}`),
+  };
   return (
     <Shell title="Episodes">
       <EpisodesView
@@ -56,7 +62,7 @@ export default function EpisodesPage() {
         sources={sources}
         workspace={workspace}
         today={today}
-        actions={{ answer, markRerun, unmarkRerun, retryDraft, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText, ...research }}
+        actions={{ answer, markRerun, unmarkRerun, retryDraft, setTracklist, pick, setHours, useFolderDate: folderDate, clearCorrection, place, unplace, tracklistText, ...research, ...drafting }}
         added={added}
         addActions={{ addShowDate, removeShowDate, postedShows }}
       />
