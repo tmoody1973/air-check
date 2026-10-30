@@ -498,7 +498,7 @@ describe("Plan 7 go-live scripts", { timeout: 30_000 }, () => {
     const ONBOARD_LOG = 'echo "secrets=$SECRETS mode=$(ls -l "$SECRETS" | cut -c1-10) search_key_lines=$(printenv | grep -c "^TAV[I]LY_API_KEY=") telegram=${TELEGRAM_BOT_TOKEN:+present}" >> "$HOME/onboard.log"'; // never names it, or the guard stops
 
     const setup = (
-      o: { reonboard?: string; busy?: boolean | "after-prompt"; policy?: string; gateway?: string; extraSkill?: string; status?: string; backupFails?: boolean; bridgeEnv?: string } = {},
+      o: { reonboard?: string; busy?: boolean | "after-prompt"; policy?: string; gateway?: string; extraSkill?: string; status?: string; backupFails?: boolean; bridgeEnv?: string; providers?: string; addFails?: boolean } = {},
     ) => {
       const home = mkdtempSync(join(tmpdir(), "reonboard-"));
       const bin = join(home, ".local/bin");
@@ -520,12 +520,16 @@ describe("Plan 7 go-live scripts", { timeout: 30_000 }, () => {
       stub(bin, "systemctl", "echo active");
       stub(bin, "curl", "echo 200");
       stub(bin, "timeout", 'shift; exec "$@"');
-      stub(bin, "openshell", `case "$*" in
+      // Every stub drains its stdin into stdin.log and logs its call to calls.log (order across both commands).
+      stub(bin, "openshell", `cat >> "${home}/stdin.log"; echo "openshell $*" >> "${home}/calls.log"
+case "$*" in
+  *"provider list"*) printf '%s\\n' '${o.providers ?? ""}' ;;
   *tar*) ${o.backupFails ? 'echo "sandbox not found" >&2; exit 1' : `tar -czf - -C "${home}/fix" config.yaml skills`} ;;
   *"skills list"*) printf '%s\\n' '${listing}' ;;
   *"config get"*) printf '0\\ntrue\\n' ;;
 esac`);
-      stub(bin, "nemohermes", `echo "$*" >> "${home}/nemohermes.log"
+      stub(bin, "nemohermes", `cat >> "${home}/stdin.log"; echo "$*" >> "${home}/nemohermes.log"; echo "nemohermes $*" >> "${home}/calls.log"
+${o.addFails ? 'case "$*" in "airc mcp add crate"*) echo "MCP add recovery for crate found non-prefix partial state" >&2; exit 1 ;; esac' : ""}
 case "$*" in
   "airc status") echo "${o.status ?? "Phase: Ready"}"; echo "Policies: pypi, telegram" ;;
   "airc policy get") printf '%s\\n' '${o.policy ?? "network_policies:\\n  telegram_bot: {}"}' ;;
@@ -534,7 +538,7 @@ case "$*" in
   "airc gateway-token --quiet") echo "${o.gateway ?? "new-gw-token"}" ;;
   *"skill list") printf '%s\\n' ${SKILLS.join(" ")} ;;
 esac`);
-      const go = (...flags: string[]) => run("hermes/reonboard-without-tavily.sh", [...flags, REPO], { HOME: home, PATH: `${bin}:${process.env.PATH}`, TAVILY_API_KEY: "fake-tavily-value" }, "rebuild\n");
+      const go = (...flags: string[]) => run("hermes/reonboard-without-tavily.sh", [...flags, REPO], { HOME: home, PATH: `${bin}:${process.env.PATH}`, TAVILY_API_KEY: "fake-tavily-value" }, "rebuild\nLEAK\n");
       const file = (f: string) => (existsSync(join(home, f)) ? readFileSync(join(home, f), "utf8") : "");
       return { home, go, file };
     };
@@ -693,6 +697,103 @@ esac`);
       expect(r.err).toContain("bridge.env lacks CRATE_MCP_TOKEN or AIRCHECK_MCP_TOKEN");
       expect(tok.file("sudo.log")).toBe("");
       noSecrets(r.out + r.err);
+    });
+
+    // What the live run on Oct 29 taught us (docs/FRICTION_LOG.md).
+    const VM_REONBOARD = [
+      "set -a", '. "$HOME/.airc/secrets.env"', "set +a",
+      "export NEMOCLAW_POLICY_TIER=restricted NEMOCLAW_WEB_SEARCH_PROVIDER=tavily NEMOCLAW_X=1",
+      "nemohermes onboard --name airc --non-interactive",
+    ].join("\n");
+
+    it("refuses a reonboard.sh that pins the tavily provider or runs onboard without --fresh, before changing anything", () => {
+      const pinned = setup({ reonboard: `${OVERRIDE}\nexport NEMOCLAW_WEB_SEARCH_PROVIDER=tavily\nnemohermes onboard --fresh --name airc` });
+      const p = pinned.go();
+      expect(p.code).toBe(1);
+      expect(p.err).toContain("pins the Tavily web-search provider");
+      expect(p.err).toContain("delete NEMOCLAW_WEB_SEARCH_PROVIDER=tavily from the export line");
+      expect(p.err).toContain("nemohermes onboard becomes nemohermes onboard --fresh");
+      const resume = setup({ reonboard: `${OVERRIDE}\nnemohermes onboard --name airc --non-interactive` });
+      const r = resume.go();
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("runs onboard without --fresh");
+      expect(r.err).toContain("3:nemohermes onboard --name airc --non-interactive");
+      expect(r.err).toContain(`"\${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"`);
+      for (const t of [pinned, resume]) {
+        expect(t.file("sudo.log")).toBe("");
+        expect(t.file("onboard.log")).toBe("");
+        expect(t.file("calls.log")).not.toContain("onboard");
+      }
+      // --fresh on a continuation line is fine; so is no onboard line at all (the default reonboard.sh here).
+      const split = setup({ reonboard: `${OVERRIDE}\nnemohermes onboard \\\n  --fresh --name airc` }).go();
+      expect(split.code).toBe(0);
+    });
+
+    it("the one-line sed in the STOP message applies all three edits to the VM's reonboard.sh, and the script then runs", () => {
+      const t = setup({ reonboard: `${VM_REONBOARD}\n${ONBOARD_LOG}` });
+      const stopped = t.go();
+      expect(stopped.code).toBe(1);
+      const cmd = stopped.err.split("\n").find((l) => l.startsWith("  sed -i.pre-plan7 "))!;
+      expect(cmd).toContain(`${t.home}/.aircheck/reonboard.sh`);
+      execFileSync("bash", ["-c", cmd], { stdio: "pipe" });
+      const edited = t.file(".aircheck/reonboard.sh");
+      expect(edited).toContain('. "${AIRC_SECRETS_FILE:-$HOME/.airc/secrets.env}"');
+      expect(edited).toContain("export NEMOCLAW_POLICY_TIER=restricted NEMOCLAW_X=1\n");
+      expect(edited).not.toMatch(/WEB_SEARCH_PROVIDER|tavily/i);
+      expect(edited).toContain("nemohermes onboard --fresh --name airc --non-interactive\n");
+      expect(t.file(".aircheck/reonboard.sh.pre-plan7")).toContain("NEMOCLAW_WEB_SEARCH_PROVIDER=tavily"); // original kept
+      const again = execFileSync("bash", ["-c", cmd], { stdio: "pipe" }) && t.file(".aircheck/reonboard.sh"); // idempotent
+      expect(again).toBe(edited);
+      const ok = t.go();
+      expect(ok.err).toBe("");
+      expect(ok.code).toBe(0);
+      expect(t.file("nemohermes.log")).toContain("onboard --fresh --name airc --non-interactive");
+    });
+
+    it("deletes only the two leftover airc gateway providers, by exact name, before mcp add", () => {
+      const providers = [
+        "│ airc-mcp-crate        │ nemoclaw-mcp-v1 │", "│ airc-mcp-aircheck     │ nemoclaw-mcp-v1 │",
+        "│ aircdemo-mcp-crate    │ nemoclaw-mcp-v1 │", "│ aircdemo-mcp-aircheck │ nemoclaw-mcp-v1 │",
+        "│ airc-telegram-bridge  │ telegram        │", "│ nemoclaw-custom-abc   │ custom          │", "│ xairc-mcp-crate       │ other           │",
+      ].join("\n");
+      const t = setup({ providers });
+      const r = t.go();
+      expect(r.code).toBe(0);
+      const calls = t.file("calls.log").trim().split("\n");
+      const dels = calls.filter((l) => l.includes("provider delete"));
+      expect(dels).toEqual(["openshell --gateway nemoclaw provider delete airc-mcp-crate", "openshell --gateway nemoclaw provider delete airc-mcp-aircheck"]);
+      expect(calls.indexOf(dels[1]!)).toBeLessThan(calls.findIndex((l) => l.startsWith("nemohermes airc mcp add crate")));
+      expect(calls.some((l) => l.startsWith("openshell --gateway nemoclaw provider list"))).toBe(true);
+      // Nothing left over: no delete at all.
+      const clean = setup({ providers: "│ aircdemo-mcp-crate │\n│ airc-telegram-bridge │" });
+      expect(clean.go().code).toBe(0);
+      expect(clean.file("calls.log")).not.toContain("provider delete");
+      // Only the two names are ever deleted: one delete line, a fixed list.
+      expect(sh.match(/provider delete/g)).toHaveLength(1);
+      expect(sh).toContain("for p in airc-mcp-crate airc-mcp-aircheck; do");
+    });
+
+    it("shows the mcp add error on failure, with a hint, and still restores the forward", () => {
+      const t = setup({ addFails: true });
+      const r = t.go();
+      expect(r.code).not.toBe(0);
+      expect(r.err).toContain("found non-prefix partial state");
+      expect(r.err).toContain("provider list");
+      expect(r.err).toContain(AGAIN);
+      expect(t.file("sudo.log").trim().split("\n")).toEqual([PAUSE, ...RESTORE]);
+    });
+
+    it("no child command reads the script's stdin (a piped `bash -s` would lose its tail)", () => {
+      const t = setup();
+      const r = t.go();
+      expect(r.code).toBe(0);
+      expect(t.file("calls.log").length).toBeGreaterThan(0); // the stubs ran
+      expect(t.file("stdin.log")).toBe(""); // none of them saw the LEAK line
+      expect(sh).toContain('nemohermes() { command nemohermes "$@" </dev/null; }');
+      expect(sh).toContain('openshell() { command openshell "$@" </dev/null; }');
+      // timeout, reonboard.sh, apply-agent-config.sh and sudo are separate programs: each redirects on its own line.
+      const code = sh.split("\n").filter((l) => !l.trim().startsWith("#"));
+      for (const l of code.filter((l) => /^\s*(timeout |sudo |env -u|bash "\$REPO)/.test(l) || /\$\(timeout /.test(l))) expect(l, l).toContain("</dev/null");
     });
 
     it("DEPLOY rebuilds airc only through this script, Error section included", () => {
