@@ -49,6 +49,18 @@ describe("buildPackageDraft", () => {
     expect(real.ok && real.draft.id).toBe("pkg-10-2-26");
   });
 
+  test("leads glued into one string (the model's 11-6-26 mistake) are split when every part is an artist", () => {
+    const leads = leadsOf(goldenPackageTitles()[0]!);
+    const r = buildPackageDraft(input({ leads: [leads.join(", ")] }), opts);
+    expect(r.ok && r.draft.title).toBe(goldenPackageTitles()[0]);
+  });
+
+  test("a glued lead with a part that is not an artist is refused whole, not split", () => {
+    const leads = leadsOf(goldenPackageTitles()[0]!);
+    const r = buildPackageDraft(input({ leads: [...leads.slice(0, 3), `${leads[3]}, Nobody Here`] }), opts);
+    expect(!r.ok && r.problems).toContain(`title artist not in the tracklist: ${leads[3]}, Nobody Here`);
+  });
+
   test("raw Drive text parses without bad lines", () => {
     const r = buildPackageDraft(input(), opts);
     expect(r.ok).toBe(true);

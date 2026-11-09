@@ -45,6 +45,18 @@ export function checkTitleArtists(leads: string[], tracks: Track[]): string[] {
   return leads.filter((lead) => !artists.some((a) => a.includes(normalize(lead))));
 }
 
+/**
+ * The model sometimes sends ["A, B, C, D"] as one lead. Split a lead on commas only when the whole is not an artist
+ * and every part is, so a real name with a comma ("Walter Bishop, Jr.") stays whole.
+ */
+export function splitGluedLeads(leads: string[], tracks: Track[]): string[] {
+  return leads.flatMap((lead) => {
+    const parts = lead.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2 || !checkTitleArtists([lead], tracks).length || checkTitleArtists(parts, tracks).length) return [lead];
+    return parts;
+  });
+}
+
 export function checkTags(tags: string[]): string[] {
   const problems: string[] = [];
   if (tags.length > MAX_TAGS) problems.push(`more than ${MAX_TAGS} tags`);

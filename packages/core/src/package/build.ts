@@ -2,7 +2,7 @@ import { parseTracklist } from "../tracklist/parse";
 import { checkDescription, type DescriptionIssue } from "./description";
 import type { DescriptionSource, PackageDraft } from "./mixcloud";
 import type { Track } from "../types";
-import { buildTitle, checkTags, checkTitleArtists, titleLeads } from "./title";
+import { buildTitle, checkTags, checkTitleArtists, splitGluedLeads, titleLeads } from "./title";
 
 export interface AgentPackageInput {
   showDate: string; // ISO yyyy-mm-dd
@@ -97,10 +97,11 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
   const { tracks, problems: trackProblems } = tracklistProblems(input.tracklistText);
   problems.push(...trackProblems);
 
-  input.leads.forEach((lead, i) => {
+  const leads = splitGluedLeads(input.leads, tracks);
+  leads.forEach((lead, i) => {
     if (!lead.trim()) problems.push(`title artist ${i + 1} is blank`);
   });
-  for (const lead of checkTitleArtists(input.leads, tracks)) problems.push(`title artist not in the tracklist: ${lead}`);
+  for (const lead of checkTitleArtists(leads, tracks)) problems.push(`title artist not in the tracklist: ${lead}`);
   for (const p of checkTags(input.tags)) problems.push(`tags: ${p}`);
   problems.push(...descriptionProblems(input.description, tracks.map((t) => t.title), opts.privateTerms));
 
@@ -108,7 +109,7 @@ export function buildPackageDraft(input: AgentPackageInput, opts: { privateTerms
 
   let title = "";
   try {
-    title = buildTitle(input.showDate, input.leads);
+    title = buildTitle(input.showDate, leads);
   } catch (e) {
     problems.push(e instanceof Error ? e.message : String(e));
   }
