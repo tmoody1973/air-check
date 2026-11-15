@@ -1,4 +1,4 @@
-import type { PackageDraft } from "@aircheck/core";
+import { chicagoDayKey, type PackageDraft } from "@aircheck/core";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi, type FunctionReference } from "convex/server"; // untyped on purpose, like the relay and media
 
@@ -37,7 +37,8 @@ export function connectConvex(url: string, token: string): PublisherConvex {
     Record<"claim" | "result" | "unclaim" | "reconcile" | "setMixcloud", FunctionReference<"mutation">>;
   const u = anyApi.descriptionUpdates as unknown as Record<"claim" | "record", FunctionReference<"mutation">>;
   return {
-    queue: () => client.query(p.queue, { token }),
+    // The Chicago day, not the clock: Convex serves queue from its cache until the data or the day changes.
+    queue: () => client.query(p.queue, { token, today: chicagoDayKey(Date.now()) }),
     claim: async (packageId) => void (await client.mutation(p.claim, { token, packageId })),
     result: async (packageId, result) => void (await client.mutation(p.result, { token, packageId, result })),
     unclaim: async (packageId) => void (await client.mutation(p.unclaim, { token, packageId })),

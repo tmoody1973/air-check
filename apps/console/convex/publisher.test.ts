@@ -100,6 +100,16 @@ describe("publisher.queue", () => {
     expect((await t.query(api.publisher.queue, { token: PUB })).publishedToday).toBe(1);
   });
 
+  test("publishedToday uses the `today` the publisher sends, not the server clock (so Convex can cache the answer)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = convexTest(schema, modules);
+    vi.setSystemTime(new Date("2026-10-28T15:00:00Z"));
+    await published(t, await approved(t, { id: "pkg-a", showDate: "2026-09-01" }));
+    expect((await t.query(api.publisher.queue, { token: PUB, today: "2026-10-28" })).publishedToday).toBe(1);
+    expect((await t.query(api.publisher.queue, { token: PUB, today: "2026-10-29" })).publishedToday).toBe(0);
+    await expect(t.query(api.publisher.queue, { token: PUB, today: "Oct 29" })).rejects.toThrow();
+  });
+
   test("R10: an unknown outcome counts toward today (it may have posted)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t = convexTest(schema, modules);

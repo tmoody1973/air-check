@@ -213,6 +213,18 @@ describe("ingest.list", () => {
     await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" });
     expect((await t.query(api.ingest.list, { token: INGEST })).awaitingReview).toBe(3);
   });
+
+  test("judges a stuck run by the `now` the worker sends, not the server clock (so Convex can cache the answer)", async () => {
+    const t = convexTest(schema, modules);
+    await upsert(t, episode());
+    await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: "2026-01-02" });
+    const at = (now: number) => t.query(api.ingest.list, { token: INGEST, now });
+    expect((await at(Date.now())).awaitingReview).toBe(1);
+    expect((await at(Date.now())).episodes[0]).toMatchObject({ openRun: true });
+    const sevenHoursOn = await at(Date.now() + 7 * 3_600_000);
+    expect(sevenHoursOn.awaitingReview).toBe(0);
+    expect(sevenHoursOn.episodes[0]).toMatchObject({ openRun: false, draftAttempts: 1 });
+  });
 });
 
 describe("ingest.setFetch", () => {

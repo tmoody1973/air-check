@@ -107,6 +107,7 @@ export interface RadarConvex {
 
 /** Like media and the publisher: a Convex call that never answers fails instead of wedging the pass. */
 export const CONVEX_TIMEOUT_MS = 15_000;
+const HOUR_MS = 3_600_000;
 
 export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIMEOUT_MS): IngestConvex & { radar: RadarConvex } {
   const client = new ConvexHttpClient(url, { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) }) });
@@ -119,7 +120,8 @@ export function connectConvex(url: string, token: string, timeoutMs = CONVEX_TIM
       embedsWanted: () => client.query(r.embedsWanted, { token }),
       embedResult: async (releaseId, pageUrl, result) => void (await client.mutation(r.embedResult, { token, releaseId, pageUrl, result })),
     },
-    list: () => client.query(m.list, { token }),
+    // The hour, not the clock: Convex serves list from its cache until the data or the hour changes.
+    list: () => client.query(m.list, { token, now: Math.floor(Date.now() / HOUR_MS) * HOUR_MS }),
     upsert: async (episode) => void (await client.mutation(m.upsert, { token, episode })),
     setFetch: async (showDate, status, error) => void (await client.mutation(m.setFetch, { token, showDate, status, ...(error ? { error } : {}) })),
     requestDraft: (showDate) => client.mutation(m.requestDraft, { token, showDate }),
