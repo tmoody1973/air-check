@@ -43,12 +43,12 @@ export async function draftRunsFor(ctx: QueryCtx, showDate: string) {
 }
 
 /** Packages ahead of Tarik (the pace of 3): real ones waiting for review or for their MP3, plus real draft runs still open. */
-export async function awaitingReviewCount(ctx: QueryCtx): Promise<number> {
+export async function awaitingReviewCount(ctx: QueryCtx, now = Date.now()): Promise<number> {
   let n = 0;
   for (const status of ["awaiting_review", "preparing_audio"] as const)
     n += (await ctx.db.query("packages").withIndex("by_workspace_status", (q) => q.eq("workspace", "real").eq("status", status)).collect()).length;
   for (const status of OPEN)
-    n += (await ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect()).filter((r) => r.workspace === "real" && r.kind === "draft-package" && isOpenRun(r)).length;
+    n += (await ctx.db.query("runs").withIndex("by_status", (q) => q.eq("status", status)).collect()).filter((r) => r.workspace === "real" && r.kind === "draft-package" && isOpenRun(r, now)).length;
   return n;
 }
 
@@ -59,9 +59,9 @@ export const correctionFor = (ctx: QueryCtx, showDate: string) =>
  * Review Focus 3: the finished draft runs that count against a show are those made after its latest fix or "Try again"
  * (R9), so either earns two fresh attempts. Corrections are refused while a run is open, so none straddles a fix.
  */
-export async function attemptsSince(ctx: QueryCtx, showDate: string): Promise<number> {
+export async function attemptsSince(ctx: QueryCtx, showDate: string, now = Date.now()): Promise<number> {
   const since = Math.max((await correctionFor(ctx, showDate))?.updatedAt ?? 0, (await episodeByDate(ctx, showDate))?.retryAt ?? 0);
-  return (await draftRunsFor(ctx, showDate)).filter((r) => !isOpenRun(r) && createdAtOf(r) >= since).length;
+  return (await draftRunsFor(ctx, showDate)).filter((r) => !isOpenRun(r, now) && createdAtOf(r) >= since).length;
 }
 
 /**
@@ -101,7 +101,8 @@ export function factsOf(e: EpisodeDoc, packageStatus: LinkedPackageStatus, draft
  * Every episode, oldest first, shaped as core's EpisodeFacts plus its package (R1), status and gaps. The tracks sit at
  * the top level for rerun detection. Never the notes text (Hard Rule 12): that is read only to build a draft.
  */
-export async function episodeRows(ctx: QueryCtx) {
+// Pass `now` from a polling caller: a query that reads the clock is never served from Convex's cache.
+export async function episodeRows(ctx: QueryCtx, now = Date.now()) {
   const docs = await ctx.db.query("episodes").withIndex("by_showDate").collect();
   return Promise.all(
     docs.map(async (e) => {
@@ -110,13 +111,13 @@ export async function episodeRows(ctx: QueryCtx) {
       void _id, _creationTime, text, driveText;
       const pkg = await linkedPackage(ctx, e.showDate);
       const runs = await draftRunsFor(ctx, e.showDate);
-      const draftAttempts = await attemptsSince(ctx, e.showDate);
+      const draftAttempts = await attemptsSince(ctx, e.showDate, now);
       const c = await correctionFor(ctx, e.showDate);
       const fields = c ? correctedFields(c) : [];
       // I2: a removed fix keeps its row (and updatedAt) with no fields: nothing is corrected.
       const corrected = c && fields.length ? { fields, at: c.updatedAt, stale: !!correctionStale } : null;
       // M2: a draft run is open (R11's 6 h rule), so Episodes says "Drafting" before any package exists.
-      const open = runs.filter((r) => isOpenRun(r)).sort((a, b) => createdAtOf(b) - createdAtOf(a));
+      const open = runs.filter((r) => isOpenRun(r, now)).sort((a, b) => createdAtOf(b) - createdAtOf(a));
       const openRun = open.length > 0;
       const openRunId = open[0]?.runId; // "Watch it work": the id /runs/[id] takes; nothing else from the run
       const derived = episodeStatus(factsOf(e, pkg.packageStatus, draftAttempts));

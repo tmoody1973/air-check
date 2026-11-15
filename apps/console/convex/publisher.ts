@@ -50,10 +50,13 @@ export async function publishQueue(ctx: QueryCtx, today: string) {
 }
 
 export const queue = query({
-  args: { token: v.string() },
-  handler: async (ctx, { token }) => {
+  // `today`: the publisher sends the Chicago day so this is cached until the data changes (a clock read never caches).
+  // It only paces uploads and lists holds: the claim mutation still checks embargoes against the server's own clock.
+  args: { token: v.string(), today: v.optional(v.string()) },
+  handler: async (ctx, { token, today }) => {
     requirePublisher(token);
-    return publishQueue(ctx, chicagoDayKey(Date.now()));
+    if (today !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new ConvexError({ code: "BAD_INPUT", message: "today must be YYYY-MM-DD" });
+    return publishQueue(ctx, today ?? chicagoDayKey(Date.now()));
   },
 });
 

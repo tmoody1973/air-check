@@ -65,8 +65,9 @@ export const upsert = mutation({
  * starts a rescan when it is newer than the last scan.
  */
 export const list = query({
-  args: { token: v.string() },
-  handler: async (ctx, { token }) => {
+  // `now`: the worker sends the hour, so the answer is cached until the data changes (a clock read here never caches).
+  args: { token: v.string(), now: v.optional(v.number()) },
+  handler: async (ctx, { token, now }) => {
     requireIngest(token);
     const corrections = (await ctx.db.query("corrections").collect()).map(({ _id, _creationTime, ...c }) => {
       void _id, _creationTime;
@@ -76,7 +77,7 @@ export const list = query({
     const undoneAt = (await ctx.db.query("rescanAsks").first())?.at ?? 0;
     const rescanAfter = Math.max(0, undoneAt, ...corrections.map((c) => c.updatedAt), ...placed.map((p) => p.updatedAt));
     return {
-      episodes: await episodeRows(ctx), awaitingReview: await awaitingReviewCount(ctx),
+      episodes: await episodeRows(ctx, now), awaitingReview: await awaitingReviewCount(ctx, now),
       corrections, placements: placed.map(({ source, id, date }) => ({ source, id, date })), rescanAfter,
       // The 2025 Fridays Tarik added: in scope for the scanner alongside 2026.
       extraDates: await extraDateList(ctx),

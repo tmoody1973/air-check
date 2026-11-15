@@ -164,9 +164,11 @@ export const claim = mutation({
   handler: async (ctx, { token }) => {
     requirePublisher(token);
     await requeueStuckUpdates(ctx);
+    const approved = await ctx.db.query("descriptionUpdates").withIndex("by_status", (q) => q.eq("status", "approved")).collect();
+    // The publisher calls this every pass and there is almost never an update: stop before reading every release.
+    if (!approved.length) return null;
     // Plan 8: an update approved before an embargo arrived waits, approved, until the embargo ends or is cleared.
     const active = await activeEmbargoes(ctx, "real", chicagoDayKey(Date.now()));
-    const approved = await ctx.db.query("descriptionUpdates").withIndex("by_status", (q) => q.eq("status", "approved")).collect();
     const u = approved.find((x) => !embargoHits({ description: x.description }, active).blocking.length);
     if (!u) return null;
     const pkg = await ctx.db.query("packages").withIndex("by_packageId", (q) => q.eq("packageId", u.packageId)).unique();
