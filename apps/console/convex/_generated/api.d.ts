@@ -16,6 +16,7 @@ import type * as corrections from "../corrections.js";
 import type * as crons from "../crons.js";
 import type * as cutoff from "../cutoff.js";
 import type * as demoLimits from "../demoLimits.js";
+import type * as demoReleases from "../demoReleases.js";
 import type * as descriptionUpdates from "../descriptionUpdates.js";
 import type * as draftNow from "../draftNow.js";
 import type * as enqueue from "../enqueue.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   cutoff: typeof cutoff;
   demoLimits: typeof demoLimits;
+  demoReleases: typeof demoReleases;
   descriptionUpdates: typeof descriptionUpdates;
   draftNow: typeof draftNow;
   enqueue: typeof enqueue;
