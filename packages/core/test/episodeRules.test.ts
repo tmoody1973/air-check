@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   episodeStatus,
   formatTrack,
@@ -279,4 +279,21 @@ test("R10: two finished drafts with no package is draft-failed, never picked aga
   const eps = [ep("2026-01-02", { draftAttempts: 2 }), ep("2026-01-09")];
   expect(nextToDraft(eps, 0)?.showDate).toBe("2026-01-09");
   expect(nextAudioToFetch([eps[0]!, { ...eps[1]!, ...prep }], 0)?.showDate).toBe("2026-01-09");
+});
+
+describe("Paper notes whose Hour 1 has no heading (11-13-26)", () => {
+  test("numbered tracks before the first hour heading are Hour 1 when the doc has an Hour 2 heading", () => {
+    const text = [
+      "# Rhythm Lab Radio 11-13-26", "## 1. Momoko Gill — “No Others”", "### Record details", "prose",
+      "## 2. Cochemea — “Curandera”", "# Rhythm Lab Radio — Hour Two", "## 1. The Chameleon — “Links”",
+    ].join("\n");
+    expect(parsePaperExport(text).tracks).toEqual([
+      { hour: 1, artist: "Momoko Gill", title: "No Others" },
+      { hour: 1, artist: "Cochemea", title: "Curandera" },
+      { hour: 2, artist: "The Chameleon", title: "Links" },
+    ]);
+  });
+  test("with no hour headings at all, nothing is guessed", () => {
+    expect(parsePaperExport("## 1. Momoko Gill — “No Others”\n## 2. Cochemea — “Curandera”").tracks).toEqual([]);
+  });
 });

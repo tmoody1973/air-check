@@ -166,6 +166,6 @@ describe("an empty description", () => {
     expect(checkDescriptionChange(goldenDraft(), description, undefined, [])).toContain("description is empty");
   });
   test("a real description passes", () => {
-    expect(checkDescriptionChange(goldenDraft(), "Warm, patient soul.", undefined, [])).toEqual([]);
+    expect(checkDescriptionChange(goldenDraft(), "Warm, patient soul from start to finish: a two-hour set that moves from spiritual jazz through broken beat and into late-night electronics, with deep cuts from Milwaukee crate-diggers and new records from London, Lagos and Los Angeles.", undefined, [])).toEqual([]);
   });
 });

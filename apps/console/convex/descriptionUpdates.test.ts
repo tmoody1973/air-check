@@ -46,7 +46,7 @@ const revise = (t: T, body: unknown, token = AGENT) =>
     body: JSON.stringify(body),
   });
 const propose = (t: T, packageId: string, description: string) => t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId, description });
-async function proposed(t: T, packageId: string, description = "Warm, patient soul for a grey morning.") {
+async function proposed(t: T, packageId: string, description = "Warm, patient soul for a grey morning. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.") {
   const r = await propose(t, packageId, description);
   if (!r.ok) throw new Error(r.message);
   return r.id;
@@ -75,10 +75,10 @@ describe("descriptionUpdates.propose (a signed-in human)", () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
     const before = await pkg(t, pid);
-    const r = await propose(t, pid, "Warm, patient soul for a grey morning.");
+    const r = await propose(t, pid, "Warm, patient soul for a grey morning. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(r).toMatchObject({ ok: true, replaced: false });
     const u = (await rows(t))[0]!;
-    expect(u).toMatchObject({ packageId: pid, status: "proposed", proposedBy: "human", attempts: 0, descriptionSources: SOURCES, description: "Warm, patient soul for a grey morning." });
+    expect(u).toMatchObject({ packageId: pid, status: "proposed", proposedBy: "human", attempts: 0, descriptionSources: SOURCES, description: "Warm, patient soul for a grey morning. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(u.fingerprint).toBe(await updateFingerprint(u.description, SOURCES));
     expect(await pkg(t, pid)).toEqual(before);
   });
@@ -86,7 +86,7 @@ describe("descriptionUpdates.propose (a signed-in human)", () => {
   test("the checker's problems come back in plain words (private terms too, never echoed); the live text again is refused", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
-    const r = await propose(t, pid, "Upcoming, thanks to Jane Secret.");
+    const r = await propose(t, pid, "Upcoming, thanks to Jane Secret. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(r).toMatchObject({ ok: false, code: "BAD_INPUT" });
     expect(!r.ok && r.message).toMatch(/upcoming/i);
     expect(!r.ok && r.message).toMatch(/private term/);
@@ -100,36 +100,36 @@ describe("descriptionUpdates.propose (a signed-in human)", () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
     const demoPid = await published(t, { id: "demo-10-2-26", workspace: "demo" });
-    const args = { packageId: pid, description: "New words." };
+    const args = { packageId: pid, description: "New words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." };
     expect(await t.mutation(api.descriptionUpdates.propose, args)).toMatchObject({ ok: false, code: "FORBIDDEN" });
     expect(await t.withIdentity(demo).mutation(api.descriptionUpdates.propose, { ...args, packageId: demoPid })).toMatchObject({ ok: false, code: "FORBIDDEN" });
-    expect(await propose(t, demoPid, "New words.")).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(await propose(t, demoPid, "New words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toMatchObject({ ok: false, code: "FORBIDDEN" });
     for (const status of ["awaiting_review", "approved", "publishing", "failed", "outcome_unknown", "skipped"]) {
       await setPackage(t, pid, { status });
-      expect(await propose(t, pid, "New words."), status).toMatchObject({ ok: false, code: "NOT_READY" });
+      expect(await propose(t, pid, "New words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates."), status).toMatchObject({ ok: false, code: "NOT_READY" });
     }
-    expect(await propose(t, "pkg-1-1-26", "New words.")).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    expect(await propose(t, "pkg-1-1-26", "New words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toMatchObject({ ok: false, code: "NOT_FOUND" });
     expect(await rows(t)).toEqual([]);
   });
 
   test("one open update per package: a new proposal replaces a proposed one; an approved or pushing one refuses it", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
-    const first = await proposed(t, pid, "First words for the show.");
-    const second = await propose(t, pid, "Second words for the show.");
+    const first = await proposed(t, pid, "First words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
+    const second = await propose(t, pid, "Second words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(second).toMatchObject({ ok: true, replaced: true });
     expect(await row(t, first)).toBeNull();
-    expect((await rows(t)).map((u) => u.description)).toEqual(["Second words for the show."]);
+    expect((await rows(t)).map((u) => u.description)).toEqual(["Second words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates."]);
     for (const status of ["approved", "pushing"]) {
       await setRow(t, (await rows(t))[0]!._id, { status });
-      const r = await propose(t, pid, "Third words for the show.");
+      const r = await propose(t, pid, "Third words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
       expect(r, status).toMatchObject({ ok: false, code: "NOT_READY" });
       expect(!r.ok && r.message, status).toMatch(/being sent to Mixcloud/);
     }
     // Finished updates are history, not open: a new proposal is fine after pushed or failed.
     for (const status of ["pushed", "failed"]) {
       await t.run(async (ctx) => { for (const u of await ctx.db.query("descriptionUpdates").collect()) await ctx.db.patch(u._id, { status } as never); });
-      expect(await propose(t, pid, `After ${status}, new words.`), status).toMatchObject({ ok: true, replaced: false });
+      expect(await propose(t, pid, `After ${status}, new words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.`), status).toMatchObject({ ok: true, replaced: false });
     }
   });
 });
@@ -153,9 +153,9 @@ describe("descriptionUpdates.approve (Hard Rule 1)", () => {
   test("approving a proposal that was replaced is PACKAGE_CHANGED, and the new one stays proposed", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
-    const old = await proposed(t, pid, "First words for the show.");
+    const old = await proposed(t, pid, "First words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     const fp = (await row(t, old))!.fingerprint;
-    await proposed(t, pid, "Second words for the show.");
+    await proposed(t, pid, "Second words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(await t.withIdentity(human).mutation(api.descriptionUpdates.approve, { id: old, fingerprint: fp })).toMatchObject({ ok: false, code: "PACKAGE_CHANGED" });
     expect((await rows(t)).map((u) => u.status)).toEqual(["proposed"]);
   });
@@ -163,16 +163,16 @@ describe("descriptionUpdates.approve (Hard Rule 1)", () => {
   test("the agent's proposal is never claimed until a human approves it", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
-    const res = await revise(t, { packageId: pid, description: "Agent words about a patient record.", descriptionSources: SOURCES });
+    const res = await revise(t, { packageId: pid, description: "Agent words about a patient record. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: SOURCES });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { packageId: string; updateId: UpdateId; status: string };
     expect(body).toMatchObject({ packageId: pid, status: "proposed" });
     expect(await row(t, body.updateId)).toMatchObject({ proposedBy: "agent", status: "proposed", descriptionSources: SOURCES });
     for (let i = 0; i < 3; i++) expect(await claim(t)).toBeNull();
     const fp = (await row(t, body.updateId))!.fingerprint;
-    expect(fp).toBe(await updateFingerprint("Agent words about a patient record.", SOURCES));
+    expect(fp).toBe(await updateFingerprint("Agent words about a patient record. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", SOURCES));
     await t.withIdentity(human).mutation(api.descriptionUpdates.approve, { id: body.updateId, fingerprint: fp });
-    expect(await claim(t)).toEqual({ id: body.updateId, packageId: pid, description: "Agent words about a patient record.", showUrl: SHOW });
+    expect(await claim(t)).toEqual({ id: body.updateId, packageId: pid, description: "Agent words about a patient record. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", showUrl: SHOW });
   });
 });
 
@@ -180,7 +180,7 @@ describe("the agent's revise route on a published package (R3)", () => {
   test("checked like any description: a bad one is 400, nothing is proposed", async () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
-    const r = await revise(t, { packageId: pid, description: "Out today!", descriptionSources: [{ claim: "x" }] });
+    const r = await revise(t, { packageId: pid, description: "Out today! Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: [{ claim: "x" }] });
     expect(r.status).toBe(400);
     expect(await rows(t)).toEqual([]);
   });
@@ -201,10 +201,10 @@ describe("the agent's revise route on a published package (R3)", () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
     await proposed(t, pid);
-    expect((await revise(t, { packageId: pid, description: "Agent words, take one." })).status).toBe(201);
+    expect((await revise(t, { packageId: pid, description: "Agent words, take one. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(201);
     expect((await rows(t)).map((u) => [u.proposedBy, u.status])).toEqual([["agent", "proposed"]]);
     await setRow(t, (await rows(t))[0]!._id, { status: "approved" });
-    const r = await revise(t, { packageId: pid, description: "Agent words, take two." });
+    const r = await revise(t, { packageId: pid, description: "Agent words, take two. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(r.status).toBe(409);
     expect(((await r.json()) as { error: string }).error).toMatch(/being sent to Mixcloud/);
   });
@@ -212,11 +212,11 @@ describe("the agent's revise route on a published package (R3)", () => {
   test("Hard Rule 9: a demo package never gets an update, whatever its status says", async () => {
     const t = convexTest(schema, modules);
     const demoPid = await published(t, { id: "demo-10-2-26", workspace: "demo" });
-    const r = await revise(t, { packageId: demoPid, description: "Demo words for the show." }, DEMO_AGENT);
+    const r = await revise(t, { packageId: demoPid, description: "Demo words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." }, DEMO_AGENT);
     expect(r.status).toBe(409);
     expect(((await r.json()) as { error: string }).error).toMatch(/demo/i);
     // The real token cannot see the demo package at all.
-    expect((await revise(t, { packageId: demoPid, description: "Demo words for the show." })).status).toBe(404);
+    expect((await revise(t, { packageId: demoPid, description: "Demo words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(404);
     expect(await rows(t)).toEqual([]);
   });
 });
@@ -228,7 +228,7 @@ describe("the publisher's side", () => {
     const b = await published(t, { id: "pkg-10-9-26", showDate: "2026-10-09" }, "https://www.mixcloud.com/rhythmlab/rlr-10926/");
     await proposed(t, b);
     const id = await approvedUpdate(t, a);
-    expect(await claim(t)).toEqual({ id, packageId: a, description: "Warm, patient soul for a grey morning.", showUrl: SHOW });
+    expect(await claim(t)).toEqual({ id, packageId: a, description: "Warm, patient soul for a grey morning. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", showUrl: SHOW });
     expect((await row(t, id))!.status).toBe("pushing");
   });
 
@@ -236,14 +236,14 @@ describe("the publisher's side", () => {
     const t = convexTest(schema, modules);
     const pid = await published(t);
     const before = await pkg(t, pid);
-    const id = await approvedUpdate(t, pid, "New live words for the show.");
+    const id = await approvedUpdate(t, pid, "New live words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     await claim(t);
     await record(t, id, { status: "pushed" });
     expect(await row(t, id)).toMatchObject({ status: "pushed" });
     expect((await row(t, id))!.pushedAt).toMatch(/^\d{4}-/);
     expect(await pkg(t, pid)).toEqual(before);
     const view = await t.withIdentity(human).query(api.descriptionUpdates.forPackage, { packageId: pid });
-    expect(view?.live).toMatchObject({ description: "New live words for the show.", descriptionSources: SOURCES });
+    expect(view?.live).toMatchObject({ description: "New live words for the show. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: SOURCES });
     expect(view?.live.updatedAt).toMatch(/^\d{4}-/);
     expect(view?.latest).toMatchObject({ id, status: "pushed" });
   });

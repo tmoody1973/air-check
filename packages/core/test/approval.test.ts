@@ -410,9 +410,9 @@ test("editDescription: a human edits while awaiting review; it re-fingerprints, 
   const sources = [{ claim: "A fact", source: "crate: musicbrainz" }];
   const { id, fp } = await ready({ descriptionSources: sources });
   const before = transitions.length;
-  const edited = await gate.editDescription(id, "Warm, patient soul from start to finish.", tarik, []);
+  const edited = await gate.editDescription(id, "Warm, patient soul from start to finish: a two-hour set that moves from spiritual jazz through broken beat and into late-night electronics, with deep cuts from Milwaukee crate-diggers and new records from London, Lagos and Los Angeles.", tarik, []);
   expect(edited.status).toBe("awaiting_review");
-  expect(edited.draft.description).toBe("Warm, patient soul from start to finish.");
+  expect(edited.draft.description).toBe("Warm, patient soul from start to finish: a two-hour set that moves from spiritual jazz through broken beat and into late-night electronics, with deep cuts from Milwaukee crate-diggers and new records from London, Lagos and Los Angeles.");
   expect(edited.draft.descriptionSources).toEqual(sources);
   expect(edited.draft.audio.mp3Sha256).toBe(MP3);
   expect(edited.fingerprint).toBe(await fingerprint(edited.draft));
@@ -437,12 +437,12 @@ test("editDescription: only a signed-in real human, only while awaiting review",
 
 test("editDescription: the checker's issues refuse the edit as BAD_INPUT, with the issue list, and change nothing", async () => {
   const { id, fp } = await ready();
-  const r = await issuesOf(gate.editDescription(id, "An upcoming record on a tiny label run by Jane Secret.", tarik, ["Jane Secret"]));
+  const r = await issuesOf(gate.editDescription(id, "An upcoming record on a tiny label run by Jane Secret, pressed in a short run and passed hand to hand between DJs who play it late, after the floor has thinned out and only the people who came for the music are left in the room.", tarik, ["Jane Secret"]));
   expect(r).toEqual({ code: "BAD_INPUT", issues: [expect.stringContaining("upcoming"), "description contains a private term"] });
   expect(await issuesOf(gate.editDescription(id, "x".repeat(1000), tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("1000 characters")] });
   // the draft's own track titles count toward a pasted tracklist
   const titles = goldenDraft().tracks.filter((t) => t.title.length >= 5).slice(0, 6).map((t) => t.title).join(", ");
-  expect(await issuesOf(gate.editDescription(id, titles, tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("lists tracks")] });
+  expect(await issuesOf(gate.editDescription(id, `${titles}. ${"A long, warm set of records chosen for a late hour. ".repeat(3)}`, tarik, []))).toMatchObject({ code: "BAD_INPUT", issues: [expect.stringContaining("lists tracks")] });
   expect((await gate.decide(id, fp, "approve", tarik)).status).toBe("approved");
 });
 
