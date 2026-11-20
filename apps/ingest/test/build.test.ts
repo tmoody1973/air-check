@@ -82,10 +82,17 @@ describe("buildEpisodes: questions instead of guesses", () => {
     expect(broken!.questions.map((q) => q.text)).toEqual([expect.stringMatching(/^Line \d+ "no dash here at all" could not be read/)]);
   });
 
-  test("notes over 64 KB are not sent; a question says why", () => {
-    const [e] = one(found({ paper: new Map([["2026-02-06", [{ id: "p", name: "n.paper", export: { kind: "ok", text: "x".repeat(70_000) } }]]]) }));
+  test("notes over 256 KB are not sent; a question says why", () => {
+    const [e] = one(found({ paper: new Map([["2026-02-06", [{ id: "p", name: "n.paper", export: { kind: "ok", text: "x".repeat(270_000) } }]]]) }));
     expect(e!.notes).toEqual({ status: "found", docId: "p" });
-    expect(e!.questions[0]!.text).toMatch(/over 64 KB/);
+    expect(e!.questions[0]!.text).toMatch(/over 256 KB/);
+  });
+
+  test("85 KB notes (the 11-13-26 per-track guide) are kept, with no question", () => {
+    const text = "x".repeat(85_000);
+    const [e] = one(found({ paper: new Map([["2026-02-06", [{ id: "p", name: "n.paper", export: { kind: "ok", text } }]]]) }));
+    expect(e!.notes).toEqual({ status: "found", docId: "p", text });
+    expect(e!.questions.filter((q) => /KB/.test(q.text))).toEqual([]);
   });
 
   test("a Paper doc about the artists with no track lines raises no question; its text still goes to the draft (R2)", () => {

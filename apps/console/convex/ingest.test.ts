@@ -155,7 +155,7 @@ describe("ingest.upsert", () => {
     for (const bad of [
       episode({ showDate: "2026-02-30" }),
       episode({ showDate: "1-2-26" }),
-      episode({ notes: { status: "found", text: "x".repeat(65_537) } }),
+      episode({ notes: { status: "found", text: "x".repeat(262_145) } }),
       episode({ tracklist: { status: "found", tracks: Array.from({ length: 101 }, (_, i) => track(1, i + 1, "A", `T${i}`)) } }),
       episode({ questions: Array.from({ length: 21 }, (_, i) => ({ id: `q${i}`, text: "?", kind: "date" })) }),
       episode({ questions: [{ id: "q", text: "x".repeat(1001), kind: "date" }] }),
