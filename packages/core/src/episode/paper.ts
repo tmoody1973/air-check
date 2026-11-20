@@ -20,8 +20,12 @@ const clean = (s: string) => s.replace(/\*\*/g, "").trim();
 /** Tolerant reader for a Paper export: Hour headings set the hour, only track lines are kept, nothing is guessed. */
 export function parsePaperExport(text: string): PaperParse {
   const tracks: PaperTrack[] = [];
-  let hour: Hour | null = null;
-  for (const raw of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  // Nov 20 (11-13-26 notes): Hour 1's tracks come first with no heading, only "Hour Two" has one. When the doc has an
+  // Hour 2 heading, numbered tracks before any hour heading are Hour 1. With no hour headings at all, nothing is guessed.
+  const hourOf = (l: string) => (l.match(HOUR_HEADING) ?? l.match(HOUR_MARKER))?.[1];
+  let hour: Hour | null = lines.some((l) => HOUR_WORD[hourOf(l.trim())?.toLowerCase() ?? ""] === 2) ? 1 : null;
+  for (const raw of lines) {
     const line = raw.trim();
     const synth = line.match(SYNTH);
     if (synth) {
@@ -33,8 +37,8 @@ export function parsePaperExport(text: string): PaperParse {
       tracks.push({ hour: hour!, artist: clean(numbered[1]!), title: clean(numbered[2]!) });
       continue;
     }
-    const h = line.match(HOUR_HEADING) ?? line.match(HOUR_MARKER);
-    if (h) hour = HOUR_WORD[h[1]!.toLowerCase()]!;
+    const h = hourOf(line);
+    if (h) hour = HOUR_WORD[h.toLowerCase()]!;
   }
   return { tracks, unreadable: tracks.length === 0 && text.trim().length > 0 };
 }

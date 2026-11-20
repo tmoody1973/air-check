@@ -75,12 +75,12 @@ describe("POST /agent/packages/get", () => {
     expect(plain).toMatchObject({ status: "succeeded", description: draft.description, descriptionSources: SOURCES });
     expect(plain).not.toHaveProperty("openUpdate");
     await t.run((ctx) =>
-      ctx.db.insert("descriptionUpdates", { packageId: draft.id, description: "Pushed words.", status: "pushed", proposedBy: "human", fingerprint: "f1", attempts: 1, pushedAt: "2026-10-04T00:00:00.000Z" }),
+      ctx.db.insert("descriptionUpdates", { packageId: draft.id, description: "Pushed words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", status: "pushed", proposedBy: "human", fingerprint: "f1", attempts: 1, pushedAt: "2026-10-04T00:00:00.000Z" }),
     );
-    const r = await t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId: draft.id, description: "Proposed words." });
+    const r = await t.withIdentity(human).mutation(api.descriptionUpdates.propose, { packageId: draft.id, description: "Proposed words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(r.ok).toBe(true);
     const body = await (await get(t, { packageId: draft.id })).json();
-    expect(body).toMatchObject({ status: "succeeded", description: "Pushed words.", openUpdate: "proposed" });
+    expect(body).toMatchObject({ status: "succeeded", description: "Pushed words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", openUpdate: "proposed" });
     expect(body).not.toHaveProperty("descriptionSources"); // the pushed update carried none
     expect(JSON.stringify(body)).not.toMatch(/utm=secret|mixcloud\.com|radiomilwaukee|Proposed words/);
   });

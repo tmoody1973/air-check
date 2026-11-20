@@ -12,7 +12,7 @@ const LIVE = "Warm soul from Milwaukee, start to finish.";
 const SOURCES = [{ claim: "Played bass with Ezra Collective", source: "crate: musicbrainz artist lookup" }];
 const view = (latest: Partial<NonNullable<UpdateView["latest"]>> | null = null, live: Partial<UpdateView["live"]> = {}): UpdateView => ({
   live: { description: LIVE, ...live },
-  latest: latest && { id: "u1", status: "proposed", description: "A brighter take on the same two hours.", proposedBy: "agent", fingerprint: "fpA", ...latest },
+  latest: latest && { id: "u1", status: "proposed", description: "A brighter take on the same two hours. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", proposedBy: "agent", fingerprint: "fpA", ...latest },
 });
 function fns(over: Partial<UpdateFns> = {}) {
   const propose = vi.fn<UpdateFns["propose"]>(async () => ({ ok: true, replaced: false }));
@@ -42,20 +42,20 @@ describe("DescriptionUpdate", () => {
     expect(screen.getAllByText(/time-relative phrase/).length).toBeGreaterThan(0);
     expect(screen.getByText("24 / 999")).toBeInTheDocument();
     expect(propose).toBeDisabled();
-    fireEvent.change(box, { target: { value: "A café 🎷 set." } });
+    fireEvent.change(box, { target: { value: "A café 🎷 set. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." } });
     expect(propose).toBeEnabled();
     await act(async () => fireEvent.click(propose));
-    expect(f.propose).toHaveBeenCalledWith("A café 🎷 set.");
+    expect(f.propose).toHaveBeenCalledWith("A café 🎷 set. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(screen.queryByLabelText("New description")).toBeNull();
   });
 
   it("a refused proposal says why and keeps the text", async () => {
     setup(view(), fns({ propose: async () => ({ ok: false, message: "description contains a private term" }) }));
     fireEvent.click(screen.getByRole("button", { name: "Update the description on Mixcloud" }));
-    fireEvent.change(screen.getByLabelText("New description"), { target: { value: "New words here." } });
+    fireEvent.change(screen.getByLabelText("New description"), { target: { value: "New words here. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Propose update" })));
     expect(screen.getByRole("alert")).toHaveTextContent("Description contains a private term");
-    expect(screen.getByLabelText("New description")).toHaveValue("New words here.");
+    expect(screen.getByLabelText("New description")).toHaveValue("New words here. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
   });
 
   it("a proposal sits beside the live text with its sources; Approve update sends its fingerprint", async () => {
@@ -63,7 +63,7 @@ describe("DescriptionUpdate", () => {
     expect(screen.getByText("Live on Mixcloud")).toBeInTheDocument();
     expect(screen.getByText("Proposed by the agent")).toBeInTheDocument();
     expect(screen.getByText(LIVE)).toBeInTheDocument();
-    expect(screen.getByText("A brighter take on the same two hours.")).toBeInTheDocument();
+    expect(screen.getByText("A brighter take on the same two hours. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toBeInTheDocument();
     expect(screen.getByText("Played bass with Ezra Collective")).toBeInTheDocument();
     expect(screen.getByText(/Only the description changes/)).toBeInTheDocument();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve update" })));
@@ -80,12 +80,12 @@ describe("DescriptionUpdate", () => {
   it("a proposal replaced while you read it is pinned: Approve waits for Reload, then sends the new fingerprint", async () => {
     const f = fns();
     const r = setup(view({}), f);
-    r.rerender(<DescriptionUpdate view={view({ id: "u2", description: "Replaced words.", fingerprint: "fpB" })} trackTitles={[]} fns={f} />);
-    expect(screen.getByText("A brighter take on the same two hours.")).toBeInTheDocument();
+    r.rerender(<DescriptionUpdate view={view({ id: "u2", description: "Replaced words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", fingerprint: "fpB" })} trackTitles={[]} fns={f} />);
+    expect(screen.getByText("A brighter take on the same two hours. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("This proposal changed. Open the latest version.");
     expect(screen.getByRole("button", { name: "Approve update" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
-    expect(screen.getByText("Replaced words.")).toBeInTheDocument();
+    expect(screen.getByText("Replaced words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toBeInTheDocument();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve update" })));
     expect(f.approve).toHaveBeenCalledWith("u2", "fpB");
   });
@@ -121,7 +121,7 @@ describe("DescriptionUpdate", () => {
     setup(view({ status: "failed", error: "retries_exhausted" }));
     expect(screen.getByText(/didn't answer after 3 tries/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Propose again" }));
-    expect(screen.getByLabelText("New description")).toHaveValue("A brighter take on the same two hours.");
+    expect(screen.getByLabelText("New description")).toHaveValue("A brighter take on the same two hours. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
   });
 
   it("failed unconfirmed: says Mixcloud accepted it but didn't confirm, so it may already be live", () => {

@@ -18,7 +18,7 @@ function record(over: Partial<PackageRecord> = {}, draft: Partial<PackageRecord[
     fingerprint: "fp1",
     draft: {
       id: "p1", workspace: "real", showDate: "2026-10-02", title: "RLR 10.2.26 | Kiwanuka and more",
-      tags: ["Jazz", "Soul"], description: "A show — café", tracks: [track(1), track(2, true), track(3, true)],
+      tags: ["Jazz", "Soul"], description: "A show — café Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", tracks: [track(1), track(2, true), track(3, true)],
       audio: { hour1Id: "a", hour2Id: "b" }, flags: ["Spellings checked.", "Left out one detail."], alternates: ["Other title"],
       ...draft,
     },
@@ -38,7 +38,7 @@ describe("PackageDecision", () => {
     expect(screen.getByText("Draft · 2 flags")).toBeInTheDocument();
     expect(screen.getByText("tracks").previousSibling).toHaveTextContent("3");
     expect(screen.getByText("closing tracks").previousSibling).toHaveTextContent("2");
-    expect(screen.getByText("description chars").previousSibling).toHaveTextContent("13");
+    expect(screen.getByText("description chars").previousSibling).toHaveTextContent("215");
     expect(screen.getByText("Spellings checked.").parentElement).toHaveTextContent("1Spellings checked.");
     expect(screen.getByText("Left out one detail.").parentElement).toHaveTextContent("2Left out one detail.");
     expect(screen.getByText("This will be public on Mixcloud")).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe("PackageDecision", () => {
       expect(c.className).toContain("bg-chip");
       expect(c.className).not.toMatch(/signal|green/);
     });
-    expect(screen.getByText(/13 characters/)).toBeInTheDocument();
+    expect(screen.getByText(/215 characters/)).toBeInTheDocument();
     expect(screen.getByText("Other title")).toBeInTheDocument();
   });
 
@@ -465,21 +465,21 @@ describe("PackageDecision: edit description", () => {
     const { rerender } = render(ui(record()));
     open();
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
-    expect(box()).toHaveValue("A show — café");
+    expect(box()).toHaveValue("A show — café Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(screen.getByRole("button", { name: "Save description" })).toBeDisabled(); // nothing changed yet
     fireEvent.change(box(), { target: { value: "An upcoming record — 🎷" } });
     expect(screen.getByText("22 / 999")).toBeInTheDocument(); // code points, not UTF-16 units
     expect(screen.getByText('Description has a time-relative phrase: "upcoming"')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save description" })).toBeDisabled();
-    fireEvent.change(box(), { target: { value: "Song 1, Song 2 and more, warm and patient." } });
+    fireEvent.change(box(), { target: { value: "Song 1, Song 2 and more, warm and patient. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." } });
     expect(screen.queryByText(/time-relative/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save description" }));
     expect(await screen.findByText("Changed: review again")).toBeInTheDocument();
-    expect(save).toHaveBeenCalledWith("Song 1, Song 2 and more, warm and patient.");
+    expect(save).toHaveBeenCalledWith("Song 1, Song 2 and more, warm and patient. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(screen.queryByRole("textbox", { name: "Description" })).not.toBeInTheDocument();
-    expect(screen.getByText("Song 1, Song 2 and more, warm and patient.")).toBeInTheDocument();
+    expect(screen.getByText("Song 1, Song 2 and more, warm and patient. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toBeInTheDocument();
     // Convex delivers the re-fingerprinted record; Approve sends the new fingerprint.
-    rerender(ui(record({ fingerprint: "fp2" }, { description: "Song 1, Song 2 and more, warm and patient." })));
+    rerender(ui(record({ fingerprint: "fp2" }, { description: "Song 1, Song 2 and more, warm and patient. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })));
     expect(screen.queryByText("This package changed. Open the latest version.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(decide).toHaveBeenCalledWith("approve", "fp2");
@@ -500,13 +500,13 @@ describe("PackageDecision: edit description", () => {
     real(record(), { editDescription: save });
     open();
     fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
-    fireEvent.change(box(), { target: { value: "Thanks to someone private." } });
+    fireEvent.change(box(), { target: { value: "Thanks to someone private. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." } });
     fireEvent.click(screen.getByRole("button", { name: "Save description" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Description contains a private term");
-    expect(box()).toHaveValue("Thanks to someone private.");
+    expect(box()).toHaveValue("Thanks to someone private. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(screen.queryByText("Changed: review again")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByText("A show — café")).toBeInTheDocument();
+    expect(screen.getByText("A show — café Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.")).toBeInTheDocument();
   });
 
   it("no edit after a decision, on a stale page, or without the edit action (demo)", () => {
@@ -597,14 +597,14 @@ describe("PackageDecision: edit tracklist", () => {
 describe("PackageDecision: the live description", () => {
   const updateFns = { propose: async () => ({ ok: true as const, replaced: false }), approve: async () => ({ ok: true as const }) };
   const published = withAudio({ status: "succeeded", result: { url: "https://www.mixcloud.com/rhythmlab/x/", at: "2026-10-28T03:04:00.000Z" } });
-  const view = { live: { description: "Updated words, now live.", updatedAt: "2026-10-28T15:04:00.000Z" }, latest: null };
+  const view = { live: { description: "Updated words, now live. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", updatedAt: "2026-10-28T15:04:00.000Z" }, latest: null };
 
   it("succeeded: the update section, and the counts and disclosure follow the live description", () => {
     real(published, { descriptionUpdate: { view, fns: updateFns } });
     expect(screen.getByRole("heading", { name: "Description on Mixcloud" })).toBeInTheDocument();
     expect(screen.getByText("description chars").previousSibling).toHaveTextContent(String([...view.live.description].length));
     fireEvent.click(screen.getByRole("button", { name: /See description and tracklist/ }));
-    expect(screen.getAllByText("Updated words, now live.").length).toBe(2);
+    expect(screen.getAllByText("Updated words, now live. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.").length).toBe(2);
   });
 
   it("not on Mixcloud, or the demo: no update section", () => {

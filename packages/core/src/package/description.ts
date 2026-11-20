@@ -1,4 +1,6 @@
 const MAX_DESCRIPTION = 999; // "under 1,000 characters", counted in code points
+/** Nov 20: "Test description." reached Mixcloud on 3-27-26. The shortest real description so far is 237. */
+export const MIN_DESCRIPTION = 200;
 const TRACKLIST_THRESHOLD = 6;
 const MIN_TITLE_LENGTH = 5;
 const MONTH = "January|February|March|April|May|June|July|August|September|October|November|December";
@@ -15,6 +17,7 @@ const TIME_RELATIVE = [
 
 export type DescriptionIssue =
   | { kind: "too-long"; length: number }
+  | { kind: "too-short"; length: number }
   | { kind: "time-relative"; phrase: string }
   | { kind: "tracklist"; titles: string[] }
   | { kind: "private"; term: string };
@@ -27,6 +30,7 @@ export function checkDescription(
   const issues: DescriptionIssue[] = [];
   const length = [...text].length;
   if (length > MAX_DESCRIPTION) issues.push({ kind: "too-long", length });
+  if (text.trim() && length < MIN_DESCRIPTION) issues.push({ kind: "too-short", length }); // blank has its own message
   for (const re of TIME_RELATIVE)
     for (const m of text.matchAll(re)) issues.push({ kind: "time-relative", phrase: m[0] });
   const lower = text.toLowerCase();

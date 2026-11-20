@@ -1,5 +1,5 @@
 import { parseTracklist } from "../tracklist/parse";
-import { checkDescription, type DescriptionIssue } from "./description";
+import { checkDescription, MIN_DESCRIPTION, type DescriptionIssue } from "./description";
 import type { DescriptionSource, PackageDraft } from "./mixcloud";
 import type { Track } from "../types";
 import { buildTitle, checkTags, checkTitleArtists, splitGluedLeads, titleLeads } from "./title";
@@ -41,6 +41,8 @@ export function describeIssue(i: DescriptionIssue): string {
   switch (i.kind) {
     case "too-long":
       return `description is ${i.length} characters, must be under 1,000`;
+    case "too-short":
+      return `description is ${i.length} characters, must be at least ${MIN_DESCRIPTION}: write the real description, not a placeholder`;
     case "time-relative":
       return `description has a time-relative phrase: "${i.phrase}"`;
     case "tracklist":

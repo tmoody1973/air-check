@@ -51,3 +51,9 @@ test("flags this week's, straight and curly apostrophe, any case", () => {
     expect(checkDescription(t, o([])).some((i) => i.kind === "time-relative")).toBe(true);
   }
 });
+
+test("a placeholder description is refused; blank is left to its own message (Nov 20: \"Test description.\" reached Mixcloud)", () => {
+  for (const t of ["Test", "Test description."]) expect(checkDescription(t, opts())).toContainEqual({ kind: "too-short", length: [...t].length });
+  expect(checkDescription("   ", opts()).some((i) => i.kind === "too-short")).toBe(false);
+  expect(checkDescription("x".repeat(200), opts()).some((i) => i.kind === "too-short")).toBe(false);
+});

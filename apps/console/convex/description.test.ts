@@ -47,10 +47,10 @@ describe("packages.editDescription", () => {
   test("a human edits while awaiting review: re-fingerprints, keeps the sources, and the old fingerprint cannot approve", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t, { descriptionSources: SOURCES });
-    const r = await t.withIdentity(human).mutation(api.packages.editDescription, { packageId: id, description: "Warm, patient soul." });
+    const r = await t.withIdentity(human).mutation(api.packages.editDescription, { packageId: id, description: "Warm, patient soul. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(r).toMatchObject({ ok: true, record: { status: "awaiting_review" } });
     const doc = (await pkg(t, id))!;
-    expect(doc.draft.description).toBe("Warm, patient soul.");
+    expect(doc.draft.description).toBe("Warm, patient soul. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.");
     expect(doc.draft.descriptionSources).toEqual(SOURCES);
     expect(doc.draft.audio.mp3Sha256).toBe(HASH);
     expect(doc.fingerprint).toBe(await fingerprint(doc.draft));
@@ -61,7 +61,7 @@ describe("packages.editDescription", () => {
   test("the checker refuses with plain reasons, including the server's private terms; nothing changes", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t);
-    const r = await t.withIdentity(human).mutation(api.packages.editDescription, { packageId: id, description: "Upcoming, thanks to Jane Secret." });
+    const r = await t.withIdentity(human).mutation(api.packages.editDescription, { packageId: id, description: "Upcoming, thanks to Jane Secret. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(r).toMatchObject({ ok: false, code: "BAD_INPUT" });
     expect(!r.ok && r.message).toMatch(/upcoming/i);
     expect(!r.ok && r.message).toMatch(/private term/);
@@ -73,7 +73,7 @@ describe("packages.editDescription", () => {
     const t = convexTest(schema, modules);
     const real = await seed(t);
     const demoPkg = await seed(t, { id: "demo-10-2-26", workspace: "demo" });
-    const args = (packageId: string) => ({ packageId, description: "New words." });
+    const args = (packageId: string) => ({ packageId, description: "New words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(await t.mutation(api.packages.editDescription, args(real.id))).toMatchObject({ ok: false, code: "FORBIDDEN" });
     expect(await t.withIdentity(demo).mutation(api.packages.editDescription, args(demoPkg.id))).toMatchObject({ ok: false, code: "FORBIDDEN" });
     expect(await t.withIdentity(human).mutation(api.packages.editDescription, args(demoPkg.id))).toMatchObject({ ok: false, code: "FORBIDDEN" });
@@ -136,13 +136,13 @@ describe("POST /agent/packages/revise", () => {
   test("replaces description and sources together, keeps the MP3, stays in review, and needs a new human approve", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t, { descriptionSources: [{ claim: "old", source: "old" }] });
-    const res = await revise(t, { packageId: id, description: "Sampha and friends, unhurried.", descriptionSources: SOURCES, status: "approved", title: "X" });
+    const res = await revise(t, { packageId: id, description: "Sampha and friends, unhurried. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: SOURCES, status: "approved", title: "X" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ packageId: id, status: "awaiting_review" });
     const doc = (await pkg(t, id))!;
     expect(doc.status).toBe("awaiting_review");
     expect(doc.decidedBy).toBeUndefined();
-    expect(doc.draft).toMatchObject({ description: "Sampha and friends, unhurried.", descriptionSources: SOURCES, title: goldenDraft().title });
+    expect(doc.draft).toMatchObject({ description: "Sampha and friends, unhurried. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: SOURCES, title: goldenDraft().title });
     expect(doc.draft.audio.mp3Sha256).toBe(HASH);
     expect(doc.fingerprint).toBe(await fingerprint(doc.draft));
     expect(await t.withIdentity(human).mutation(api.packages.decide, { packageId: id, fingerprint: fp, decision: "approve" })).toMatchObject({ ok: false, code: "PACKAGE_CHANGED" });
@@ -151,17 +151,17 @@ describe("POST /agent/packages/revise", () => {
   test("no sources in the revision means none on the draft", async () => {
     const t = convexTest(schema, modules);
     const { id } = await seed(t, { descriptionSources: SOURCES });
-    expect((await revise(t, { packageId: id, description: "Plain words." })).status).toBe(200);
+    expect((await revise(t, { packageId: id, description: "Plain words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(200);
     expect((await pkg(t, id))!.draft.descriptionSources).toBeUndefined();
   });
 
   test("a bad description or bad sources is 400 with problems, and nothing changes", async () => {
     const t = convexTest(schema, modules);
     const { id, fp } = await seed(t);
-    const bad = await revise(t, { packageId: id, description: "Out next week." });
+    const bad = await revise(t, { packageId: id, description: "Out next week. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { problems: string[] }).problems.join(" ")).toMatch(/next week/);
-    const src = await revise(t, { packageId: id, description: "Fine words.", descriptionSources: [{ claim: "", source: "x" }] });
+    const src = await revise(t, { packageId: id, description: "Fine words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates.", descriptionSources: [{ claim: "", source: "x" }] });
     expect(src.status).toBe(400);
     expect(await revise(t, { packageId: id })).toHaveProperty("status", 400);
     expect((await pkg(t, id))!.fingerprint).toBe(fp);
@@ -172,11 +172,11 @@ describe("POST /agent/packages/revise", () => {
     const t = convexTest(schema, modules);
     const real = await seed(t);
     const demoPkg = await seed(t, { id: "demo-10-2-26-abcde", workspace: "demo" });
-    expect((await revise(t, { packageId: real.id, description: "Words." }, `Bearer ${DEMO}`)).status).toBe(404);
-    expect((await revise(t, { packageId: demoPkg.id, description: "Words." })).status).toBe(404);
-    expect((await revise(t, { packageId: "pkg-1-1-26", description: "Words." })).status).toBe(404);
+    expect((await revise(t, { packageId: real.id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." }, `Bearer ${DEMO}`)).status).toBe(404);
+    expect((await revise(t, { packageId: demoPkg.id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(404);
+    expect((await revise(t, { packageId: "pkg-1-1-26", description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(404);
     expect((await pkg(t, real.id))!.fingerprint).toBe(real.fp);
-    expect((await revise(t, { packageId: demoPkg.id, description: "Words." }, `Bearer ${DEMO}`)).status).toBe(200);
+    expect((await revise(t, { packageId: demoPkg.id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." }, `Bearer ${DEMO}`)).status).toBe(200);
   });
 
   // A published package gets a proposed update instead (Task 4, descriptionUpdates.test.ts).
@@ -185,7 +185,7 @@ describe("POST /agent/packages/revise", () => {
     const { id, fp } = await seed(t);
     for (const status of ["approved", "publishing", "skipped", "failed", "outcome_unknown", "preparing_audio"]) {
       await setStatus(t, id, status);
-      const r = await revise(t, { packageId: id, description: "Words." });
+      const r = await revise(t, { packageId: id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." });
       expect(r.status, status).toBe(409);
       expect(((await r.json()) as { error: string }).error, status).toMatch(/\w+ \w+/);
     }
@@ -195,9 +195,9 @@ describe("POST /agent/packages/revise", () => {
   test("wrong or missing token is 401; unset is 503", async () => {
     const t = convexTest(schema, modules);
     const { id } = await seed(t);
-    expect((await revise(t, { packageId: id, description: "Words." }, `Bearer ${"x".repeat(40)}`)).status).toBe(401);
-    expect((await revise(t, { packageId: id, description: "Words." }, null)).status).toBe(401);
+    expect((await revise(t, { packageId: id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." }, `Bearer ${"x".repeat(40)}`)).status).toBe(401);
+    expect((await revise(t, { packageId: id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." }, null)).status).toBe(401);
     vi.stubEnv("AGENT_SUBMIT_TOKEN", "");
-    expect((await revise(t, { packageId: id, description: "Words." })).status).toBe(503);
+    expect((await revise(t, { packageId: id, description: "Words. Two hours of records chosen with care, from spiritual jazz and broken beat to late-night electronics, with new music from London, Lagos and Los Angeles alongside deep cuts pulled from Milwaukee crates." })).status).toBe(503);
   });
 });
