@@ -5,7 +5,7 @@ import { requireIngest } from "./agentSubmit";
 import { awaitingReviewCount, correctedFields, correctionFor, episodeByDate, episodeRows, extraDateList, isShowDate, linkedPackage, writeSource } from "./episodes";
 import { draftIfReady } from "./draftNow";
 import { fixSourceV, scannedEpisodeFields, sourceStateV } from "./schema";
-import { MAX_NOTES, MAX_NOTES_BYTES } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES, MAX_NOTES_LABEL } from "./tracklist";
 
 // The ingest service on the VM (it reads Box, Google Drive and Dropbox Paper) is the only caller. Every function checks
 // INGEST_TOKEN first (requireIngest, in agentSubmit.ts beside sameToken), in constant time, and fails closed.
@@ -26,7 +26,7 @@ type ScannedEpisode = Infer<typeof scannedEpisodeV>;
 /** Why a scanned episode is refused, in plain words, or null. */
 function scanProblem(e: ScannedEpisode): string | null {
   if (!isShowDate(e.showDate)) return "showDate must be a real date, yyyy-mm-dd";
-  if (e.notes.text !== undefined && new TextEncoder().encode(e.notes.text).length > MAX_NOTES_BYTES) return "the notes text is over 64 KB";
+  if (e.notes.text !== undefined && new TextEncoder().encode(e.notes.text).length > MAX_NOTES_BYTES) return `the notes text is over ${MAX_NOTES_LABEL}`;
   if ((e.tracklist.text?.length ?? 0) > MAX_NOTES) return "the tracklist text is over 20,000 characters";
   if ((e.tracklist.tracks?.length ?? 0) > MAX_TRACKS) return `the tracklist has over ${MAX_TRACKS} tracks`;
   if (e.questions.length > MAX_QUESTIONS) return `over ${MAX_QUESTIONS} questions`;

@@ -18,8 +18,11 @@ export const LIMITS = {
   briefClaims: 39,
   /** A source's text the ledger keeps for code's fact check: Tavily's chunks plus the page's plain text (Oct 29). */
   sourceText: 8_000,
-  /** The ingest service's MAX_NOTES_BYTES. */
-  verifyNotesBytes: 65_536,
+  /**
+   * A show's Paper notes (the ingest scan, the episode row, a pre-air check). Nov 20: 64 KB refused the 11-13-26 notes
+   * (85 KB, a full per-track guide); 256 KB leaves room under Convex's 1 MiB document limit.
+   */
+  notesBytes: 262_144,
   searchResults: 5,
   searchQuery: 300,
 } as const;

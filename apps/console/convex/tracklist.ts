@@ -1,4 +1,4 @@
-import { draftPackageInput, type PackageDraftForm } from "@aircheck/core";
+import { draftPackageInput, LIMITS, type PackageDraftForm } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import { mutation, type MutationCtx } from "./_generated/server";
 import { enqueueRun } from "./enqueue";
@@ -6,8 +6,9 @@ import { actorOf, workspaceOf, type Workspace } from "./gate";
 
 export const MAX_TRACKLIST = 50_000;
 export const MAX_NOTES = 20_000;
-/** The ingest service's cap on a show's Paper notes, and on the notes a pre-air check reads (64 KB). */
-export const MAX_NOTES_BYTES = 65_536;
+/** The cap on a show's Paper notes, shared with the ingest service and the pre-air check. */
+export const MAX_NOTES_BYTES = LIMITS.notesBytes;
+export const MAX_NOTES_LABEL = `${MAX_NOTES_BYTES / 1024} KB`;
 
 /** Queues a draft-package run whose instruction is built here, in code. Shared by the form and the ingest service. */
 export function queueDraft(ctx: MutationCtx, workspace: Workspace, form: PackageDraftForm): Promise<string> {

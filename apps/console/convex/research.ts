@@ -48,7 +48,7 @@ import { createdAtOf } from "./runDefaults";
 import { stopRun } from "./runs";
 import { claimKindV, workspaceV } from "./schema";
 import { SAMPLE_JOB_PREFIX } from "./seedResearch";
-import { MAX_NOTES, MAX_NOTES_BYTES, MAX_TRACKLIST } from "./tracklist";
+import { MAX_NOTES, MAX_NOTES_BYTES, MAX_NOTES_LABEL, MAX_TRACKLIST } from "./tracklist";
 
 // Plan 7: sourced research jobs. A job is a Hermes run (kind `research`) whose prompt is built here, in code. The agent
 // saves blocks through POST /agent/research -> submitEntry, which writes research rows in its token's workspace and
@@ -368,7 +368,7 @@ async function notesText(ctx: QueryCtx, ws: Workspace, showDate: string, notes: 
 type NotesFrom = Infer<typeof notesFromV>["from"];
 async function beginVerify(ctx: MutationCtx, ws: Workspace, showDate: string, from: NotesFrom, { text, tracks: ownTracks }: NotesText, tracklistText?: string) {
   if (!text.trim()) throw refuse("The notes are empty.");
-  if (new TextEncoder().encode(text).length > MAX_NOTES_BYTES) throw refuse("The notes are over 64 KB. Check them in parts.");
+  if (new TextEncoder().encode(text).length > MAX_NOTES_BYTES) throw refuse(`The notes are over ${MAX_NOTES_LABEL}. Check them in parts.`);
   const tracks = ownTracks ?? (await showTracks(ctx, ws, showDate, tracklistText));
   if (!tracks) throw refuse("Add the tracklist first, so closing tracks are skipped.");
   return startJob(ctx, ws, { kind: "verify", showDate, tracks, lines: numberLines(text, tracks), notesSource: from, angles: false });

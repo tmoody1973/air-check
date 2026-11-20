@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  parseDriveTracklist, parsePaperExport, reconcile, rerunCandidate,
+  LIMITS, parseDriveTracklist, parsePaperExport, reconcile, rerunCandidate,
   type BoxFile, type EpisodeAssembly, type EpisodeFacts, type PaperTrack, type ParsedTracklist, type Track, type TrackStatus,
 } from "@aircheck/core";
 import type { Choice, Correction, Fix, IngestRow, Question, QuestionKind, ScannedEpisode, ScannedTrack } from "./convex.js";
@@ -19,7 +19,7 @@ export interface Found { box: Map<string, BoxFolder[]>; drive: Map<string, Drive
 // Convex's upsert limits (apps/console/convex/ingest.ts): kept here so one show never fails its whole upsert.
 const MAX_QUESTIONS = 20;
 const MAX_QUESTION_CHARS = 1_000;
-const MAX_NOTES_BYTES = 65_536;
+const MAX_NOTES_BYTES = LIMITS.notesBytes;
 const MAX_TRACKS = 100;
 /** The editor's text, the same cap as a typed tracklist (MAX_NOTES in apps/console/convex/tracklist.ts). */
 const MAX_TRACKLIST_TEXT = 20_000;
@@ -115,7 +115,7 @@ function notesOf(date: string, docs: PaperDoc[] | undefined, q: Question[]): { n
   }
   const text = doc.export.text;
   if (Buffer.byteLength(text) > MAX_NOTES_BYTES) {
-    q.push(ask("tracklist", `The notes for ${date} are over 64 KB, too long to use. Check the Paper doc "${doc.name}".`));
+    q.push(ask("tracklist", `The notes for ${date} are over ${MAX_NOTES_BYTES / 1024} KB, too long to use. Check the Paper doc "${doc.name}".`));
     return { notes: { status: "found", docId: doc.id }, paper: null };
   }
   const parsed = parsePaperExport(text);
