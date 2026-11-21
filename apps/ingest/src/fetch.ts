@@ -1,6 +1,6 @@
 import { mkdir, rm, rmdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { nextAudioToFetch } from "@aircheck/core";
+import { isRecentShow, nextAudioToFetch } from "@aircheck/core";
 import { MAX_DOWNLOAD_BYTES, type BoxClient } from "./box.js";
 import { inBacklog, type IngestConvex } from "./convex.js";
 import { factsOf, onDisk, removeStaleParts } from "./disk.js";
@@ -43,7 +43,11 @@ export async function fetchPass(deps: FetchDeps): Promise<void> {
   const facts = episodes.filter((r) => inBacklog(r.showDate, extraDates) && !backingOff(r.showDate)).map((r) => factsOf(r, disk.complete.has(r.showDate)));
   // A show half on disk (a failed or interrupted download) already holds its space: finish it first.
   const half = facts.filter((f) => disk.held.has(f.showDate));
-  const next = nextAudioToFetch(half, 0, MAX_ON_DISK) ?? nextAudioToFetch(facts, disk.held.size, MAX_ON_DISK);
+  // A recent show neither waits for nor uses up the backlog's places (Nov 21), so only backlog shows are counted.
+  // Recent is a calendar question: the wall clock, not `now` (the backoff clock, which tests start at 0).
+  const today = Date.now();
+  const backlogHeld = [...disk.held].filter((d) => !isRecentShow(d, today)).length;
+  const next = nextAudioToFetch(half, 0, MAX_ON_DISK) ?? nextAudioToFetch(facts, backlogHeld, MAX_ON_DISK, today);
   if (!next) return;
   const row = episodes.find((r) => r.showDate === next.showDate)!;
   const { hour1, hour2 } = row.audio;

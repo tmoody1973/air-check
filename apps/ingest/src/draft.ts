@@ -24,7 +24,7 @@ export async function draftPass(deps: DraftDeps): Promise<void> {
   // R4: a show whose fix the scanner hasn't applied yet waits for its rescan, without holding up the shows behind it.
   // R5: a stale fix fell back to what Tarik rejected, so that show is never drafted until he fixes it again.
   // A removed 2025 date can keep its row (a correction, prune's cap); out of the backlog, it is never a candidate.
-  const next = nextToDraft(episodes.filter((r) => inBacklog(r.showDate, extraDates) && !r.rescanPending && !r.corrected?.stale).map((r) => factsOf(r)), awaitingReview);
+  const next = nextToDraft(episodes.filter((r) => inBacklog(r.showDate, extraDates) && !r.rescanPending && !r.corrected?.stale).map((r) => factsOf(r)), awaitingReview, 3, Date.now());
   if (!next) return;
   const t0 = Date.now();
   const r = await deps.convex.requestDraft(next.showDate);

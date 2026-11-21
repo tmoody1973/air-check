@@ -1,4 +1,4 @@
-import { episodeStatus, formatTracklist, isShowDate } from "@aircheck/core";
+import { episodeStatus, formatTracklist, isRecentShow, isShowDate } from "@aircheck/core";
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -49,7 +49,8 @@ export async function draftIfReady(ctx: MutationCtx, showDate: string, { pace }:
   if (row.correctionStale) return { queued: false, reason: "fix-stale" };
   const { status } = episodeStatus(factsOf(row, (await linkedPackage(ctx, showDate)).packageStatus, await attemptsSince(ctx, showDate)));
   if (status !== "ready-to-draft") return { queued: false, reason: status };
-  if (pace && (await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" };
+  // Nov 21: the newest show is never held back by the backlog's pace.
+  if (pace && !isRecentShow(showDate, Date.now()) && (await awaitingReviewCount(ctx)) >= PACE) return { queued: false, reason: "pace" };
   const tracks = row.tracklist.tracks ?? [];
   if (!tracks.length) return { queued: false, reason: "missing-tracklist" };
   const runId = await queueDraft(ctx, "real", { showDate, tracklistText: formatTracklist(tracks), notes: await draftNotes(ctx, row) });

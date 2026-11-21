@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   episodeStatus,
   formatTrack,
+  isRecentShow,
   nextAudioToFetch,
   nextToDraft,
   rerunCandidate,
@@ -84,6 +85,30 @@ test("I1: audio is fetched only once a package exists; ready-to-draft and draft-
 test("nextAudioToFetch: also covers drafting and awaiting-review shows", () => {
   const eps = [ep("2026-02-01", { packageStatus: "awaiting_review" }), ep("2026-01-01", { packageStatus: "succeeded" })];
   expect(nextAudioToFetch(eps, 0)?.showDate).toBe("2026-02-01");
+});
+
+describe("Nov 21: the newest show never waits behind the backlog (11-13-26 waited a day behind 3 backlog shows)", () => {
+  const now = Date.parse("2026-11-21T21:00:00Z");
+  test("isRecentShow: aired within 14 days, or not aired yet", () => {
+    expect(isRecentShow("2026-11-13", now)).toBe(true);
+    expect(isRecentShow("2026-11-07", now)).toBe(true);
+    expect(isRecentShow("2026-11-06", now)).toBe(false);
+    expect(isRecentShow("2026-11-27", now)).toBe(true);
+    expect(isRecentShow("2026-05-15", now)).toBe(false);
+  });
+  test("nextAudioToFetch: a recent show goes first, even with every backlog place full", () => {
+    const eps = [ep("2026-05-08", prep), ep("2026-11-13", prep)];
+    expect(nextAudioToFetch(eps, 3, 3, now)?.showDate).toBe("2026-11-13");
+    expect(nextAudioToFetch(eps, 0, 3, now)?.showDate).toBe("2026-11-13");
+    expect(nextAudioToFetch([ep("2026-11-13", { ...prep, audioOnDisk: true }), eps[0]!], 3, 3, now)).toBeNull();
+    expect(nextAudioToFetch(eps, 3)).toBeNull(); // no clock given: the old rule
+  });
+  test("nextToDraft: a recent show is drafted even when 3 await review", () => {
+    const eps = [ep("2026-05-08"), ep("2026-11-20")];
+    expect(nextToDraft(eps, 3, 3, now)?.showDate).toBe("2026-11-20");
+    expect(nextToDraft(eps, 0, 3, now)?.showDate).toBe("2026-11-20");
+    expect(nextToDraft([ep("2026-05-08")], 3, 3, now)).toBeNull();
+  });
 });
 
 test("nextToDraft: oldest ready-to-draft, none when 3 await review", () => {

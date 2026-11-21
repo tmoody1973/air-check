@@ -44,6 +44,14 @@ const errorOf = async (p: Promise<unknown>) => {
   return "no error";
 };
 
+test("Nov 21: the ingest service's draft of a recent show is never refused for the pace", async () => {
+  const t = convexTest(schema, modules);
+  for (const [i, d] of ["2026-05-15", "2026-05-22", "2026-05-29"].entries()) await insertPackage(t, "awaiting_review", { id: `pkg-${i}`, showDate: d });
+  const recent = new Date(Date.now() - 1 * 86_400_000).toISOString().slice(0, 10);
+  await upsert(t, episode({ showDate: recent }));
+  expect(await t.mutation(api.ingest.requestDraft, { token: INGEST, showDate: recent })).toMatchObject({ queued: true });
+});
+
 describe("draftNow.draftNow", () => {
   test("drafts the chosen show now, even with 3 packages waiting (the ingest service is held by the pace)", async () => {
     const t = convexTest(schema, modules);
