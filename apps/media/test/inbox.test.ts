@@ -93,6 +93,18 @@ describe("runPass", () => {
     }]);
   });
 
+  test("Nov 21: a recent show is encoded even while 3 backlog MP3s are prepared", async () => {
+    await mkdir(preparedDir);
+    for (const n of ["pkg-4-17-26", "pkg-5-15-26", "pkg-5-29-26"]) await writeFile(join(preparedDir, `${n}.mp3`), "x");
+    const date = new Date(Date.now() - 8 * 86_400_000).toISOString().slice(0, 10); // aired 8 days ago, like 11-13
+    const pkg = `pkg-${Number(date.slice(5, 7))}-${Number(date.slice(8, 10))}-${date.slice(2, 4)}`;
+    await addShow(date);
+    const convex = fakeConvex([{ packageId: pkg, showDate: date }]);
+    await pass(convex, okExec());
+    expect(convex.attachedCalls.map((a) => a.packageId)).toEqual([pkg]);
+    expect(convex.waitingCalls).toEqual([[]]);
+  });
+
   test("if the statuses can't be read, the slots are still named", async () => {
     await mkdir(preparedDir);
     for (const n of ["pkg-a", "pkg-b", "pkg-c"]) await writeFile(join(preparedDir, `${n}.mp3`), "x");

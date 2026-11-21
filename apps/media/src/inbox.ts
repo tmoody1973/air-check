@@ -1,6 +1,6 @@
 import { chmod, mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { matchInbox } from "@aircheck/core";
+import { isRecentShow, matchInbox } from "@aircheck/core";
 import type { MediaConvex, WaitingItem } from "./convex.js";
 import { encodeMp3, probeSeconds, sha256File, type Exec } from "./encode.js";
 
@@ -134,8 +134,9 @@ export async function runPass(deps: PassDeps): Promise<void> {
       waiting.push({ showDate: date, reason: `${date} is still copying (or the copy is incomplete)` });
       continue;
     }
-    const held = await preparedIds(deps.preparedDir, pkg);
-    if (held.length >= deps.maxPrepared) {
+    // Nov 21: a recent show never waits, and its MP3 holds no backlog place (an id of another shape still counts).
+    const held = (await preparedIds(deps.preparedDir, pkg)).filter((id) => { const d = folderForPackage(id); return !d || !isRecentShow(d, now()); });
+    if (!isRecentShow(date, now()) && held.length >= deps.maxPrepared) {
       waiting.push({ showDate: date, reason: `${date} waits: ${held.length} prepared MP3s are held by ${await holders(deps, held)}` });
       continue;
     }
